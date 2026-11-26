@@ -109,7 +109,7 @@ def _validate_verify(value: Any) -> dict[str, Any] | None:
         not isinstance(url, str)
         or not url.strip()
         or len(url) > 2_048
-        or any(char in url for char in "\\r\\n")
+        or any(char in url for char in "\r\n")
     ):
         raise ScenarioError("verify.url must be a non-empty absolute HTTP(S) URL of at most 2048 characters")
     parsed = urlsplit(url.strip())
