@@ -229,7 +229,10 @@ def _history_compare_file_command(args: argparse.Namespace) -> int:
 def _history_export_command(args: argparse.Namespace) -> int:
     output = export_history_run(args.run_id, args.output, args.db)
     print(f"Exported HookStorm baseline: {output}")
-    print(f"Run: {args.run_id}")
+    run_id = args.run_id
+    if run_id == "latest":
+        run_id = list_runs(args.db, limit=1)[0]["run_id"]
+    print(f"Run: {run_id}")
     return 0
 
 
