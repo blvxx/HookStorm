@@ -41,7 +41,7 @@ def test_rejects_invalid_headers() -> None:
         validate_scenario(data)
 
 
-@pytest.mark.parametrize("value", ["snowman \u2603", "bad\\x00value", "bad\\x1fvalue", "bad\\x7fvalue"])
+@pytest.mark.parametrize("value", ["snowman \u2603", "bad\x00value", "bad\x1fvalue", "bad\x7fvalue"])
 def test_rejects_non_ascii_or_control_header_values(value: str) -> None:
     data = valid_scenario()
     data["events"][0]["headers"] = {"X-Custom": value}
@@ -51,12 +51,12 @@ def test_rejects_non_ascii_or_control_header_values(value: str) -> None:
 
 def test_accepts_horizontal_tab_in_http_header_value() -> None:
     data = valid_scenario()
-    data["events"][0]["headers"] = {"X-Custom": "first\\tsecond"}
+    data["events"][0]["headers"] = {"X-Custom": "first\tsecond"}
     assert validate_scenario(data)["events"][0]["headers"]["X-Custom"] == "first\\tsecond"
 
 
 @pytest.mark.parametrize("field", ["event_id", "id"])
-@pytest.mark.parametrize("value", ["event-\\u2603", "event-\\x00", "event-\\x7f", "event-\\tvalue"])
+@pytest.mark.parametrize("value", ["event-\u2603", "event-\x00", "event-\x7f", "event-\tvalue"])
 def test_rejects_unsafe_event_header_values(field: str, value: str) -> None:
     data = valid_scenario()
     data["events"][0][field] = value
