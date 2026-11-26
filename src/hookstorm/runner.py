@@ -5,6 +5,7 @@ from __future__ import annotations
 import asyncio
 import base64
 import hashlib
+import ipaddress
 import hmac
 import json
 import os
@@ -157,6 +158,17 @@ async def run_scenario(
         if verify_config is not None
         else None
     )
+    if verify_config is not None and verify_config.get("auth") is not None:
+        verify_parts = urlsplit(verification_url or "")
+        hostname = (verify_parts.hostname or "").rstrip(".").lower()
+        try:
+            is_loopback = ipaddress.ip_address(hostname).is_loopback
+        except ValueError:
+            is_loopback = hostname == "localhost"
+        if verify_parts.scheme != "https" and not is_loopback:
+            raise ValueError(
+                "Authenticated verification probes require HTTPS for non-loopback URLs."
+            )
     # Resolve verification credentials before any webhook event is sent.
     verification_auth_headers = (
         _verification_auth_headers(verify_config.get("auth"))
