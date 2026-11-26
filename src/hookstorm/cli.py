@@ -296,11 +296,14 @@ def _init_command(args: argparse.Namespace) -> int:
     print("     Variable: HOOKSTORM_TARGET_URL")
     print("     Secret:   HOOKSTORM_SECRET")
     print("     Add required reviewers to protect staging credentials.")
+    print("  3. Set HOOKSTORM_TARGET_URL and HOOKSTORM_SECRET locally, then run:")
+    print(f"     hookstorm doctor {args.scenario_path}")
+    print("     Add --connect to check DNS/TCP/TLS without sending an HTTP request.")
     if not args.no_workflow:
-        print(f"  3. Commit {args.workflow_path} and {args.scenario_path}.")
-        print("  4. Run the workflow on main once to create its first baseline.")
+        print(f"  4. Commit {args.workflow_path} and {args.scenario_path}.")
+        print("  5. Run the workflow on main once to create its first baseline.")
     else:
-        print("  3. Add a CI workflow when you are ready to gate pull requests.")
+        print("  4. Add a CI workflow when you are ready to gate pull requests.")
     print("No target URL or secret was written to the generated files.")
     return 0
 
