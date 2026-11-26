@@ -328,13 +328,17 @@ def validate_scenario(data: Any) -> dict[str, Any]:
 
     for event in normalized_events:
         effective_delivery = {**delivery, **event["delivery"]}
+        signature_provider = effective_delivery.get("signature_provider", "generic")
         timestamp_offset = effective_delivery.get("signature_timestamp_offset_seconds", 0)
-        if timestamp_offset and effective_delivery.get("signature_provider", "generic") not in {
-            "stripe", "standard_webhooks"
-        }:
+        if timestamp_offset and signature_provider not in {"stripe", "standard_webhooks"}:
             raise ScenarioError(
                 "signature_timestamp_offset_seconds can only be used with signature_provider: "
                 "stripe or standard_webhooks"
+            )
+        if signature_provider == "standard_webhooks" and "." in event["event_id"]:
+            raise ScenarioError(
+                "events[].event_id must not contain '.' when signature_provider is "
+                "standard_webhooks"
             )
 
     estimated_requests = 0
