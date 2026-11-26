@@ -79,7 +79,10 @@ class Handler(BaseHTTPRequestHandler):
         if self.path.startswith("/webhook/slow"):
             time.sleep(1.0)
 
-        if SECRET and self.path.startswith("/webhook/signature"):
+        if (
+            (SECRET or self.path.startswith("/webhook/signature/standard"))
+            and self.path.startswith("/webhook/signature")
+        ):
             if self.path.startswith("/webhook/signature/standard"):
                 message_id = self.headers.get("webhook-id", "")
                 timestamp_header = self.headers.get("webhook-timestamp", "")
@@ -196,6 +199,7 @@ def main() -> None:
     print(f"Standard Webhooks demo secret: {STANDARD_WEBHOOKS_DEMO_SECRET}")
     print("State probe: GET /__hookstorm/state (scoped by X-HookStorm-Run)")
     print("Provider signatures: /webhook/signature/stripe, /github, /shopify, /standard")
+    print("Standard Webhooks validation enabled with the public demo-only key")
     if SECRET:
         print("HMAC validation enabled for generic, Stripe, GitHub, and Shopify endpoints")
     with ThreadingHTTPServer(address, Handler) as server:
