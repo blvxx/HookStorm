@@ -150,6 +150,20 @@ def _print_summary(result: dict) -> None:
         )
         if latest["error"]:
             print(f"   {latest['error']}")
+    verification = result.get("verification")
+    if verification is not None:
+        verify_mark = "✓" if verification["passed"] else "✗"
+        verify_status = (
+            verification["status_code"]
+            if verification["status_code"] is not None
+            else "ERR"
+        )
+        print(
+            f" {verify_mark} Business-state verification "
+            f"GET {verification['target']} status={verify_status}"
+        )
+        if verification["error"]:
+            print(f"   {verification['error']}")
 
 
 def _history_list_command(args: argparse.Namespace) -> int:
