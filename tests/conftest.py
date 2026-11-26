@@ -109,7 +109,7 @@ def receiver() -> Iterator[tuple[str, dict]]:
                         timestamp = int(timestamp_header)
                     except ValueError:
                         timestamp = 0
-                    signed = f"{message_id}.{timestamp_header}.".encode("utf-8") + body
+                    signed = f"{message_id}.{timestamp_header}.".encode() + body
                     expected = hmac.new(
                         standard_secret, signed, hashlib.sha256
                     ).digest()
