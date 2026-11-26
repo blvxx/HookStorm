@@ -267,7 +267,7 @@ def test_provider_signature_header_cannot_be_overridden(receiver) -> None:
     assert headers["x-hub-signature-256"] != "sha256=attacker-controlled"
 
 
-def test_missing_provider_signature_omits_provider_header(receiver, state=None) -> None:
+def test_missing_provider_signature_omits_provider_header(receiver) -> None:
     base, state = receiver
     result = asyncio.run(run_scenario(
         scenario(
