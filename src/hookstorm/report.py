@@ -305,15 +305,6 @@ def render_junit(result: dict[str, Any]) -> str:
                 "time": f"{case_time:.6f}",
             },
         )
-        testcase_properties = ET.SubElement(testcase, "properties")
-        ET.SubElement(
-            testcase_properties,
-            "property",
-            {
-                "name": "hookstorm.schedule_after_ms",
-                "value": str(int(delivery.get("schedule_after_ms", 0))),
-            },
-        )
         if delivery.get("passed"):
             continue
 
