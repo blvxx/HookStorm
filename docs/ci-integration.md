@@ -4,6 +4,29 @@ HookStorm can run against a staging webhook endpoint and compare each run with a
 
 The copy-ready example is in [examples/ci/webhook-regression.yml](../examples/ci/webhook-regression.yml). The matching scenario example is [examples/ci/webhook-regression.yaml](../examples/ci/webhook-regression.yaml).
 
+## Quick setup with the CLI
+
+After installing HookStorm in your application repository, run:
+
+~~~bash
+hookstorm init
+~~~
+
+The wizard creates `scenarios/webhook.yaml` and `.github/workflows/webhook-regression.yml`. In an interactive terminal, choose the signature provider (`generic`, `stripe`, `github`, or `shopify`). Without an interactive terminal, the provider defaults to `generic`.
+
+Customize the event contract directly from the command line:
+
+~~~bash
+hookstorm init --signature-provider github \\
+  --event-type issues.opened --event-id evt_issues_opened_001
+~~~
+
+Then edit the generated scenario's payload, HTTP status expectations, and JSON assertions to match your staging receiver. The generated workflow reads the staging URL and signing secret from GitHub Environment values; it never writes them into the scenario or workflow.
+
+The command preserves existing files and exits with an error rather than overwriting them. Use `--force` only when you intend to replace both generated files. Use `--no-workflow` to create just the scenario file. The workflow installs HookStorm from a pinned repository commit; update that pin when you intentionally upgrade the tool.
+
+
+
 ## 1. Add a scenario
 
 Copy the sample scenario to your application repository, for example:
