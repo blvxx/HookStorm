@@ -30,7 +30,7 @@ def _parser() -> argparse.ArgumentParser:
     run.add_argument("--target", required=True, help="webhook URL; localhost only unless opted in")
     run.add_argument("--allow-remote", action="store_true", help="allow a non-local target")
     run.add_argument("--secret-env", default="HOOKSTORM_SECRET", help="environment variable for HMAC secret")
-    run.add_argument("--format", choices=("html", "json"), default="html", help="report format")
+    run.add_argument("--format", choices=("html", "json", "junit"), default="html", help="report format")
     run.add_argument("--output", help="write a report to this path")
 
     validate = subparsers.add_parser("validate", help="validate a scenario without sending requests")
@@ -87,7 +87,12 @@ def main(argv: Sequence[str] | None = None) -> int:
         if args.format == "json" and not args.output:
             sys.stdout.write(render_json(result))
         else:
-            output = Path(args.output or f"hookstorm-report.{args.format}")
+            default_names = {
+                "html": "hookstorm-report.html",
+                "json": "hookstorm-report.json",
+                "junit": "hookstorm-report.xml",
+            }
+            output = Path(args.output or default_names[args.format])
             write_report(result, output, args.format)
             _print_summary(result)
             print(f"Report: {output.resolve()}")
