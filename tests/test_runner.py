@@ -323,6 +323,27 @@ def test_standard_webhooks_invalid_signature_is_rejected(receiver) -> None:
     assert result["deliveries"][0]["attempts"][0]["status_code"] == 401
 
 
+def test_standard_webhooks_stale_timestamp_is_rejected(receiver) -> None:
+    base, _ = receiver
+    key = b"hookstorm-test-standard-webhooks-secret"
+    secret = "whsec_" + base64.b64encode(key).decode("ascii")
+    result = asyncio.run(run_scenario(
+        scenario(
+            delivery={
+                "signature": "valid",
+                "signature_provider": "standard_webhooks",
+                "signature_timestamp_offset_seconds": -3600,
+            },
+            event={"expect_status": [401], "expect_json": {"ok": False, "provider": "standard"}},
+        ),
+        f"{base}/signature/standard",
+        secret=secret,
+    ))
+
+    assert result["summary"]["success"] is True
+    assert result["deliveries"][0]["attempts"][0]["status_code"] == 401
+
+
 def test_standard_webhooks_retry_reuses_id_and_refreshes_attempt_timestamp(receiver) -> None:
     base, state = receiver
     key = b"hookstorm-test-standard-webhooks-secret"
