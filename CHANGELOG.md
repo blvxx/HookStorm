@@ -40,3 +40,4 @@
 
 - Add an optional read-only post-delivery business-state probe with run-scoped verification, report output, and history regression checks.
 - Add environment-backed Bearer and API-key authentication for verification probes with preflight checks and secret-safe reporting.
+- Extend `hookstorm doctor` to validate verification credentials and enforce HTTPS for authenticated remote probes without sending credentials.
