@@ -1,6 +1,8 @@
 from __future__ import annotations
 
-from hookstorm.report import render_html, render_json
+import xml.etree.ElementTree as ET
+
+from hookstorm.report import render_html, render_json, render_junit, write_report
 
 
 def test_report_serialization_escapes_html() -> None:
@@ -100,3 +102,96 @@ def test_report_escapes_event_data_in_attributes_and_attempt_notes() -> None:
     assert 'data-search="" onmouseover=' not in html_report
     assert "<script>alert(1)</script>" not in html_report
     assert "&lt;script&gt;alert(1)&lt;/script&gt;" in html_report
+
+
+
+def test_junit_report_contains_one_testcase_per_delivery_and_counts_failures() -> None:
+    result = {
+        "scenario": "junit smoke",
+        "version": "0.1.0",
+        "run_id": "run_safe_123",
+        "summary": {"success": False},
+        "deliveries": [
+            {
+                "event_type": "invoice.paid",
+                "event_id": "evt_pass",
+                "duplicate_index": 0,
+                "passed": True,
+                "attempts": [{"status_code": 200, "latency_ms": 15.0, "error": None}],
+            },
+            {
+                "event_type": "orders.created",
+                "event_id": "evt_failure",
+                "duplicate_index": 0,
+                "passed": False,
+                "attempts": [
+                    {"status_code": 503, "latency_ms": 10.0, "error": None},
+                    {"status_code": 401, "latency_ms": 20.0, "error": "signature mismatch"},
+                ],
+            },
+            {
+                "event_type": "report.ready",
+                "event_id": "evt_error",
+                "duplicate_index": 1,
+                "passed": False,
+                "attempts": [{"status_code": None, "latency_ms": 100.0, "error": "request timed out"}],
+            },
+        ],
+    }
+    xml_report = render_junit(result)
+    root = ET.fromstring(xml_report)
+    assert root.tag == "testsuite"
+    assert root.attrib["tests"] == "3"
+    assert root.attrib["failures"] == "1"
+    assert root.attrib["errors"] == "1"
+    assert root.attrib["skipped"] == "0"
+    cases = root.findall("testcase")
+    assert len(cases) == 3
+    assert cases[0].find("failure") is None
+    assert cases[1].find("failure").attrib["type"] == "AssertionFailure"
+    assert cases[2].find("error").attrib["type"] == "DeliveryError"
+    assert "signature mismatch" in xml_report
+    assert "request timed out" in xml_report
+
+
+def test_junit_report_does_not_include_payloads_secrets_or_url_query() -> None:
+    result = {
+        "scenario": "private data check",
+        "version": "0.1.0",
+        "run_id": "run_123",
+        "target": "http://127.0.0.1/hook?token=do-not-export",
+        "secret": "super-secret",
+        "payload": {"card": "4111111111111111"},
+        "summary": {"success": True},
+        "deliveries": [{
+            "event_type": "payment.created",
+            "event_id": "evt_public_id",
+            "duplicate_index": 0,
+            "passed": True,
+            "attempts": [{"status_code": 200, "latency_ms": 3.0, "error": None}],
+        }],
+    }
+    xml_report = render_junit(result)
+    assert "do-not-export" not in xml_report
+    assert "super-secret" not in xml_report
+    assert "4111111111111111" not in xml_report
+    assert "evt_public_id" in xml_report
+
+
+def test_write_report_supports_junit_xml(tmp_path) -> None:
+    result = {
+        "scenario": "write JUnit",
+        "version": "0.1.0",
+        "run_id": "run_1",
+        "summary": {"success": True},
+        "deliveries": [{
+            "event_type": "ping",
+            "event_id": "evt_1",
+            "duplicate_index": 0,
+            "passed": True,
+            "attempts": [{"status_code": 200, "latency_ms": 2.0, "error": None}],
+        }],
+    }
+    output = write_report(result, tmp_path / "reports" / "hookstorm.xml", "junit")
+    assert output.is_file()
+    assert ET.parse(output).getroot().attrib["tests"] == "1"
