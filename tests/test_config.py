@@ -135,3 +135,47 @@ def test_rejects_non_json_expected_values() -> None:
     data["events"][0]["expect_json"] = {"created_at": date.today()}
     with pytest.raises(ScenarioError, match="JSON-compatible"):
         validate_scenario(data)
+
+
+
+@pytest.mark.parametrize("provider", ["generic", "stripe", "github", "shopify"])
+def test_accepts_supported_signature_providers(provider: str) -> None:
+    data = valid_scenario()
+    data["delivery"] = {"signature_provider": provider, "signature": "valid"}
+    assert validate_scenario(data)["delivery"]["signature_provider"] == provider
+
+
+@pytest.mark.parametrize("provider", ["Stripe", "github_v1", "", None, 1])
+def test_rejects_unknown_signature_providers(provider: object) -> None:
+    data = valid_scenario()
+    data["delivery"] = {"signature_provider": provider}
+    with pytest.raises(ScenarioError, match="signature_provider"):
+        validate_scenario(data)
+
+
+@pytest.mark.parametrize("offset", [-86_401, 86_401, True, 1.5, "30"])
+def test_rejects_invalid_stripe_timestamp_offsets(offset: object) -> None:
+    data = valid_scenario()
+    data["delivery"] = {
+        "signature_provider": "stripe",
+        "signature_timestamp_offset_seconds": offset,
+    }
+    with pytest.raises(ScenarioError, match="signature_timestamp_offset_seconds"):
+        validate_scenario(data)
+
+
+def test_rejects_timestamp_offset_for_non_stripe_provider() -> None:
+    data = valid_scenario()
+    data["delivery"] = {
+        "signature_provider": "github",
+        "signature_timestamp_offset_seconds": 30,
+    }
+    with pytest.raises(ScenarioError, match="only supported for Stripe"):
+        validate_scenario(data)
+
+
+def test_rejects_timestamp_offset_without_explicit_stripe_provider() -> None:
+    data = valid_scenario()
+    data["delivery"] = {"signature_timestamp_offset_seconds": 30}
+    with pytest.raises(ScenarioError, match="requires signature_provider"):
+        validate_scenario(data)
