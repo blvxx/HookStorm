@@ -23,7 +23,7 @@ def receiver() -> Iterator[tuple[str, dict]]:
             return
 
         def do_GET(self) -> None:  # noqa: N802
-            if self.path != "/state":
+            if self.path.split("?", 1)[0] != "/state":
                 self.send_error(404)
                 return
             run_id = self.headers.get("X-HookStorm-Run", "")
