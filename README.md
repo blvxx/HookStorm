@@ -132,7 +132,7 @@ From the root of the application repository (after installing HookStorm), run:
 hookstorm init
 ~~~
 
-The wizard creates `scenarios/webhook.yaml` and `.github/workflows/webhook-regression.yml`. In an interactive terminal it asks which signature format your staging receiver uses; non-interactive runs default to `generic`.
+The wizard creates `scenarios/webhook.yaml` and `.github/workflows/webhook-regression.yml`. In an interactive terminal it asks which signature format your staging receiver uses (`generic`, `stripe`, `github`, `shopify`, or `standard_webhooks`); non-interactive runs default to `generic`.
 
 You can also choose the provider and event contract explicitly:
 
@@ -200,6 +200,8 @@ hookstorm run examples/invalid-signature.yaml --target http://127.0.0.1:8000/web
 ~~~
 
 The invalid-signature scenario expects 401, so a correct rejection is reported as a passing test.
+
+For Standard Webhooks, copy the `whsec_` demo secret printed by `examples/receiver.py` into `HOOKSTORM_SECRET` in the HookStorm terminal. This key is intentionally public and for local demonstration only. Real integrations must use the secret issued for their endpoint.
 
 ## Reproduce a committed event with a lost acknowledgement
 
