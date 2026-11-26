@@ -283,6 +283,117 @@ def test_missing_provider_signature_omits_provider_header(receiver) -> None:
 
 
 
+def test_standard_webhooks_signature_matches_the_standard(receiver) -> None:
+    base, state = receiver
+    key = b"hookstorm-test-standard-webhooks-secret"
+    secret = "whsec_" + base64.b64encode(key).decode("ascii")
+    result = asyncio.run(run_scenario(
+        scenario(
+            delivery={"signature": "valid", "signature_provider": "standard_webhooks"},
+            event={
+                "expect_status": [200],
+                "expect_json": {"ok": True, "provider": "standard"},
+            },
+        ),
+        f"{base}/signature/standard",
+        secret=secret,
+    ))
+
+    assert result["summary"]["success"] is True
+    headers = {key.lower(): value for key, value in state["requests"][0]["headers"].items()}
+    assert headers["webhook-id"] == "evt_test_1"
+    assert headers["webhook-timestamp"].isdigit()
+    assert headers["webhook-signature"].startswith("v1,")
+
+
+def test_standard_webhooks_invalid_signature_is_rejected(receiver) -> None:
+    base, _ = receiver
+    key = b"hookstorm-test-standard-webhooks-secret"
+    secret = "whsec_" + base64.b64encode(key).decode("ascii")
+    result = asyncio.run(run_scenario(
+        scenario(
+            delivery={"signature": "invalid", "signature_provider": "standard_webhooks"},
+            event={"expect_status": [401], "expect_json": {"ok": False}},
+        ),
+        f"{base}/signature/standard",
+        secret=secret,
+    ))
+
+    assert result["summary"]["success"] is True
+    assert result["deliveries"][0]["attempts"][0]["status_code"] == 401
+
+
+def test_standard_webhooks_retry_reuses_id_and_refreshes_attempt_timestamp(receiver) -> None:
+    base, state = receiver
+    key = b"hookstorm-test-standard-webhooks-secret"
+    secret = "whsec_" + base64.b64encode(key).decode("ascii")
+    result = asyncio.run(run_scenario(
+        scenario(
+            delivery={"signature": "valid", "signature_provider": "standard_webhooks"},
+            retry={"max_attempts": 2, "backoff_ms": 1_100},
+            event={"expect_json": {"ok": True}},
+        ),
+        f"{base}/signature/standard-flaky",
+        secret=secret,
+    ))
+
+    assert result["summary"]["success"] is True
+    assert [attempt["status_code"] for attempt in result["deliveries"][0]["attempts"]] == [
+        503, 200
+    ]
+    first, second = [
+        {key.lower(): value for key, value in request["headers"].items()}
+        for request in state["requests"]
+    ]
+    assert first["webhook-id"] == second["webhook-id"] == "evt_test_1"
+    assert int(second["webhook-timestamp"]) > int(first["webhook-timestamp"])
+
+
+@pytest.mark.parametrize("secret", ["not-a-whsec-secret", "whsec_!!!!", "whsec_YQ=="])
+def test_standard_webhooks_invalid_secret_fails_before_sending(receiver, secret: str) -> None:
+    base, state = receiver
+    data = scenario(
+        delivery={"signature": "valid", "signature_provider": "standard_webhooks"}
+    )
+
+    with pytest.raises(ValueError, match="Standard Webhooks"):
+        asyncio.run(run_scenario(data, f"{base}/signature/standard", secret=secret))
+
+    assert state["requests"] == []
+
+
+def test_response_lost_after_business_commit_retries_without_duplicate_effect(receiver) -> None:
+    base, state = receiver
+    data = validate_scenario({
+        "version": 1,
+        "name": "commit succeeded but acknowledgement was lost",
+        "retry": {"max_attempts": 2, "backoff_ms": 1},
+        "events": [{
+            "id": "order.created",
+            "event_id": "evt_commit_ack_lost",
+            "payload": {"order_id": 42},
+            "expect_json": {"duplicate": True, "effect_applied": False},
+        }],
+        "verify": {
+            "url": f"{base}/state",
+            "expect_json": {"processed_events": 1},
+        },
+    })
+
+    result = asyncio.run(run_scenario(data, base))
+
+    assert result["summary"]["success"] is True
+    attempts = result["deliveries"][0]["attempts"]
+    assert len(attempts) == 2
+    assert attempts[0]["status_code"] is None
+    assert attempts[0]["error"].startswith("request error:")
+    assert attempts[1]["status_code"] == 200
+    assert result["verification"]["passed"] is True
+    run_id = result["run_id"]
+    assert len([key for key in state["effects"] if key[0] == run_id]) == 1
+    assert state["attempts"][(run_id, "evt_commit_ack_lost")] == 2
+
+
 def test_business_state_verification_checks_unique_side_effects(receiver) -> None:
     base, state = receiver
     data = validate_scenario({
