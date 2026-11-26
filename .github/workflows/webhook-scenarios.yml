@@ -32,13 +32,23 @@ jobs:
           cache: pip
       - name: Install HookStorm
         run: python -m pip install .
-      - name: Run provider and delivery scenarios
+
+      - name: Restore main-branch webhook baselines
+        uses: actions/cache/restore@v4
+        with:
+          path: hookstorm-baselines/
+          key: hookstorm-webhook-baselines-main-${{ github.sha }}
+          restore-keys: |
+            hookstorm-webhook-baselines-main-
+
+      - name: Run and compare provider / delivery scenarios
         shell: bash
         env:
           HOOKSTORM_SECRET: hookstorm-ci-test-secret
         run: |
           set -uo pipefail
-          mkdir -p test-results
+          mkdir -p test-results hookstorm-baselines
+          history_db="test-results/history.sqlite3"
 
           python examples/receiver.py > test-results/receiver.log 2>&1 &
           receiver_pid=$!
@@ -58,18 +68,46 @@ jobs:
           done
           if [ "$ready" -ne 1 ]; then
             cat test-results/receiver.log
-            echo "Demo receiver did not start on 127.0.0.1:8000"
+            echo "::error::Demo receiver did not start on 127.0.0.1:8000"
             exit 1
           fi
+
+          is_main_push() {
+            [ "$GITHUB_EVENT_NAME" = "push" ] && [ "$GITHUB_REF" = "refs/heads/main" ]
+          }
 
           failed=0
           run_case() {
             scenario="$1"
             target="$2"
             name="$(basename "$scenario" .yaml)"
+            baseline="hookstorm-baselines/${name}.json"
             echo "::group::${name}"
-            if hookstorm run "$scenario" --target "$target" --format junit --output "test-results/${name}.xml"; then
-              echo "Scenario ${name}: PASS"
+
+            if hookstorm run "$scenario" --target "$target" --format junit --output "test-results/${name}.xml" --history-db "$history_db"; then
+              if [ -f "$baseline" ]; then
+                if hookstorm history compare-file "$baseline" --db "$history_db" --latency-threshold-pct 1000; then
+                  echo "Scenario ${name}: PASS · no regression"
+                  if is_main_push; then
+                    if ! hookstorm history export latest --output "$baseline" --db "$history_db"; then
+                      echo "::error::Could not update baseline for ${name}"
+                      failed=1
+                    fi
+                  fi
+                else
+                  code=$?
+                  echo "::error::Scenario ${name} regression comparison failed with exit code ${code}"
+                  failed=1
+                fi
+              else
+                echo "Scenario ${name}: PASS · no baseline found yet; comparison will start after a successful main run"
+                if is_main_push; then
+                  if ! hookstorm history export latest --output "$baseline" --db "$history_db"; then
+                    echo "::error::Could not initialize baseline for ${name}"
+                    failed=1
+                  fi
+                fi
+              fi
             else
               code=$?
               echo "::error::Scenario ${name} failed with exit code ${code}"
@@ -87,6 +125,14 @@ jobs:
           run_case examples/payment-retry.yaml http://127.0.0.1:8000/webhook/flaky
 
           exit "$failed"
+
+      - name: Save refreshed webhook baselines
+        if: success() && github.event_name == 'push' && github.ref == 'refs/heads/main'
+        uses: actions/cache/save@v4
+        with:
+          path: hookstorm-baselines/
+          key: hookstorm-webhook-baselines-main-${{ github.sha }}
+
       - name: Upload JUnit reports
         if: always()
         uses: actions/upload-artifact@v7
