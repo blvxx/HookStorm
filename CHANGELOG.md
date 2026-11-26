@@ -39,3 +39,4 @@
 - Add `hookstorm doctor --format json` with versioned machine-readable check results, readiness status, summaries, and CI-friendly exit codes.
 
 - Add an optional read-only post-delivery business-state probe with run-scoped verification, report output, and history regression checks.
+- Add environment-backed Bearer and API-key authentication for verification probes with preflight checks and secret-safe reporting.
