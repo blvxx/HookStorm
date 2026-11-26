@@ -50,10 +50,10 @@ Backoff grows exponentially as backoff_ms * 2^(attempt - 1), capped at 60 second
 | headers | no | Additional string headers (up to 64 headers / 16 KiB total). Names and values cannot contain line breaks. Transport-managed headers cannot be overridden. |
 | delivery | no | Per-event delivery overrides. |
 | expect_status | no | Accepted final HTTP status code or list; defaults to [200, 201, 202, 204]. |
-| expect_json | no | Expected top-level JSON fields for the first delivery. |
-| expect_duplicate_json | no | Expected top-level JSON fields for additional deliveries. |
+| expect_json | no | Expected JSON object for the first delivery; nested objects are subset-matched recursively. |
+| expect_duplicate_json | no | Expected JSON object for additional deliveries; nested objects are subset-matched recursively. |
 
-JSON expectations are subset matches: additional response keys are allowed. The final attempt of each delivery is checked. A delivery passes only when its final status and configured JSON expectation match.
+JSON object expectations are recursive subset matches: additional object keys are allowed at every depth. Arrays must match in length, order, and value. Boolean values are distinct from numbers. The final attempt of each delivery is checked. A delivery passes only when its final status and configured JSON expectation match.
 
 ## Built-in request headers
 
