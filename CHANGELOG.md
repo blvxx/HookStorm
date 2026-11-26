@@ -16,3 +16,4 @@
 - Preserve scenario order in reports when concurrent requests finish out of order.
 - Add nested JSON subset assertions with strict boolean-versus-number matching.
 - Validate signature configuration before sending any scenario traffic.
+- Add `hookstorm export-pytest` to generate pytest integration tests from YAML scenarios.
