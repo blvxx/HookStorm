@@ -128,6 +128,7 @@ jobs:
           run_case examples/shopify-signature.yaml http://127.0.0.1:8000/webhook/signature/shopify
           run_case examples/invalid-signature.yaml http://127.0.0.1:8000/webhook/signature
           run_case examples/duplicate-delivery.yaml http://127.0.0.1:8000/webhook
+          run_case examples/idempotency-verification.yaml http://127.0.0.1:8000/webhook
           run_case examples/out-of-order.yaml http://127.0.0.1:8000/webhook
           run_case examples/payment-retry.yaml http://127.0.0.1:8000/webhook/flaky
 
