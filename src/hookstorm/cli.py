@@ -6,8 +6,8 @@ import argparse
 import asyncio
 import os
 import sys
+from collections.abc import Sequence
 from pathlib import Path
-from typing import Sequence
 
 from hookstorm import __version__
 from hookstorm.config import ScenarioError, load_scenario
@@ -68,7 +68,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(f"Scenario valid: {scenario['name']} ({len(scenario['events'])} event(s))")
             return 0
         secret = os.getenv(args.secret_env)
-        result = asyncio.run(run_scenario(scenario, args.target, allow_remote=args.allow_remote, secret=secret))
+        result = asyncio.run(
+            run_scenario(scenario, args.target, allow_remote=args.allow_remote, secret=secret)
+        )
         if args.format == "json" and not args.output:
             sys.stdout.write(render_json(result))
         else:
@@ -77,7 +79,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             _print_summary(result)
             print(f"Report: {output.resolve()}")
         return 0 if result["summary"]["success"] else 1
-    except (ScenarioError, UnsafeTargetError, ValueError) as exc:
+    except ValueError as exc:
         print(f"HookStorm error: {exc}", file=sys.stderr)
         return 2
     except KeyboardInterrupt:

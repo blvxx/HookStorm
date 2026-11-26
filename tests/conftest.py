@@ -3,8 +3,8 @@ from __future__ import annotations
 import json
 import threading
 from collections import defaultdict
+from collections.abc import Iterator
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
-from typing import Iterator
 
 import pytest
 

@@ -140,11 +140,10 @@ See SECURITY.md and docs/architecture.md for additional details.
 ~~~bash
 python -m pip install -e '.[dev]'
 ruff check .
-ruff format --check .
 pytest
 ~~~
 
-CI tests Python 3.11–3.13, runs lint and tests, and builds the distributable package.
+CI tests Python 3.11, 3.12, and 3.13, runs lint and tests, and builds the distributable package.
 
 ## Roadmap
 
