@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import html
 import json
+import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any
 
@@ -212,9 +213,72 @@ footer{{margin-top:32px;color:GrayText;font-size:.8rem}}
 </html>"""
 
 
+
+def render_junit(result: dict[str, Any]) -> str:
+    """Render delivery results as JUnit XML without embedding request data or secrets."""
+    summary = result["summary"]
+    suite = ET.Element(
+        "testsuite",
+        {
+            "name": str(result["scenario"]),
+            "tests": str(len(result["deliveries"])),
+            "failures": str(sum(1 for item in result["deliveries"] if not item["passed"] and item["attempts"][-1].get("status_code") is not None)),
+            "errors": str(sum(1 for item in result["deliveries"] if not item["passed"] and item["attempts"][-1].get("status_code") is None)),
+            "skipped": "0",
+            "time": f"{sum(sum(float(a.get('latency_ms', 0.0)) for a in item['attempts']) for item in result['deliveries']) / 1000:.6f}",
+        },
+    )
+    if result.get("started_at"):
+        suite.set("timestamp", str(result["started_at"]))
+
+    properties = ET.SubElement(suite, "properties")
+    ET.SubElement(properties, "property", {"name": "hookstorm.version", "value": str(result.get("version", ""))})
+    ET.SubElement(properties, "property", {"name": "hookstorm.run_id", "value": str(result.get("run_id", ""))})
+    ET.SubElement(properties, "property", {"name": "hookstorm.success", "value": str(bool(summary["success"])).lower()})
+
+    for delivery in result["deliveries"]:
+        attempts = delivery.get("attempts", [])
+        final = attempts[-1] if attempts else {}
+        elapsed_seconds = sum(float(item.get("latency_ms", 0.0)) for item in attempts) / 1000
+        case = ET.SubElement(
+            suite,
+            "testcase",
+            {
+                "classname": str(delivery.get("event_type", "webhook")),
+                "name": f"{delivery.get('event_id', 'unknown')}[duplicate={delivery.get('duplicate_index', 0)}]",
+                "time": f"{elapsed_seconds:.6f}",
+            },
+        )
+        if delivery.get("passed"):
+            continue
+
+        status_code = final.get("status_code")
+        detail = str(final.get("error") or "")
+        attempts_text = f" after {len(attempts)} attempt(s)" if attempts else ""
+        if status_code is None:
+            message = detail or "No HTTP response was received"
+            error = ET.SubElement(
+                case,
+                "error",
+                {"message": f"Webhook delivery error{attempts_text}: {message}", "type": "DeliveryError"},
+            )
+        else:
+            message = f"Final HTTP status: {status_code}"
+            if detail:
+                message += f"; {detail}"
+            failure = ET.SubElement(
+                case,
+                "failure",
+                {"message": f"Webhook assertion failed{attempts_text}: {message}", "type": "AssertionFailure"},
+            )
+            failure.text = message
+
+    ET.indent(suite, space="  ")
+    return '<?xml version="1.0" encoding="UTF-8"?>\\n' + ET.tostring(suite, encoding="unicode") + "\\n"
+
 def write_report(result: dict[str, Any], path: str | Path, format_name: str) -> Path:
     output = Path(path)
     output.parent.mkdir(parents=True, exist_ok=True)
-    content = render_html(result) if format_name == "html" else render_json(result)
+    if format_name == "html":\n        content = render_html(result)\n    elif format_name == "junit":\n        content = render_junit(result)\n    else:\n        content = render_json(result)
     output.write_text(content, encoding="utf-8")
     return output
