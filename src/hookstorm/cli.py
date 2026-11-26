@@ -348,7 +348,7 @@ def _doctor_command(args: argparse.Namespace) -> int:
             if args.verbose:
                 for detail in check.details:
                     print(f"    {detail}")
-        print("\nPreflight: " + document["status"])
+        print("\nPreflight: " + ("NOT READY" if not document["ready"] else "READY"))
     return document["exit_code"]
 
 
