@@ -7,13 +7,30 @@ import hashlib
 import hmac
 import json
 import os
+import sqlite3
+import threading
 import time
+from urllib.parse import urlsplit
 from collections import defaultdict
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
 SEEN: set[tuple[str, str]] = set()
 ATTEMPTS: defaultdict[tuple[str, str], int] = defaultdict(int)
 SECRET = os.getenv("HOOKSTORM_SECRET", "")
+BUSINESS_DB = sqlite3.connect(":memory:", check_same_thread=False)
+BUSINESS_LOCK = threading.Lock()
+with BUSINESS_LOCK:
+    BUSINESS_DB.execute(
+        """
+        CREATE TABLE processed_events (
+            run_id TEXT NOT NULL,
+            event_id TEXT NOT NULL,
+            event_type TEXT NOT NULL,
+            PRIMARY KEY (run_id, event_id)
+        )
+        """
+    )
+    BUSINESS_DB.commit()
 
 
 class Handler(BaseHTTPRequestHandler):
@@ -33,6 +50,18 @@ class Handler(BaseHTTPRequestHandler):
         except (BrokenPipeError, ConnectionResetError):
             # Expected when HookStorm intentionally times out a slow delivery.
             pass
+
+    def do_GET(self) -> None:  # noqa: N802 - stdlib handler API
+        if urlsplit(self.path).path != "/__hookstorm/state":
+            self._reply(404, {"ok": False, "error": "not found"})
+            return
+        run_id = self.headers.get("X-HookStorm-Run", "")
+        with BUSINESS_LOCK:
+            row = BUSINESS_DB.execute(
+                "SELECT COUNT(*) FROM processed_events WHERE run_id = ?",
+                (run_id,),
+            ).fetchone()
+        self._reply(200, {"ok": True, "processed_events": int(row[0])})
 
     def do_POST(self) -> None:  # noqa: N802 - stdlib handler API
         length = int(self.headers.get("Content-Length", "0"))
@@ -88,13 +117,31 @@ class Handler(BaseHTTPRequestHandler):
 
         duplicate = delivery_key in SEEN
         SEEN.add(delivery_key)
-        self._reply(200, {"ok": True, "event_id": event_id, "duplicate": duplicate})
+        with BUSINESS_LOCK:
+            cursor = BUSINESS_DB.execute(
+                """
+                INSERT OR IGNORE INTO processed_events (run_id, event_id, event_type)
+                VALUES (?, ?, ?)
+                """,
+                (run_id, event_id, self.headers.get("X-Event-Type", "unknown")),
+            )
+            BUSINESS_DB.commit()
+        self._reply(
+            200,
+            {
+                "ok": True,
+                "event_id": event_id,
+                "duplicate": duplicate,
+                "effect_applied": cursor.rowcount == 1,
+            },
+        )
 
 
 def main() -> None:
     address = ("127.0.0.1", 8000)
     print(f"HookStorm demo receiver listening on http://{address[0]}:{address[1]}")
     print("Endpoints: /webhook, /webhook/flaky, /webhook/slow, /webhook/signature")
+    print("State probe: GET /__hookstorm/state (scoped by X-HookStorm-Run)")
     print("Provider signatures: /webhook/signature/stripe, /github, /shopify")
     if SECRET:
         print("HMAC validation enabled for generic, Stripe, GitHub, and Shopify endpoints")
