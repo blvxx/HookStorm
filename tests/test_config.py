@@ -67,7 +67,7 @@ def test_rejects_non_integer_scenario_version() -> None:
 
 def test_rejects_event_id_with_newline() -> None:
     data = valid_scenario()
-    data["events"][0]["event_id"] = "evt_1\\r\\nX-Injected: yes"
+    data["events"][0]["event_id"] = "evt_1\r\nX-Injected: yes"
     with pytest.raises(ScenarioError, match="header-safe"):
         validate_scenario(data)
 

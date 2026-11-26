@@ -29,7 +29,8 @@ def test_retries_transient_server_error(receiver) -> None:
     assert result["summary"]["success"] is True
     assert result["summary"]["attempts"] == 2
     assert [x["status_code"] for x in result["deliveries"][0]["attempts"]] == [503, 200]
-    assert state["attempts"]["evt_test_1"] == 2
+    run_id = state["requests"][0]["run_id"]
+    assert state["attempts"][(run_id, "evt_test_1")] == 2
 
 
 def test_detects_duplicate_idempotency_response(receiver) -> None:
