@@ -17,13 +17,13 @@ from urllib.parse import urlsplit, urlunsplit
 import httpx
 
 from hookstorm.safety import validate_target
-from hookstorm.verify_auth import (
-    resolve_verification_auth_headers,
-    validate_verification_auth_transport,
-)
 from hookstorm.standard_webhooks import (
     decode_standard_webhooks_secret,
     standard_webhooks_headers,
+)
+from hookstorm.verify_auth import (
+    resolve_verification_auth_headers,
+    validate_verification_auth_transport,
 )
 
 
