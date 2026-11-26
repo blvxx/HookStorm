@@ -160,12 +160,12 @@ jobs:
             --format junit \
             --output test-results/webhook-regression.xml
 
-          is_trusted_main_run() {
-            [ "$GITHUB_REF" = "refs/heads/main" ] && {
+          is_trusted_main_run() {{
+            [ "$GITHUB_REF" = "refs/heads/main" ] && {{
               [ "$GITHUB_EVENT_NAME" = "push" ] ||
               [ "$GITHUB_EVENT_NAME" = "workflow_dispatch" ]
-            }
-          }
+            }}
+          }}
 
           if [ -f "$HOOKSTORM_BASELINE_FILE" ]; then
             hookstorm history compare-file "$HOOKSTORM_BASELINE_FILE" \
