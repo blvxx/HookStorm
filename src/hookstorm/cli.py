@@ -11,6 +11,7 @@ from pathlib import Path
 
 from hookstorm import __version__
 from hookstorm.config import load_scenario
+from hookstorm.pytest_export import write_pytest
 from hookstorm.report import render_json, write_report
 from hookstorm.runner import run_scenario
 
@@ -34,6 +35,14 @@ def _parser() -> argparse.ArgumentParser:
 
     validate = subparsers.add_parser("validate", help="validate a scenario without sending requests")
     validate.add_argument("scenario", help="path to a scenario YAML file")
+
+    export = subparsers.add_parser(
+        "export-pytest", help="export a scenario as a pytest integration test"
+    )
+    export.add_argument("scenario", help="path to a scenario YAML file")
+    export.add_argument(
+        "--output", default="test_hookstorm_scenario.py", help="generated pytest module path"
+    )
     return parser
 
 
@@ -65,6 +74,11 @@ def main(argv: Sequence[str] | None = None) -> int:
         scenario = load_scenario(args.scenario)
         if args.command == "validate":
             print(f"Scenario valid: {scenario['name']} ({len(scenario['events'])} event(s))")
+            return 0
+        if args.command == "export-pytest":
+            output = write_pytest(scenario, args.output)
+            print(f"pytest integration test written: {output.resolve()}")
+            print("Set HOOKSTORM_TARGET to the test receiver URL before running pytest.")
             return 0
         secret = os.getenv(args.secret_env)
         result = asyncio.run(

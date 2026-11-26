@@ -15,7 +15,7 @@ class ScenarioError(ValueError):
 
 
 _ALLOWED_TOP_LEVEL = {"version", "name", "description", "delivery", "retry", "events"}
-_ALLOWED_DELIVERY = {"order", "duplicate_count", "delay_ms", "timeout_ms", "signature"}
+_ALLOWED_DELIVERY = {"order", "duplicate_count", "delay_ms", "timeout_ms", "signature", "concurrency"}
 _ALLOWED_RETRY = {"max_attempts", "backoff_ms", "retry_on"}
 _ALLOWED_EVENT = {
     "id", "event_id", "payload", "headers", "delivery",
@@ -40,7 +40,7 @@ def _validate_delivery(value: Any, where: str, *, allow_order: bool = True) -> d
         return {}
     if not isinstance(value, dict):
         raise ScenarioError(f"{where} must be a mapping")
-    allowed = _ALLOWED_DELIVERY if allow_order else _ALLOWED_DELIVERY - {"order"}
+    allowed = _ALLOWED_DELIVERY if allow_order else _ALLOWED_DELIVERY - {"order", "concurrency"}
     _unknown_keys(value, allowed, where)
     result = dict(value)
     if "order" in result and (not isinstance(result["order"], str) or result["order"] not in {"in_order", "reverse"}):
@@ -49,6 +49,8 @@ def _validate_delivery(value: Any, where: str, *, allow_order: bool = True) -> d
         result["duplicate_count"] = _integer(result["duplicate_count"], f"{where}.duplicate_count", minimum=0, maximum=100)
     if "delay_ms" in result:
         result["delay_ms"] = _integer(result["delay_ms"], f"{where}.delay_ms", minimum=0, maximum=60_000)
+    if "concurrency" in result:
+        result["concurrency"] = _integer(result["concurrency"], f"{where}.concurrency", minimum=1, maximum=50)
     if "timeout_ms" in result:
         result["timeout_ms"] = _integer(result["timeout_ms"], f"{where}.timeout_ms", minimum=1, maximum=300_000)
     if "signature" in result and (not isinstance(result["signature"], str) or result["signature"] not in {"none", "valid", "invalid", "missing"}):
@@ -144,10 +146,24 @@ def validate_scenario(data: Any) -> dict[str, Any]:
             raise ScenarioError(f"{where}.expect_status must be an integer or non-empty list")
         if any(isinstance(code, bool) or not isinstance(code, int) or not 100 <= code <= 599 for code in expect_status):
             raise ScenarioError(f"{where}.expect_status entries must be HTTP status codes")
+        expectations: dict[str, Any] = {}
         for expectation_key in ("expect_json", "expect_duplicate_json"):
             expected = event.get(expectation_key)
-            if expected is not None and not isinstance(expected, dict):
+            if expected is None:
+                expectations[expectation_key] = None
+                continue
+            if not isinstance(expected, dict):
                 raise ScenarioError(f"{where}.{expectation_key} must be a JSON object")
+            try:
+                expectations[expectation_key] = json.loads(
+                    json.dumps(
+                        expected, ensure_ascii=False, separators=(",", ":"), allow_nan=False
+                    )
+                )
+            except (TypeError, ValueError, UnicodeEncodeError) as exc:
+                raise ScenarioError(
+                    f"{where}.{expectation_key} must contain JSON-compatible values"
+                ) from exc
         normalized_events.append({
             "id": event_type,
             "event_id": event_id,
@@ -155,8 +171,8 @@ def validate_scenario(data: Any) -> dict[str, Any]:
             "headers": headers,
             "delivery": event_delivery,
             "expect_status": sorted(set(expect_status)),
-            "expect_json": event.get("expect_json"),
-            "expect_duplicate_json": event.get("expect_duplicate_json"),
+            "expect_json": expectations["expect_json"],
+            "expect_duplicate_json": expectations["expect_duplicate_json"],
         })
 
     estimated_requests = 0

@@ -27,12 +27,13 @@ HookStorm sends controlled webhook traffic to **your own endpoint** and checks r
 | Retry after transient HTTP errors | retry.max_attempts, retry.retry_on, retry.backoff_ms |
 | Duplicate event delivery | delivery.duplicate_count |
 | Out-of-order delivery | delivery.order: reverse |
+| Concurrent event delivery | delivery.concurrency: 1–50 (default: 1) |
 | Slow receiver / timeout | delivery.timeout_ms |
 | HMAC signature | delivery.signature: valid / invalid / missing |
 | Expected HTTP status | expect_status |
-| Expected JSON response fields | expect_json, expect_duplicate_json |
+| Nested JSON response assertions | expect_json, expect_duplicate_json |
 
-The same event_id is preserved across retries and duplicate deliveries, allowing an idempotency implementation to be checked rather than merely sending unrelated repeated requests.
+The same event_id is preserved across retries and duplicate deliveries, allowing an idempotency implementation to be checked rather than merely sending unrelated repeated requests. Set `delivery.concurrency` from 1 to 50 to run independent events concurrently; retries and duplicate deliveries for each event remain ordered, and reports retain scenario order.
 
 ## Quick start
 
@@ -81,6 +82,23 @@ Validate a scenario without sending requests:
 hookstorm validate examples/duplicate-delivery.yaml
 ~~~
 
+Export a scenario as a pytest integration test:
+
+~~~bash
+hookstorm export-pytest examples/payment-retry.yaml --output tests/test_payment_webhook.py
+~~~
+
+The generated test reads its target from `HOOKSTORM_TARGET` and the optional HMAC secret from `HOOKSTORM_SECRET`. It does not embed an endpoint or secret. Remote targets remain blocked unless `HOOKSTORM_ALLOW_REMOTE=1` is explicitly set.
+
+~~~bash
+# Linux / macOS
+HOOKSTORM_TARGET=http://127.0.0.1:8000/webhook/flaky pytest tests/test_payment_webhook.py
+
+# Windows PowerShell
+$env:HOOKSTORM_TARGET = "http://127.0.0.1:8000/webhook/flaky"
+pytest tests/test_payment_webhook.py
+~~~
+
 ## Try the scenarios
 
 ~~~bash
@@ -109,6 +127,7 @@ The invalid-signature scenario expects 401, so a correct rejection is reported a
 version: 1
 name: Order webhook idempotency
 delivery:
+  concurrency: 4
   duplicate_count: 2
   order: in_order
   timeout_ms: 1500
@@ -169,8 +188,9 @@ CI tests Python 3.11, 3.12, and 3.13 on Linux, plus Python 3.12 on Windows and m
 - [x] HMAC signature modes and response assertions
 - [x] HTML / JSON reports
 - [x] Local demo receiver and CI test suite
-- [ ] Per-event scheduling and concurrent delivery groups
-- [ ] Export scenarios as pytest tests
+- [x] Bounded concurrent event delivery groups
+- [ ] Per-event scheduling
+- [x] Export scenarios as pytest tests
 - [ ] Interactive run timeline / optional local dashboard
 - [ ] More provider-style signature adapters
 
