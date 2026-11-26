@@ -43,8 +43,22 @@ git clone https://github.com/blvxx/HookStorm.git
 cd HookStorm
 python -m venv .venv
 source .venv/bin/activate
-# Windows PowerShell: .venv\Scripts\Activate.ps1
 python -m pip install -e .
+~~~
+
+**Windows PowerShell:**
+
+~~~powershell
+py -3.11 -m venv .venv
+.\.venv\Scripts\Activate.ps1
+python -m pip install -e .
+~~~
+
+If PowerShell blocks activation, allow it for the current terminal only:
+
+~~~powershell
+Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
+.\.venv\Scripts\Activate.ps1
 ~~~
 
 Start the included demo receiver in a second terminal:
