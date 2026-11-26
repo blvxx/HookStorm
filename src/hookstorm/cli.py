@@ -10,10 +10,9 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from hookstorm import __version__
-from hookstorm.config import ScenarioError, load_scenario
+from hookstorm.config import load_scenario
 from hookstorm.report import render_json, write_report
 from hookstorm.runner import run_scenario
-from hookstorm.safety import UnsafeTargetError
 
 
 def _parser() -> argparse.ArgumentParser:
