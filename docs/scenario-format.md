@@ -13,7 +13,7 @@ A scenario is a YAML document. It describes events, delivery behavior, and expec
 | retry | no | Retry policy; defaults to one attempt. |
 | events | yes | One to 500 event definitions. Payloads are limited to 1 MiB each. |
 
-Unknown keys are rejected to catch typos early.
+Unknown keys are rejected to catch typos early. Scenarios can be exported with `hookstorm export-pytest`; the generated test embeds the normalized scenario and reads its endpoint from `HOOKSTORM_TARGET` at runtime.
 
 ## Delivery settings
 
