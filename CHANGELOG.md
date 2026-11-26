@@ -17,3 +17,7 @@
 - Add nested JSON subset assertions with strict boolean-versus-number matching.
 - Validate signature configuration before sending any scenario traffic.
 - Add `hookstorm export-pytest` to generate pytest integration tests from YAML scenarios.
+- Add provider-compatible Stripe, GitHub, and Shopify HMAC signature headers while preserving the generic format.
+- Add Stripe timestamp offsets for receiver replay-window tests.
+- Add a searchable HTML delivery timeline with result filters and expandable attempt details.
+- Extend the local demo receiver and add provider-specific example scenarios.
