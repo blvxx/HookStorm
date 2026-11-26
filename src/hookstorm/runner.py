@@ -197,6 +197,11 @@ async def run_scenario(
             decode_standard_webhooks_secret(secret)
 
     async def process_event(event: dict[str, Any]) -> list[dict[str, Any]]:
+        scheduled_at = monotonic_started + event.get("schedule_after_ms", 0) / 1000
+        schedule_wait = scheduled_at - time.perf_counter()
+        if schedule_wait > 0:
+            await asyncio.sleep(schedule_wait)
+
         async with semaphore:
             delivery_config = {**default_delivery, **scenario["delivery"], **event["delivery"]}
             event_body = _json_bytes(event["payload"])
@@ -310,6 +315,7 @@ async def run_scenario(
                         "event_id": event["event_id"],
                         "event_type": event["id"],
                         "duplicate_index": duplicate_index,
+                        "schedule_after_ms": event.get("schedule_after_ms", 0),
                         "signature_provider": delivery_config["signature_provider"],
                         "attempts": attempts,
                         "passed": bool(last["passed"]),

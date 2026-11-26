@@ -23,7 +23,7 @@ _ALLOWED_DELIVERY = {
 _ALLOWED_RETRY = {"max_attempts", "backoff_ms", "retry_on"}
 _ALLOWED_EVENT = {
     "id", "event_id", "payload", "headers", "delivery",
-    "expect_status", "expect_json", "expect_duplicate_json",
+    "expect_status", "expect_json", "expect_duplicate_json", "schedule_after_ms",
 }
 
 
@@ -315,12 +315,19 @@ def validate_scenario(data: Any) -> dict[str, Any]:
                 raise ScenarioError(
                     f"{where}.{expectation_key} must contain JSON-compatible values"
                 ) from exc
+        schedule_after_ms = _integer(
+            event.get("schedule_after_ms", 0),
+            f"{where}.schedule_after_ms",
+            minimum=0,
+            maximum=300_000,
+        )
         normalized_events.append({
             "id": event_type,
             "event_id": event_id,
             "payload": payload,
             "headers": headers,
             "delivery": event_delivery,
+            "schedule_after_ms": schedule_after_ms,
             "expect_status": sorted(set(expect_status)),
             "expect_json": expectations["expect_json"],
             "expect_duplicate_json": expectations["expect_duplicate_json"],

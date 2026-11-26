@@ -95,6 +95,7 @@ def render_html(result: dict[str, Any]) -> str:
             f"<span class='badge {'good' if passed else 'bad'}'>{badge}</span>"
             f"<span>HTTP {html.escape(final_status)}</span>"
             f"<span>duplicate #{duplicate_index}</span>"
+            f"<span>scheduled +{int(delivery.get('schedule_after_ms', 0))} ms</span>"
             f"<span class='provider'>{signature_provider}</span>"
             "</div></div>"
             f"<ol class='attempt-rail' aria-label='Attempt timeline for {event_id}'>{rail}</ol>"
@@ -302,6 +303,15 @@ def render_junit(result: dict[str, Any]) -> str:
                     f"[duplicate={delivery.get('duplicate_index', 0)}]"
                 ),
                 "time": f"{case_time:.6f}",
+            },
+        )
+        testcase_properties = ET.SubElement(testcase, "properties")
+        ET.SubElement(
+            testcase_properties,
+            "property",
+            {
+                "name": "hookstorm.schedule_after_ms",
+                "value": str(int(delivery.get("schedule_after_ms", 0))),
             },
         )
         if delivery.get("passed"):

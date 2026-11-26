@@ -23,13 +23,13 @@ Unknown keys are rejected to catch typos early. Scenarios can be exported with `
 | order | in_order | in_order or reverse; reverse reverses the event list. |
 | concurrency | 1 | Maximum number of independent events sent concurrently; 1–50. |
 | duplicate_count | 0 | Additional deliveries per event, 0–100. Reuses the same event ID and body. |
-| delay_ms | 0 | Delay before each request, 0–60,000 ms. |
+| delay_ms | 0 | Delay before each HTTP attempt, 0–60,000 ms. |
 | timeout_ms | 5000 | HTTP request timeout, 1–300,000 ms. |
 | signature | none | none, valid, invalid, or missing. |
 | signature_provider | generic | generic, stripe, github, shopify, or standard_webhooks. |
 | signature_timestamp_offset_seconds | 0 | Stripe and Standard Webhooks; shifts the signed attempt timestamp by -86,400 to +86,400 seconds for replay-window tests. |
 
-Delivery settings may be global or defined per event. Per-event settings override global settings. The `concurrency` setting is global only. Retries and duplicate deliveries belonging to one event stay sequential; independent events may overlap. The report keeps events in scenario order even when requests finish out of order.
+Delivery settings may be global or defined per event. Per-event settings override global settings. The `concurrency` setting is global only. Retries and duplicate deliveries belonging to one event stay sequential; independent events may overlap. Each event's `schedule_after_ms` is measured from the beginning of the run, not from the previous event or from the completion of another request. A scheduled event waits before acquiring a concurrency slot, so a later event with an earlier offset is not blocked by it. The separate `delay_ms` setting remains a wait before every HTTP attempt. The report keeps events in scenario order even when requests finish out of order.
 
 For signature valid or invalid, set `HOOKSTORM_SECRET` in the shell. HookStorm signs the exact compact JSON request bytes sent over HTTP. The default `generic` provider preserves the legacy `X-HookStorm-Signature: sha256=<hex>` format.
 
@@ -105,6 +105,7 @@ The probe is not a universal exactly-once guarantee: it verifies only the state 
 | expect_status | no | Accepted final HTTP status code or list; defaults to [200, 201, 202, 204]. |
 | expect_json | no | Expected JSON object for the first delivery; nested objects are subset-matched recursively. |
 | expect_duplicate_json | no | Expected JSON object for additional deliveries; nested objects are subset-matched recursively. |
+| schedule_after_ms | no | Start this event at an offset of 0–300,000 ms from run start; defaults to 0. Scheduling is independent of scenario order and does not reserve a concurrency slot while waiting. |
 
 JSON object expectations are recursive subset matches: additional object keys are allowed at every depth. Arrays must match in length, order, and value. Boolean values are distinct from numbers. The final attempt of each delivery is checked. A delivery passes only when its final status and configured JSON expectation match.
 

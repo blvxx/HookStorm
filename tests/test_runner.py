@@ -609,3 +609,40 @@ def test_authenticated_remote_verification_requires_https(receiver, monkeypatch)
     assert state["requests"] == []
     assert state["verification_requests"] == []
 
+
+
+
+def test_scheduled_event_waits_before_acquiring_concurrency_slot(receiver) -> None:
+    base, state = receiver
+    data = validate_scenario({
+        "version": 1,
+        "name": "independent event schedule",
+        "delivery": {"concurrency": 1},
+        "events": [
+            {
+                "id": "delayed.event",
+                "event_id": "evt_delayed",
+                "schedule_after_ms": 150,
+                "payload": {},
+            },
+            {
+                "id": "immediate.event",
+                "event_id": "evt_immediate",
+                "schedule_after_ms": 0,
+                "payload": {},
+            },
+        ],
+    })
+
+    result = asyncio.run(run_scenario(data, base))
+
+    assert result["summary"]["success"] is True
+    assert [item["event_id"] for item in state["requests"]] == [
+        "evt_immediate",
+        "evt_delayed",
+    ]
+    assert result["deliveries"][0]["schedule_after_ms"] == 150
+    assert result["deliveries"][1]["schedule_after_ms"] == 0
+    assert result["deliveries"][0]["attempts"][0]["elapsed_ms"] >= 100
+    assert 'name="hookstorm.schedule_after_ms" value="150"' in render_junit(result)
+    assert "scheduled +150 ms" in render_html(result)

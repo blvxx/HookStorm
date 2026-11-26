@@ -353,3 +353,22 @@ def test_rejects_non_mapping_verification_auth() -> None:
     with pytest.raises(ScenarioError, match="verify.auth"):
         validate_scenario(data)
 
+
+
+
+def test_per_event_schedule_defaults_to_zero_and_accepts_bounded_offset() -> None:
+    data = valid_scenario()
+    normalized = validate_scenario(data)
+    assert normalized["events"][0]["schedule_after_ms"] == 0
+
+    data["events"][0]["schedule_after_ms"] = 300_000
+    normalized = validate_scenario(data)
+    assert normalized["events"][0]["schedule_after_ms"] == 300_000
+
+
+@pytest.mark.parametrize("offset", [-1, 300_001, True, 1.5, "100"])
+def test_rejects_invalid_per_event_schedule_offset(offset: object) -> None:
+    data = valid_scenario()
+    data["events"][0]["schedule_after_ms"] = offset
+    with pytest.raises(ScenarioError, match="schedule_after_ms"):
+        validate_scenario(data)

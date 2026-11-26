@@ -28,13 +28,14 @@ HookStorm sends controlled webhook traffic to **your own endpoint** and checks r
 | Duplicate event delivery | delivery.duplicate_count |
 | Out-of-order delivery | delivery.order: reverse |
 | Concurrent event delivery | delivery.concurrency: 1–50 (default: 1) |
+| Per-event scheduling | events[].schedule_after_ms: 0–300,000 ms from run start |
 | Slow receiver / timeout | delivery.timeout_ms |
 | Provider-compatible signatures | delivery.signature + signature_provider: generic / stripe / github / shopify / standard_webhooks |
 | Expected HTTP status | expect_status |
 | Nested JSON response assertions | expect_json, expect_duplicate_json |
 | Business-state / idempotency verification after delivery | verify.url, verify.expect_json |
 
-The same event_id is preserved across retries and duplicate deliveries, so the receiver can recognize repeated deliveries. HookStorm also includes a commit-then-drop example: the receiver commits the business effect, closes the connection before acknowledging it, and then receives the same event again. The retry response and run-scoped verify probe prove whether the effect was applied only once. Set delivery.concurrency from 1 to 50 to run independent events concurrently; retries and duplicate deliveries for each event remain ordered, and reports retain scenario order.
+The same event_id is preserved across retries and duplicate deliveries, so the receiver can recognize repeated deliveries. HookStorm also includes a commit-then-drop example: the receiver commits the business effect, closes the connection before acknowledging it, and then receives the same event again. The retry response and run-scoped verify probe prove whether the effect was applied only once. Set delivery.concurrency from 1 to 50 to run independent events concurrently; retries and duplicate deliveries for each event remain ordered, and reports retain scenario order. Use events[].schedule_after_ms to start individual events at offsets from run start without holding a worker slot while waiting.
 
 ## Quick start
 
@@ -419,7 +420,7 @@ CI tests Python 3.11, 3.12, and 3.13 on Linux, plus Python 3.12 on Windows and m
 - [x] Staging preflight diagnostics for scenario, secrets, and endpoint connectivity
 - [x] Local SQLite run history and baseline comparison
 - [x] Pass-rate, delivery-coverage, and latency regression detection
-- [ ] Per-event scheduling
+- [x] Per-event scheduling with run-relative event offsets
 - [x] Export scenarios as pytest tests
 - [ ] Interactive run timeline / optional local dashboard
 - [x] Stripe, GitHub, and Shopify provider-style signature adapters
