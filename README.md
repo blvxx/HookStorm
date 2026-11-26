@@ -32,8 +32,9 @@ HookStorm sends controlled webhook traffic to **your own endpoint** and checks r
 | Provider HMAC signature | delivery.signature + signature_provider: generic / stripe / github / shopify |
 | Expected HTTP status | expect_status |
 | Nested JSON response assertions | expect_json, expect_duplicate_json |
+| Business-state / idempotency verification after delivery | verify.url, verify.expect_json |
 
-The same event_id is preserved across retries and duplicate deliveries, allowing an idempotency implementation to be checked rather than merely sending unrelated repeated requests. Set `delivery.concurrency` from 1 to 50 to run independent events concurrently; retries and duplicate deliveries for each event remain ordered, and reports retain scenario order.
+The same event_id is preserved across retries and duplicate deliveries, so the receiver can recognize repeated deliveries. Response assertions alone do not prove that the underlying business operation happened only once; use the optional verify probe below to check backend state independently. Set delivery.concurrency from 1 to 50 to run independent events concurrently; retries and duplicate deliveries for each event remain ordered, and reports retain scenario order.
 
 ## Quick start
 
@@ -193,6 +194,31 @@ hookstorm run examples/invalid-signature.yaml --target http://127.0.0.1:8000/web
 ~~~
 
 The invalid-signature scenario expects 401, so a correct rejection is reported as a passing test.
+
+## Verify business state after delivery
+
+A successful webhook response does not prove that an order, payment, or other business operation was written exactly once. Add a read-only verification endpoint to your test receiver and configure a verify block:
+
+~~~yaml
+verify:
+  url: http://127.0.0.1:8000/__hookstorm/state
+  expect_status: [200]
+  expect_json:
+    processed_events: 1
+~~~
+
+After all webhook deliveries finish, HookStorm performs one **GET** request. It sends the generated X-HookStorm-Run header so the receiver can return state scoped to that test run. The expected JSON is checked with the same recursive subset rules as delivery responses. A failed probe makes the overall run fail and is included in JSON, HTML, JUnit, and run history.
+
+Try the database-backed demo:
+
+~~~bash
+hookstorm run examples/idempotency-verification.yaml \
+  --target http://127.0.0.1:8000/webhook
+~~~
+
+The included receiver uses SQLite with a unique (run_id, event_id) key to simulate an idempotent business write. It exposes the run-scoped count at GET /__hookstorm/state. The scenario sends one event three times and verifies that only one row was created.
+
+Verification URLs follow the same local-only default as webhook targets. Use --allow-remote only for an authorized test environment. HookStorm stores only the probe URL path (not query parameters), status, timing, and assertion outcome; it never stores the response body. The probe currently supports unauthenticated GET endpoints and sends only X-HookStorm-Run plus the HookStorm user-agent.
 
 ## Write your own scenario
 
