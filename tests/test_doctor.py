@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 import socket
 from pathlib import Path
@@ -23,7 +24,7 @@ def _scenario_file(
 name: Doctor smoke
 delivery:
   signature: {signature}
-  signature_provider: generic
+  signature_provider: {provider}
 events:
   - id: ping
     event_id: evt_doctor_001
@@ -205,7 +206,7 @@ def test_doctor_reports_when_verification_auth_is_not_configured(tmp_path) -> No
 def test_doctor_validates_standard_webhooks_secret(tmp_path) -> None:
     scenario = _scenario_file(tmp_path, signature="valid", provider="standard_webhooks")
     key = b"hookstorm-test-standard-webhooks-secret"
-    secret = "whsec_" + __import__("base64").b64encode(key).decode("ascii")
+    secret = "whsec_" + base64.b64encode(key).decode("ascii")
 
     checks = run_preflight(
         scenario,
