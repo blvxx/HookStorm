@@ -467,3 +467,24 @@ def test_invalid_verify_auth_value_fails_before_sending_webhooks(
     assert state["requests"] == []
     assert state["verification_requests"] == []
 
+
+def test_authenticated_remote_verification_requires_https(receiver, monkeypatch) -> None:
+    base, state = receiver
+    monkeypatch.setenv("HOOKSTORM_VERIFY_TOKEN", "test-token")
+    data = validate_scenario({
+        "version": 1,
+        "name": "remote http verify auth",
+        "events": [{"id": "ping", "event_id": "evt_remote_http", "payload": {}}],
+        "verify": {
+            "url": "http://example.com/state",
+            "expect_json": {},
+            "auth": {"type": "bearer", "token_env": "HOOKSTORM_VERIFY_TOKEN"},
+        },
+    })
+
+    with pytest.raises(ValueError, match="require HTTPS"):
+        asyncio.run(run_scenario(data, base, allow_remote=True))
+
+    assert state["requests"] == []
+    assert state["verification_requests"] == []
+
