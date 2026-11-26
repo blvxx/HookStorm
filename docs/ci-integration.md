@@ -26,6 +26,8 @@ hookstorm validate scenarios/webhook.yaml
 
 In your GitHub repository, open **Settings → Environments** and create an environment named `staging`.
 
+Treat this environment as a deployment boundary, not just a place to store variables. Configure **Required reviewers** so a trusted maintainer must approve access from pull-request runs, and restrict which branches can deploy to the environment where that is practical. The workflow skips fork-originated PRs, but same-repository PRs can reach the job; do not make staging credentials available to code from contributors you do not trust. Use a dedicated staging signing secret with the minimum privileges needed, never a production credential.
+
 Add the following values to that environment:
 
 | Name | Type | Purpose |
