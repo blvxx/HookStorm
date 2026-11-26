@@ -11,7 +11,14 @@ from pathlib import Path
 
 from hookstorm import __version__
 from hookstorm.config import load_scenario
-from hookstorm.history import HistoryError, compare_history_runs, get_run, list_runs, result_metrics, save_run
+from hookstorm.history import (
+    HistoryError,
+    compare_history_runs,
+    get_run,
+    list_runs,
+    result_metrics,
+    save_run,
+)
 from hookstorm.pytest_export import write_pytest
 from hookstorm.report import render_json, write_report
 from hookstorm.runner import run_scenario
