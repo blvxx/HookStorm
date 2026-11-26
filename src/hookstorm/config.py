@@ -68,11 +68,6 @@ def _validate_delivery(value: Any, where: str, *, allow_order: bool = True) -> d
             minimum=-86_400,
             maximum=86_400,
         )
-        provider = result.get("signature_provider", "generic")
-        if provider != "stripe" and result["signature_timestamp_offset_seconds"] != 0:
-            raise ScenarioError(
-                f"{where}.signature_timestamp_offset_seconds is only supported for Stripe"
-            )
     if "timeout_ms" in result:
         result["timeout_ms"] = _integer(result["timeout_ms"], f"{where}.timeout_ms", minimum=1, maximum=300_000)
     if "signature" in result and (
@@ -80,10 +75,6 @@ def _validate_delivery(value: Any, where: str, *, allow_order: bool = True) -> d
         or result["signature"] not in {"none", "valid", "invalid", "missing"}
     ):
         raise ScenarioError(f"{where}.signature must be none, valid, invalid, or missing")
-    if "signature_timestamp_offset_seconds" in result and "signature_provider" not in result:
-        raise ScenarioError(
-            f"{where}.signature_timestamp_offset_seconds requires signature_provider: stripe"
-        )
     return result
 
 
@@ -203,6 +194,14 @@ def validate_scenario(data: Any) -> dict[str, Any]:
             "expect_json": expectations["expect_json"],
             "expect_duplicate_json": expectations["expect_duplicate_json"],
         })
+
+    for event in normalized_events:
+        effective_delivery = {**delivery, **event["delivery"]}
+        timestamp_offset = effective_delivery.get("signature_timestamp_offset_seconds", 0)
+        if timestamp_offset and effective_delivery.get("signature_provider", "generic") != "stripe":
+            raise ScenarioError(
+                "signature_timestamp_offset_seconds can only be used with signature_provider: stripe"
+            )
 
     estimated_requests = 0
     for event in normalized_events:
