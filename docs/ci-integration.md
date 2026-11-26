@@ -65,7 +65,7 @@ Add the following values to that environment:
 | Name | Type | Purpose |
 |---|---|---|
 | `HOOKSTORM_TARGET_URL` | Variable | Full URL of a dedicated staging/test webhook endpoint. Do not include credentials or query-string tokens. |
-| `HOOKSTORM_SECRET` | Secret | HMAC secret used by the scenario and the staging receiver. |
+| `HOOKSTORM_SECRET` | Secret | HMAC secret used by signed scenarios (`signature: valid` or `invalid`). Unsigned scenarios do not require it. |
 | `HOOKSTORM_SCENARIO` | Optional variable | Scenario path. Defaults to `scenarios/webhook.yaml`. |
 | `HOOKSTORM_LATENCY_THRESHOLD_PCT` | Optional variable | Allowed latency increase. Defaults to `20`. |
 
