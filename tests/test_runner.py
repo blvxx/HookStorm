@@ -105,3 +105,14 @@ def test_missing_signature_is_sent_as_absence_and_can_be_expected(receiver) -> N
         f"{base}/signature",
     ))
     assert result["summary"]["success"] is True
+
+
+def test_query_parameters_are_not_written_to_report_target(receiver) -> None:
+    base, _ = receiver
+    result = asyncio.run(run_scenario(
+        scenario(),
+        f"{base}/webhook?api_key=do-not-store-this",
+    ))
+    assert result["summary"]["success"] is True
+    assert result["target"] == f"{base}/webhook"
+    assert "do-not-store-this" not in result["target"]

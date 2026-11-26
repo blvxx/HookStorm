@@ -132,7 +132,7 @@ Reports include event IDs, delivery/attempt counts, status codes, latency, and p
 - Redirects are not followed. Credentials embedded in target URLs are rejected.
 - HMAC secrets are read from HOOKSTORM_SECRET (or a custom --secret-env variable), not from the scenario file.
 - No cloud relay, tunnel, telemetry, account, or hosted service is involved.
-- Reports omit payloads, headers, response bodies, and secrets. Event IDs and endpoint URLs remain; review reports before sharing them.
+- Reports omit payloads, headers, response bodies, secrets, and URL query strings. Event IDs and endpoint paths remain; review reports before sharing them.
 - The demo receiver is for development only, not public exposure.
 
 See SECURITY.md and docs/architecture.md for additional details.
@@ -145,7 +145,7 @@ ruff check .
 pytest
 ~~~
 
-CI tests Python 3.11, 3.12, and 3.13, runs lint and tests, and builds the distributable package.
+CI tests Python 3.11, 3.12, and 3.13 on Linux, plus Python 3.12 on Windows and macOS. Every job runs lint, tests, and a package build.
 
 ## Roadmap
 
