@@ -318,7 +318,7 @@ def run_preflight(
             DoctorCheck(
                 "INFO",
                 "Network",
-                "not contacted; pass --connect for DNS/TCP and HTTPS TLS checks (no HTTP request is sent)",
+                "not contacted; pass --connect for a socket check or --verbose for detailed DNS/TCP/TLS output",
             )
         )
     elif parsed_target is None:
