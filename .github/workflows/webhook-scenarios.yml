@@ -37,6 +37,8 @@ jobs:
           cache: pip
       - name: Install HookStorm
         run: python -m pip install .
+      - name: Validate external CI example scenario
+        run: hookstorm validate examples/ci/webhook-regression.yaml
 
       - name: Restore main-branch webhook baselines
         uses: actions/cache/restore@v4
