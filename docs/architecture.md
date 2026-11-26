@@ -25,7 +25,8 @@ CLI exit code (0 passed, 1 assertions failed, 2 invalid input/configuration)
 - config.py: uses yaml.safe_load, rejects unknown keys, applies defaults, and bounds scenario sizes and timings.
 - safety.py: accepts only loopback IPs and localhost by default. --allow-remote is an explicit opt-in.
 - runner.py: sends requests asynchronously with HTTPX, preserves event IDs, supports bounded concurrency across independent events, generates generic / Stripe / GitHub / Shopify HMAC headers from the exact request bytes, and checks nested JSON responses.
-- report.py: generates JSON, JUnit XML, or self-contained HTML with elapsed-time attempt tracks, search, result filters, and expandable attempt details. Payloads, request headers, response bodies, and secrets are not stored.
+- report.py: generates JSON, JUnit XML, or self-contained HTML with elapsed-time attempt tracks, search, result filters, and expandable attempt details.
+- history.py: persists a strict whitelist of run metadata and assertion outcomes to local SQLite, lists and retrieves runs, and compares a current run with a baseline for pass-rate, coverage, and latency regressions.
 - examples/receiver.py: standard-library local demo server; never use it as a public endpoint.
 - pytest_export.py: generates pytest integration modules with an embedded, normalized scenario and runtime-only target / secret environment variables.
 
@@ -50,3 +51,12 @@ CLI exit code (0 passed, 1 assertions failed, 2 invalid input/configuration)
 - `--format junit` writes one JUnit testcase per event delivery, including duplicates; assertion failures and transport errors are distinguished.
 - `.github/workflows/ci.yml` publishes the unit-test JUnit report from each OS / Python matrix job.
 - `.github/workflows/webhook-scenarios.yml` runs the local demo receiver and representative YAML scenarios, then uploads the per-scenario JUnit reports.
+
+
+## Run history and regression model
+
+Run history is local and opt-out. By default it is stored at `~/.hookstorm/history.sqlite3`; `HOOKSTORM_HISTORY_DB` or a per-command `--db` / `--history-db` option can override the path.
+
+Only run metadata, event identifiers, statuses, attempt timing, and assertion outcomes are persisted. Request payloads, request / response headers, response bodies, and secrets are excluded by an explicit field whitelist. The sanitized result still retains the target URL path for identifying the tested endpoint; query strings are removed by the runner.
+
+The `history compare` command compares deliveries by event type, event ID, and duplicate index. It reports newly failing deliveries, recovered deliveries, removed coverage, per-delivery latency changes, aggregate p95 latency changes, pass-rate changes, and total run duration. The default latency regression threshold is 20 percent. A detected regression returns exit code 1; command and database errors return exit code 2. The p95 metric uses per-delivery sums of HTTP attempt latency and excludes configured retry backoff.

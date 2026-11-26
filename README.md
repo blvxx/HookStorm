@@ -192,6 +192,42 @@ JUnit output creates one testcase per event delivery (including duplicates), rec
 
 Reports include event IDs, delivery/attempt counts, elapsed attempt timing, status codes, latency, and pass/fail checks. The self-contained HTML report adds a searchable and filterable delivery timeline, attempt expansion, and pass/fail filters. Reports intentionally omit request payloads, request headers, response bodies, and secrets.
 
+## Run history and regression detection
+
+Every `hookstorm run` is saved to a local SQLite database by default:
+
+- Windows: `%USERPROFILE%\\.hookstorm\\history.sqlite3`
+- Linux / macOS: `~/.hookstorm/history.sqlite3`
+
+The history stores run metadata and assertion outcomes only. Payloads, request headers, response bodies, and secrets are not persisted. Event IDs and the target URL path are retained for comparison; query strings are stripped by the runner. Keep the database local and review identifiers / URL paths before sharing it.
+
+List recent runs:
+
+~~~bash
+hookstorm history list --limit 20
+hookstorm history list --scenario "Payment webhook retry"
+~~~
+
+Inspect one run:
+
+~~~bash
+hookstorm history show RUN_ID
+~~~
+
+Compare a new run with a saved baseline:
+
+~~~bash
+hookstorm history compare BASELINE_RUN_ID
+~~~
+
+The current run defaults to the latest recorded run. You can select it explicitly and adjust the latency threshold:
+
+~~~bash
+hookstorm history compare BASELINE_RUN_ID --current CURRENT_RUN_ID --latency-threshold-pct 20
+~~~
+
+The comparison checks pass rate, failed deliveries, per-delivery latency, p95 delivery latency, and delivery coverage. Latency is calculated as the sum of HTTP attempt times for each delivery (retry backoff is excluded). A regression exits with code `1`, so the command can fail a CI step. Use `--no-history` on `hookstorm run` to skip persistence, `--history-db PATH` to choose a database for a run, or set `HOOKSTORM_HISTORY_DB` for a shared local default.
+
 ## Safety and privacy
 
 - **Local-only by default.** Targets must resolve to loopback. A remote URL requires the explicit --allow-remote switch.
@@ -225,6 +261,8 @@ CI tests Python 3.11, 3.12, and 3.13 on Linux, plus Python 3.12 on Windows and m
 - [x] Bounded concurrent event delivery groups
 - [x] JUnit XML reports for CI integrations
 - [x] GitHub Actions webhook scenario workflow
+- [x] Local SQLite run history and baseline comparison
+- [x] Pass-rate, delivery-coverage, and latency regression detection
 - [ ] Per-event scheduling
 - [x] Export scenarios as pytest tests
 - [ ] Interactive run timeline / optional local dashboard

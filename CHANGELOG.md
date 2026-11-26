@@ -24,3 +24,6 @@
 - Add JUnit XML reports with per-delivery testcases and distinct assertion-failure / transport-error elements.
 - Publish pytest JUnit results from every OS / Python CI matrix job.
 - Add a GitHub Actions workflow that runs local provider-signature, retry, duplicate, and out-of-order scenarios and uploads JUnit artifacts.
+- Add opt-out local SQLite run history with sanitized per-delivery outcomes.
+- Add `history list`, `history show`, and `history compare` CLI commands.
+- Detect pass-rate, failed-delivery, delivery-coverage, per-delivery latency, and p95 latency regressions; return a CI-friendly nonzero exit code when regressions are found.
