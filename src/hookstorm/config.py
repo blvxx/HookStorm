@@ -146,10 +146,24 @@ def validate_scenario(data: Any) -> dict[str, Any]:
             raise ScenarioError(f"{where}.expect_status must be an integer or non-empty list")
         if any(isinstance(code, bool) or not isinstance(code, int) or not 100 <= code <= 599 for code in expect_status):
             raise ScenarioError(f"{where}.expect_status entries must be HTTP status codes")
+        expectations: dict[str, Any] = {}
         for expectation_key in ("expect_json", "expect_duplicate_json"):
             expected = event.get(expectation_key)
-            if expected is not None and not isinstance(expected, dict):
+            if expected is None:
+                expectations[expectation_key] = None
+                continue
+            if not isinstance(expected, dict):
                 raise ScenarioError(f"{where}.{expectation_key} must be a JSON object")
+            try:
+                expectations[expectation_key] = json.loads(
+                    json.dumps(
+                        expected, ensure_ascii=False, separators=(",", ":"), allow_nan=False
+                    )
+                )
+            except (TypeError, ValueError, UnicodeEncodeError) as exc:
+                raise ScenarioError(
+                    f"{where}.{expectation_key} must contain JSON-compatible values"
+                ) from exc
         normalized_events.append({
             "id": event_type,
             "event_id": event_id,
@@ -157,8 +171,8 @@ def validate_scenario(data: Any) -> dict[str, Any]:
             "headers": headers,
             "delivery": event_delivery,
             "expect_status": sorted(set(expect_status)),
-            "expect_json": event.get("expect_json"),
-            "expect_duplicate_json": event.get("expect_duplicate_json"),
+            "expect_json": expectations["expect_json"],
+            "expect_duplicate_json": expectations["expect_duplicate_json"],
         })
 
     estimated_requests = 0
