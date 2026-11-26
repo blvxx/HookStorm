@@ -1,4 +1,4 @@
-"""JSON and self-contained HTML report rendering."""
+"""JSON and self-contained interactive HTML report rendering."""
 
 from __future__ import annotations
 
@@ -12,54 +12,204 @@ def render_json(result: dict[str, Any]) -> str:
     return json.dumps(result, indent=2, ensure_ascii=False) + "\n"
 
 
+def _render_attempt(attempt: dict[str, Any], index: int, *, final: bool, passed: bool) -> str:
+    """Build one escaped attempt marker for the delivery track."""
+    status_code = attempt.get("status_code")
+    status_label = str(status_code) if status_code is not None else "ERR"
+    latency = float(attempt.get("latency_ms", 0.0))
+    elapsed = float(attempt.get("elapsed_ms", 0.0))
+    error = html.escape(str(attempt.get("error") or ""))
+    state = "pass" if final and passed else "fail" if final else "retry"
+    title = html.escape(
+        f"Attempt {index}: HTTP {status_label}; {latency:.2f} ms; +{elapsed:.2f} ms",
+        quote=True,
+    )
+    error_markup = f"<em>{error}</em>" if error else ""
+    return (
+        f"<li class='attempt {state}' title='{title}'>"
+        f"<span class='attempt-index'>#{index}</span>"
+        f"<strong>{html.escape(status_label)}</strong>"
+        f"<span>{latency:.2f} ms</span>"
+        f"<small>+{elapsed:.0f} ms</small>"
+        f"{error_markup}"
+        "</li>"
+    )
+
+
 def render_html(result: dict[str, Any]) -> str:
+    """Render a self-contained report with searchable, filterable delivery timelines."""
     summary = result["summary"]
     status = "PASSED" if summary["success"] else "FAILED"
-    rows: list[str] = []
-    for delivery in result["deliveries"]:
-        latest = delivery["attempts"][-1]
-        badge = "PASS" if delivery["passed"] else "FAIL"
-        error = latest["error"] or ""
-        attempt_path = " → ".join(
-            str(item["status_code"]) if item["status_code"] is not None else "timeout/error"
-            for item in delivery["attempts"]
+    deliveries = list(result["deliveries"])
+    deliveries.sort(
+        key=lambda item: (
+            float(item.get("attempts", [{}])[0].get("elapsed_ms", 0.0))
+            if item.get("attempts")
+            else 0.0
         )
-        rows.append(
-            "<tr>"
-            f"<td>{html.escape(delivery['event_type'])}</td>"
-            f"<td><code>{html.escape(delivery['event_id'])}</code></td>"
-            f"<td>{delivery['duplicate_index']}</td>"
-            f"<td>{html.escape(attempt_path)}</td>"
-            f"<td>{latest['status_code'] if latest['status_code'] is not None else '—'}</td>"
-            f"<td>{latest['latency_ms']:.2f} ms</td>"
-            f"<td><span class='badge {'good' if delivery['passed'] else 'bad'}'>{badge}</span></td>"
-            f"<td>{html.escape(error)}</td>"
-            "</tr>"
+    )
+
+    cards: list[str] = []
+    for delivery in deliveries:
+        attempts = delivery.get("attempts", [])
+        if not attempts:
+            continue
+        passed = bool(delivery["passed"])
+        state = "passed" if passed else "failed"
+        badge = "PASS" if passed else "FAIL"
+        event_type = html.escape(str(delivery["event_type"]))
+        event_id = html.escape(str(delivery["event_id"]))
+        signature_provider = html.escape(str(delivery.get("signature_provider", "generic")))
+        duplicate_index = int(delivery.get("duplicate_index", 0))
+        error_text = " ".join(str(item.get("error") or "") for item in attempts)
+        searchable = html.escape(
+            f"{delivery['event_type']} {delivery['event_id']} {signature_provider} {error_text}".lower(),
+            quote=True,
         )
+        rail = "".join(
+            _render_attempt(
+                attempt,
+                index,
+                final=index == len(attempts),
+                passed=passed,
+            )
+            for index, attempt in enumerate(attempts, start=1)
+        )
+        final_attempt = attempts[-1]
+        final_status = (
+            str(final_attempt["status_code"])
+            if final_attempt.get("status_code") is not None
+            else "ERR"
+        )
+        note = html.escape(str(final_attempt.get("error") or ""))
+        note_markup = f"<p>{note}</p>" if note else "<p>No error details recorded.</p>"
+        cards.append(
+            f"<article class='delivery-card {state}' data-state='{state}' data-search='{searchable}'>"
+            "<div class='delivery-top'>"
+            "<div class='delivery-identity'>"
+            f"<span class='event-type'>{event_type}</span>"
+            f"<code>{event_id}</code>"
+            "</div>"
+            "<div class='delivery-meta'>"
+            f"<span class='badge {'good' if passed else 'bad'}'>{badge}</span>"
+            f"<span>HTTP {html.escape(final_status)}</span>"
+            f"<span>duplicate #{duplicate_index}</span>"
+            f"<span class='provider'>{signature_provider}</span>"
+            "</div></div>"
+            f"<ol class='attempt-rail' aria-label='Attempt timeline for {event_id}'>{rail}</ol>"
+            "<details class='attempt-details'>"
+            f"<summary>Inspect {len(attempts)} attempt(s)</summary>"
+            f"<div class='attempt-notes'>{note_markup}</div>"
+            "</details></article>"
+        )
+
+    started_at = html.escape(str(result.get("started_at", "unknown")))
+    scenario = html.escape(str(result["scenario"]))
+    target = html.escape(str(result["target"]))
+    version = html.escape(str(result["version"]))
+    timeline_content = "".join(cards) if cards else '<p class="empty">No delivery attempts were recorded.</p>'
     return f"""<!doctype html>
-<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width, initial-scale=1">
-<title>HookStorm report — {html.escape(result['scenario'])}</title>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<meta name="color-scheme" content="light dark">
+<title>HookStorm report — {scenario}</title>
 <style>
-:root{{color-scheme:light dark;font-family:ui-sans-serif,system-ui,sans-serif}}body{{margin:0;background:Canvas;color:CanvasText}}
-main{{max-width:1100px;margin:48px auto;padding:0 24px}}h1{{font-size:2rem;margin-bottom:8px}}.muted{{color:GrayText}}
-.grid{{display:flex;flex-wrap:wrap;gap:12px;margin:28px 0}}.card{{border:1px solid GrayText;border-radius:12px;padding:16px 20px;min-width:130px}}
-.card strong{{display:block;font-size:1.6rem}}.table-wrap{{overflow-x:auto}}table{{width:100%;border-collapse:collapse;font-size:.92rem}}
-th,td{{text-align:left;border-bottom:1px solid GrayText;padding:12px 10px;vertical-align:top}}th{{font-weight:650}}
-.badge{{font-size:.78rem;font-weight:700;padding:4px 8px;border-radius:999px}}.good{{background:#14532d;color:#dcfce7}}.bad{{background:#7f1d1d;color:#fee2e2}}
-code{{font-family:ui-monospace,monospace}}footer{{margin-top:36px;color:GrayText;font-size:.85rem}}
-</style></head><body><main>
-<p class="muted">HOOKSTORM / RUN REPORT</p><h1>{html.escape(result['scenario'])}</h1>
-<p class="muted">{html.escape(result['target'])}</p>
+:root{{font-family:ui-sans-serif,system-ui,-apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif;color-scheme:light dark}}
+*{{box-sizing:border-box}}body{{margin:0;background:Canvas;color:CanvasText}}
+main{{max-width:1180px;margin:40px auto;padding:0 24px 48px}}
+h1{{font-size:clamp(1.7rem,4vw,2.25rem);margin:5px 0 8px;letter-spacing:-.03em}}
+h2{{font-size:1.15rem;margin:32px 0 14px}}.muted{{color:GrayText}}.eyebrow{{font-size:.76rem;letter-spacing:.14em;font-weight:750}}
+.target{{overflow-wrap:anywhere;font-size:.9rem}}
+.grid{{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:26px 0}}
+.card{{border:1px solid color-mix(in srgb,CanvasText 18%,transparent);border-radius:14px;padding:16px 18px;min-width:0}}
+.card strong{{display:block;font-size:1.45rem;margin-bottom:3px}}.card span{{font-size:.82rem;color:GrayText}}
+.toolbar{{display:flex;flex-wrap:wrap;align-items:end;gap:12px;padding:14px;border:1px solid color-mix(in srgb,CanvasText 18%,transparent);border-radius:14px;margin-bottom:12px}}
+.field{{display:grid;gap:5px;font-size:.8rem;color:GrayText}}input,select,button{{font:inherit;color:CanvasText;background:Canvas;border:1px solid color-mix(in srgb,CanvasText 30%,transparent);border-radius:8px;padding:8px 10px}}
+input{{min-width:min(280px,70vw)}}button{{cursor:pointer;font-weight:650}}button:hover,summary:hover{{border-color:Highlight}}
+#result-count{{margin-left:auto;color:GrayText;font-size:.82rem;padding:8px 0}}
+.timeline{{display:grid;gap:10px}}.delivery-card{{border:1px solid color-mix(in srgb,CanvasText 18%,transparent);border-radius:14px;padding:16px 18px;min-width:0}}
+.delivery-card[hidden]{{display:none}}.delivery-top{{display:flex;gap:16px;justify-content:space-between;align-items:start;flex-wrap:wrap}}
+.delivery-identity{{display:grid;gap:4px;min-width:0}}.event-type{{font-weight:750}}.delivery-identity code{{font-size:.8rem;color:GrayText;overflow-wrap:anywhere}}
+.delivery-meta{{display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:.78rem;color:GrayText}}
+.badge{{font-size:.72rem;font-weight:800;padding:4px 9px;border-radius:999px;letter-spacing:.03em}}
+.good{{background:#14532d;color:#dcfce7}}.bad{{background:#7f1d1d;color:#fee2e2}}
+.provider{{border:1px solid color-mix(in srgb,CanvasText 20%,transparent);padding:3px 7px;border-radius:999px}}
+.attempt-rail{{list-style:none;margin:15px 0 10px;padding:0;display:flex;gap:8px;overflow-x:auto}}
+.attempt{{position:relative;display:grid;gap:3px;flex:1 0 130px;max-width:220px;min-width:125px;padding:10px 11px;border:1px solid color-mix(in srgb,CanvasText 18%,transparent);border-radius:10px;background:color-mix(in srgb,CanvasText 4%,Canvas);font-size:.78rem}}
+.attempt::before{{content:"";position:absolute;left:0;right:0;top:0;height:3px;border-radius:10px 10px 0 0;background:GrayText}}
+.attempt.pass::before{{background:#16a34a}}.attempt.fail::before{{background:#dc2626}}.attempt.retry::before{{background:#d97706}}
+.attempt-index,.attempt small{{color:GrayText;font-size:.7rem}}.attempt strong{{font-size:1.03rem}}.attempt em{{font-size:.72rem;font-style:normal;color:#dc6b6b;overflow-wrap:anywhere}}
+.attempt-details summary{{cursor:pointer;display:inline-block;color:GrayText;font-size:.8rem;padding:4px 0}}
+.attempt-notes{{font-size:.82rem;color:GrayText;overflow-wrap:anywhere}}.empty{{padding:26px;text-align:center;color:GrayText;border:1px dashed GrayText;border-radius:12px}}
+footer{{margin-top:32px;color:GrayText;font-size:.8rem}}
+@media(max-width:700px){{main{{margin:26px auto;padding:0 14px 36px}}.grid{{grid-template-columns:repeat(2,minmax(0,1fr))}}.delivery-card{{padding:13px}}.delivery-top{{display:grid}}#result-count{{width:100%;margin:0}}}}
+@media(prefers-reduced-motion:no-preference){{.delivery-card{{transition:opacity .15s ease}}}}
+</style>
+</head>
+<body><main>
+<p class="muted eyebrow">HOOKSTORM / RUN REPORT</p>
+<h1>{scenario}</h1>
+<p class="muted target">{target}</p>
+<p class="muted" style="font-size:.78rem">Started: {started_at}</p>
 <div class="grid">
 <div class="card"><strong>{status}</strong><span>Overall result</span></div>
 <div class="card"><strong>{summary['passed']}/{summary['total_deliveries']}</strong><span>Deliveries passed</span></div>
 <div class="card"><strong>{summary['attempts']}</strong><span>HTTP attempts</span></div>
 <div class="card"><strong>{result['duration_ms']:.0f} ms</strong><span>Total duration</span></div>
 </div>
-<h2>Delivery timeline</h2><div class="table-wrap"><table><thead><tr><th>Event</th><th>Event ID</th><th>Duplicate</th><th>Attempt path</th><th>Final HTTP</th><th>Latency</th><th>Result</th><th>Note</th></tr></thead>
-<tbody>{''.join(rows)}</tbody></table></div>
-<footer>Generated by HookStorm {html.escape(result['version'])} · Payloads, request headers and secrets are not included in this report.</footer>
-</main></body></html>"""
+<h2>Delivery timeline</h2>
+<div class="toolbar" role="region" aria-label="Timeline filters">
+<label class="field">Result
+<select id="status-filter">
+<option value="all">All deliveries</option>
+<option value="passed">Passed</option>
+<option value="failed">Failed</option>
+</select></label>
+<label class="field">Find event or ID
+<input id="event-search" type="search" placeholder="Type to filter events" autocomplete="off">
+</label>
+<button id="expand-all" type="button">Expand all attempts</button>
+<span id="result-count" aria-live="polite"></span>
+</div>
+<section class="timeline" id="timeline" aria-label="Webhook event delivery attempts">
+{timeline_content}
+</section>
+<footer>Generated by HookStorm {version} · Attempts are ordered by elapsed run time. Payloads, request headers and secrets are not included.</footer>
+</main>
+<script>
+(() => {{
+  const cards = Array.from(document.querySelectorAll(".delivery-card"));
+  const statusFilter = document.getElementById("status-filter");
+  const searchInput = document.getElementById("event-search");
+  const count = document.getElementById("result-count");
+  const expandButton = document.getElementById("expand-all");
+  const applyFilters = () => {{
+    const state = statusFilter.value;
+    const query = searchInput.value.trim().toLowerCase();
+    let visible = 0;
+    for (const card of cards) {{
+      const stateMatches = state === "all" || card.dataset.state === state;
+      const queryMatches = !query || card.dataset.search.includes(query);
+      card.hidden = !(stateMatches && queryMatches);
+      if (!card.hidden) visible += 1;
+    }}
+    count.textContent = visible + " of " + cards.length + " deliveries";
+  }};
+  statusFilter.addEventListener("change", applyFilters);
+  searchInput.addEventListener("input", applyFilters);
+  expandButton.addEventListener("click", () => {{
+    const details = cards.filter(card => !card.hidden).map(card => card.querySelector("details"));
+    const expand = details.some(detail => !detail.open);
+    details.forEach(detail => {{ detail.open = expand; }});
+    expandButton.textContent = expand ? "Collapse all attempts" : "Expand all attempts";
+  }});
+  applyFilters();
+}})();
+</script>
+</body>
+</html>"""
 
 
 def write_report(result: dict[str, Any], path: str | Path, format_name: str) -> Path:
