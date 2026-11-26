@@ -131,7 +131,8 @@ def test_doctor_rejects_malformed_verification_credential(
     )
 
     assert _check(checks, "Verification auth", "FAIL")
-    assert credential not in str(checks)
+    if credential:
+        assert credential not in str(checks)
 
 
 def test_doctor_checks_api_key_environment_variable(tmp_path) -> None:
