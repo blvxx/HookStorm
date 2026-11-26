@@ -6,7 +6,7 @@ import time
 
 import pytest
 
-from hookstorm.config import validate_scenario
+from hookstorm.config import ScenarioError, validate_scenario
 from hookstorm.report import render_html, render_json, render_junit
 from hookstorm.runner import run_scenario
 
@@ -250,23 +250,12 @@ def test_stripe_timestamp_offset_can_exercise_receiver_tolerance(receiver) -> No
     assert abs(time.time() - timestamp) >= 3599
 
 
-def test_provider_signature_header_cannot_be_overridden(receiver) -> None:
-    base, state = receiver
-    result = asyncio.run(run_scenario(
+def test_provider_signature_header_cannot_be_overridden() -> None:
+    with pytest.raises(ScenarioError, match="may not override"):
         scenario(
             delivery={"signature": "valid", "signature_provider": "github"},
-            event={
-                "headers": {"X-Hub-Signature-256": "sha256=attacker-controlled"},
-                "expect_status": [200],
-            },
-        ),
-        f"{base}/signature/github",
-        secret="test-secret",
-    ))
-    assert result["summary"]["success"] is True
-    headers = {key.lower(): value for key, value in state["requests"][0]["headers"].items()}
-    assert headers["x-hub-signature-256"] != "sha256=attacker-controlled"
-
+            event={"headers": {"X-Hub-Signature-256": "sha256=attacker-controlled"}},
+        )
 
 def test_missing_provider_signature_omits_provider_header(receiver) -> None:
     base, state = receiver
@@ -401,7 +390,7 @@ def test_response_lost_after_business_commit_retries_without_duplicate_effect(re
         },
     })
 
-    result = asyncio.run(run_scenario(data, base))
+    result = asyncio.run(run_scenario(data, f"{base}/commit-then-drop"))
 
     assert result["summary"]["success"] is True
     attempts = result["deliveries"][0]["attempts"]
