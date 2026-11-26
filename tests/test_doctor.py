@@ -393,7 +393,7 @@ def test_doctor_json_output_is_versioned_and_secret_safe(
     }
     assert document["summary"] == {
         "total_checks": len(document["checks"]),
-        "passed": 2,
+        "passed": 3,
         "failed": 0,
         "warnings": 1,
         "info": 1,
