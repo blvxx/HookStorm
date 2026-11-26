@@ -52,7 +52,7 @@ def test_rejects_non_ascii_or_control_header_values(value: str) -> None:
 def test_accepts_horizontal_tab_in_http_header_value() -> None:
     data = valid_scenario()
     data["events"][0]["headers"] = {"X-Custom": "first\tsecond"}
-    assert validate_scenario(data)["events"][0]["headers"]["X-Custom"] == "first\\tsecond"
+    assert validate_scenario(data)["events"][0]["headers"]["X-Custom"] == "first\tsecond"
 
 
 @pytest.mark.parametrize("field", ["event_id", "id"])
