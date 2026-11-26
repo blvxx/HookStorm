@@ -103,6 +103,11 @@ def _parser() -> argparse.ArgumentParser:
         action="store_true",
         help="check DNS/TCP and HTTPS TLS connectivity without sending an HTTP request",
     )
+    doctor.add_argument(
+        "--verbose",
+        action="store_true",
+        help="show DNS addresses, per-address timing, and TLS certificate details (implies --connect)",
+    )
     doctor.add_argument("--timeout", type=float, default=5.0, help="socket timeout in seconds (0.1–30; default: 5)")
 
     validate = subparsers.add_parser("validate", help="validate a scenario without sending requests")
@@ -316,13 +321,17 @@ def _doctor_command(args: argparse.Namespace) -> int:
         args.scenario,
         target=args.target,
         secret_env=args.secret_env,
-        connect=args.connect,
+        connect=args.connect or args.verbose,
+        verbose=args.verbose,
         timeout=args.timeout,
     )
     print(f"HookStorm doctor · {args.scenario}")
     for check in checks:
         mark = {"PASS": "✓", "FAIL": "✗", "WARN": "!", "INFO": "i"}[check.status]
         print(f" {mark} {check.label}: {check.message}")
+        if args.verbose:
+            for detail in check.details:
+                print(f"    {detail}")
     failed = any(check.status == "FAIL" for check in checks)
     print("\nPreflight: " + ("NOT READY" if failed else "READY"))
     return 1 if failed else 0
