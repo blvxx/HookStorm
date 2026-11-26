@@ -35,7 +35,13 @@ def test_initialize_project_creates_valid_scenario_and_workflow(tmp_path) -> Non
     )
     assert env["HOOKSTORM_TARGET_URL"] == "${{ vars.HOOKSTORM_TARGET_URL }}"
     assert env["HOOKSTORM_SECRET"] == "${{ secrets.HOOKSTORM_SECRET }}"
-    assert "https://example" not in workflow_path.read_text(encoding="utf-8")
+    workflow_text = workflow_path.read_text(encoding="utf-8")
+    steps = workflow["jobs"]["webhook-regression"]["steps"]
+    preflight = next(step for step in steps if step.get("name") == "Preflight staging endpoint")
+    assert "hookstorm doctor" in preflight["run"]
+    assert "--connect" in preflight["run"]
+    assert "4aa0e8e2eba7189f6ccc6aa3e8e46d1b0c91efae" in workflow_text
+    assert "https://example" not in workflow_text
 
 
 def test_generated_workflow_bash_blocks_have_valid_syntax(tmp_path) -> None:
