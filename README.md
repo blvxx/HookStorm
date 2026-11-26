@@ -152,13 +152,14 @@ export HOOKSTORM_SECRET='your-staging-secret'
 hookstorm doctor scenarios/webhook.yaml
 ~~~
 
-Add `--connect` to check DNS, TCP, and HTTPS certificate verification:
+Add `--connect` for a compact socket check, or `--verbose` for detailed diagnostics:
 
 ~~~bash
 hookstorm doctor scenarios/webhook.yaml --connect
+hookstorm doctor scenarios/webhook.yaml --verbose
 ~~~
 
-The default `doctor` command does not contact the endpoint. The optional connection check sends no HTTP request or webhook event; it only opens a socket (and performs a TLS handshake for HTTPS). It cannot verify the application route, HTTP authentication, or the receiver's response.
+The default `doctor` command does not contact the endpoint. `--connect` resolves the host and opens a socket (plus a TLS handshake for HTTPS). `--verbose` implies `--connect` and reports each resolved IPv4 / IPv6 address, DNS lookup time, per-address TCP connection time, negotiated TLS version and cipher, certificate subject / issuer, and expiry date. It warns when an address fails while another succeeds, or when a certificate is nearing expiry. No HTTP request or webhook event is sent, so these checks cannot verify the application route, HTTP authentication, or the receiver's response.
 
 The demo receiver verifies the generic format and provider-compatible Stripe, GitHub, and Shopify signatures. Try the provider scenarios:
 

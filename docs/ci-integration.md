@@ -52,7 +52,13 @@ hookstorm doctor scenarios/webhook.yaml
 hookstorm doctor scenarios/webhook.yaml --connect
 ```
 
-The first command checks the scenario, target URL format, and required secret without network access. The second additionally resolves the host, opens a TCP connection, and verifies the TLS handshake and certificate for HTTPS. It does not send an HTTP request or webhook event, so it cannot validate the route, application-level authentication, or the handler's response. The command exits with code `1` when a required check fails.
+The first command checks the scenario, target URL format, and required secret without network access. The second additionally resolves the host, opens a TCP connection, and verifies the TLS handshake and certificate for HTTPS. Use `--verbose` when troubleshooting to list IPv4 / IPv6 addresses, timings, negotiated TLS details, certificate subject / issuer, and expiry date:
+
+```bash
+hookstorm doctor scenarios/webhook.yaml --verbose
+```
+
+Verbose mode implies `--connect`. It does not send an HTTP request or webhook event, so it cannot validate the route, application-level authentication, or the handler's response. The command exits with code `1` when a required check fails.
 
 ## 2. Configure the staging environment
 
