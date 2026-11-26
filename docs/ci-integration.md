@@ -62,7 +62,7 @@ The workflow runs for pushes to `main`, pull requests targeting `main`, and manu
 
 The sample workflow serializes runs for each Git ref to avoid competing main-branch runs racing to update the baseline cache. Baselines are data, not secrets. GitHub cache contents can be read by people who can open a pull request against the repository, so never put tokens, credentials, or private payloads into cached files. The exported HookStorm record excludes request payloads, headers, response bodies, and signing secrets, but it retains event identifiers and target metadata. Review identifiers and assertion values before sharing reports or baselines.
 
-GitHub documents that default-branch caches can be restored by other branches and that cache contents should not contain secrets. Untrusted pull request workflows should use restore-only cache access; the example follows that pattern and saves cache entries only after successful main-branch runs.
+GitHub documents [cache scope and security restrictions](https://docs.github.com/en/actions/reference/workflows-and-actions/dependency-caching), including that default-branch caches can be restored by other branches and must not contain secrets. Untrusted pull request workflows should use restore-only cache access; the example follows that pattern and saves cache entries only after successful main-branch runs. For general workflow hardening, see GitHub's [secure use reference](https://docs.github.com/en/actions/reference/security/secure-use), which recommends pinning actions to full commit SHAs.
 
 ## 5. Tune and troubleshoot
 
