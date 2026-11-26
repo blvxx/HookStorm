@@ -303,7 +303,7 @@ def _init_command(args: argparse.Namespace) -> int:
     print("     Add required reviewers to protect staging credentials.")
     print("  3. Set HOOKSTORM_TARGET_URL and, for signed scenarios, HOOKSTORM_SECRET locally:")
     print(f"     hookstorm doctor {args.scenario_path}")
-    print("     Add --connect to check DNS/TCP/TLS without sending an HTTP request.")
+    print("     Add --connect for a socket check, or --verbose for DNS/IP timing and TLS certificate details.")
     if not args.no_workflow:
         print(f"  4. Commit {args.workflow_path} and {args.scenario_path}.")
         print("  5. Run the workflow on main once to create its first baseline.")
