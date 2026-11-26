@@ -500,6 +500,11 @@ def load_history_export(source: str | Path) -> dict[str, Any]:
     for index, delivery in enumerate(result["deliveries"]):
         if not isinstance(delivery, dict) or not isinstance(delivery.get("attempts", []), list):
             raise HistoryError(f"Baseline delivery {index} has an invalid structure")
+        for attempt_index, attempt in enumerate(delivery.get("attempts", [])):
+            if not isinstance(attempt, dict):
+                raise HistoryError(
+                    f"Baseline delivery {index} attempt {attempt_index} has an invalid structure"
+                )
 
     try:
         safe_result = _sanitize_result(result)
