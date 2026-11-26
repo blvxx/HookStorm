@@ -11,8 +11,8 @@ from pathlib import Path
 
 from hookstorm import __version__
 from hookstorm.config import load_scenario
-from hookstorm.report import render_json, write_report
 from hookstorm.pytest_export import write_pytest
+from hookstorm.report import render_json, write_report
 from hookstorm.runner import run_scenario
 
 
