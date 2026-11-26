@@ -185,6 +185,15 @@ def test_standard_webhooks_timestamp_offset_is_supported() -> None:
     assert normalized["delivery"]["signature_timestamp_offset_seconds"] == -60
 
 
+def test_standard_webhooks_event_id_rejects_period_delimiter() -> None:
+    data = valid_scenario()
+    data["delivery"] = {"signature_provider": "standard_webhooks", "signature": "valid"}
+    data["events"][0]["event_id"] = "evt.with.periods"
+
+    with pytest.raises(ScenarioError, match="must not contain"):
+        validate_scenario(data)
+
+
 def test_rejects_standard_webhooks_managed_headers() -> None:
     data = valid_scenario()
     data["events"][0]["headers"] = {"webhook-signature": "attacker"}
