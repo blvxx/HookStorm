@@ -36,9 +36,9 @@ Provider formats:
 
 | Provider | Header | Signed content / encoding |
 |---|---|---|
-| `stripe` | `Stripe-Signature` | HMAC-SHA256 over `<unix_timestamp>.<raw_body>`; header contains `t=<timestamp>,v1=<hex>`. |
-| `github` | `X-Hub-Signature-256` | HMAC-SHA256 over the raw body, hex encoded with the `sha256=` prefix. |
-| `shopify` | `X-Shopify-Hmac-Sha256` | HMAC-SHA256 over the raw body, Base64 encoded. |
+| [`stripe`](https://docs.stripe.com/webhooks/signature) | `Stripe-Signature` | HMAC-SHA256 over `<unix_timestamp>.<raw_body>`; header contains `t=<timestamp>,v1=<hex>`. |
+| [`github`](https://docs.github.com/en/webhooks/using-webhooks/validating-webhook-deliveries) | `X-Hub-Signature-256` | HMAC-SHA256 over the raw body, hex encoded with the `sha256=` prefix. |
+| [`shopify`](https://shopify.dev/docs/apps/build/webhooks/verify-deliveries) | `X-Shopify-Hmac-Sha256` | HMAC-SHA256 over the raw body, Base64 encoded. |
 
 `signature: invalid` changes the digest while keeping the provider's header shape. `signature: missing` omits the signature header. Stripe's timestamp offset allows testing receivers that enforce timestamp tolerance; HookStorm's demo receiver rejects signatures more than 300 seconds from its current clock.
 
