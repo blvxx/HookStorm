@@ -191,7 +191,7 @@ def _check_connectivity_detailed(
                     details.append("  Certificate expiry: unavailable")
 
             successful += 1
-        except (OSError, ssl.SSLError, ValueError) as exc:
+        except (OSError, ValueError) as exc:
             failed += 1
             details.append(
                 f"{family_name} {address}: connection failed "
