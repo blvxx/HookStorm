@@ -57,6 +57,19 @@ def _parser() -> argparse.ArgumentParser:
     history_compare.add_argument("--current", default="latest")
     history_compare.add_argument("--latency-threshold-pct", type=float, default=20.0)
     history_compare.add_argument("--db", help="history database path")
+    history_compare_file = history_sub.add_parser(
+        "compare-file", help="compare the latest run against a portable JSON baseline"
+    )
+    history_compare_file.add_argument("baseline_file", help="exported HookStorm baseline JSON")
+    history_compare_file.add_argument("--current", default="latest")
+    history_compare_file.add_argument("--latency-threshold-pct", type=float, default=20.0)
+    history_compare_file.add_argument("--db", help="history database path")
+    history_export = history_sub.add_parser(
+        "export", help="export one sanitized run as a portable JSON baseline"
+    )
+    history_export.add_argument("run_id", help="run ID or 'latest'")
+    history_export.add_argument("--output", required=True, help="output JSON path")
+    history_export.add_argument("--db", help="history database path")
 
     validate = subparsers.add_parser("validate", help="validate a scenario without sending requests")
     validate.add_argument("scenario", help="path to a scenario YAML file")
@@ -140,13 +153,7 @@ def _history_show_command(args: argparse.Namespace) -> int:
     return 0
 
 
-def _history_compare_command(args: argparse.Namespace) -> int:
-    comparison = compare_history_runs(
-        args.baseline_run_id,
-        current_run_id=args.current,
-        path=args.db,
-        latency_threshold_pct=args.latency_threshold_pct,
-    )
+def _print_history_comparison(comparison: dict) -> int:
     print(
         f"Comparing {comparison['current_run_id']} against baseline "
         f"{comparison['baseline_run_id']}"
@@ -196,6 +203,34 @@ def _history_compare_command(args: argparse.Namespace) -> int:
     return 1 if comparison["has_regressions"] else 0
 
 
+def _history_compare_command(args: argparse.Namespace) -> int:
+    comparison = compare_history_runs(
+        args.baseline_run_id,
+        current_run_id=args.current,
+        path=args.db,
+        latency_threshold_pct=args.latency_threshold_pct,
+    )
+    return _print_history_comparison(comparison)
+
+
+def _history_compare_file_command(args: argparse.Namespace) -> int:
+    comparison = compare_history_file(
+        args.baseline_file,
+        current_run_id=args.current,
+        path=args.db,
+        latency_threshold_pct=args.latency_threshold_pct,
+    )
+    print(f"Baseline file: {Path(args.baseline_file).expanduser()}")
+    return _print_history_comparison(comparison)
+
+
+def _history_export_command(args: argparse.Namespace) -> int:
+    output = export_history_run(args.run_id, args.output, args.db)
+    print(f"Exported HookStorm baseline: {output}")
+    print(f"Run: {args.run_id}")
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
@@ -206,6 +241,10 @@ def main(argv: Sequence[str] | None = None) -> int:
                 return _history_show_command(args)
             if args.history_command == "compare":
                 return _history_compare_command(args)
+            if args.history_command == "compare-file":
+                return _history_compare_file_command(args)
+            if args.history_command == "export":
+                return _history_export_command(args)
 
         scenario = load_scenario(args.scenario)
         if args.command == "validate":
