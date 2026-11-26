@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import asyncio
+import base64
 import hashlib
 import hmac
 import json
@@ -66,13 +67,48 @@ def _matches_subset(actual: Any, expected: dict[str, Any]) -> tuple[bool, str | 
     return _match_json_value(actual, expected, "")
 
 
-def _signature(body: bytes, secret: str, mode: str) -> str | None:
+_SIGNATURE_HEADERS = {
+    "generic": "X-HookStorm-Signature",
+    "stripe": "Stripe-Signature",
+    "github": "X-Hub-Signature-256",
+    "shopify": "X-Shopify-Hmac-Sha256",
+}
+
+
+def _signature_headers(
+    body: bytes,
+    secret: str,
+    mode: str,
+    provider: str,
+    timestamp_offset_seconds: int = 0,
+) -> dict[str, str]:
+    """Build provider-compatible webhook signature headers from the exact request bytes."""
     if mode in {"none", "missing"}:
-        return None
-    digest = hmac.new(secret.encode("utf-8"), body, hashlib.sha256).hexdigest()
+        return {}
+
+    signed_payload = body
+    timestamp: int | None = None
+    if provider == "stripe":
+        timestamp = int(time.time()) + timestamp_offset_seconds
+        signed_payload = str(timestamp).encode("ascii") + b"." + body
+
+    digest = bytearray(
+        hmac.new(secret.encode("utf-8"), signed_payload, hashlib.sha256).digest()
+    )
     if mode == "invalid":
-        digest = ("0" if digest[0] != "0" else "1") + digest[1:]
-    return f"sha256={digest}"
+        digest[0] ^= 0x01
+    digest_bytes = bytes(digest)
+
+    if provider == "shopify":
+        value = base64.b64encode(digest_bytes).decode("ascii")
+    else:
+        hex_digest = digest_bytes.hex()
+        if provider == "stripe":
+            value = f"t={timestamp},v1={hex_digest}"
+        else:
+            value = f"sha256={hex_digest}"
+
+    return {_SIGNATURE_HEADERS[provider]: value}
 
 
 async def run_scenario(
@@ -100,6 +136,8 @@ async def run_scenario(
         "delay_ms": 0,
         "timeout_ms": 5_000,
         "signature": "none",
+        "signature_provider": "generic",
+        "signature_timestamp_offset_seconds": 0,
         "concurrency": 1,
     }
     retry = scenario["retry"]
@@ -134,17 +172,24 @@ async def run_scenario(
                 "x-event-type",
                 "x-hookstorm-attempt",
                 "x-hookstorm-signature",
+                "x-hub-signature-256",
+                "stripe-signature",
+                "x-shopify-hmac-sha256",
                 "x-hookstorm-duplicate-index",
             }
             for key, value in event["headers"].items():
                 if key.lower() not in reserved:
                     base_headers[key] = value
 
-            signature = _signature(event_body, secret or "", delivery_config["signature"])
-            if signature:
-                base_headers["X-HookStorm-Signature"] = signature
-            else:
-                base_headers.pop("X-HookStorm-Signature", None)
+            base_headers.update(
+                _signature_headers(
+                    event_body,
+                    secret or "",
+                    delivery_config["signature"],
+                    delivery_config["signature_provider"],
+                    delivery_config["signature_timestamp_offset_seconds"],
+                )
+            )
 
             event_deliveries: list[dict[str, Any]] = []
             for duplicate_index in range(delivery_config["duplicate_count"] + 1):
@@ -163,6 +208,7 @@ async def run_scenario(
                     started_attempt = time.perf_counter()
                     outcome = {
                         "attempt": attempt,
+                        "elapsed_ms": round((started_attempt - monotonic_started) * 1000, 2),
                         "status_code": None,
                         "latency_ms": 0.0,
                         "error": None,
@@ -220,6 +266,7 @@ async def run_scenario(
                         "event_id": event["event_id"],
                         "event_type": event["id"],
                         "duplicate_index": duplicate_index,
+                        "signature_provider": delivery_config["signature_provider"],
                         "attempts": attempts,
                         "passed": bool(last["passed"]),
                     }
