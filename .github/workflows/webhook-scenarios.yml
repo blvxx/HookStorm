@@ -1,0 +1,97 @@
+name: Webhook scenario tests
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "src/**"
+      - "examples/**"
+      - ".github/workflows/webhook-scenarios.yml"
+      - "pyproject.toml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "src/**"
+      - "examples/**"
+      - ".github/workflows/webhook-scenarios.yml"
+      - "pyproject.toml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  scenarios:
+    runs-on: ubuntu-latest
+    name: Local webhook integration scenarios
+    steps:
+      - uses: actions/checkout@v7
+      - uses: actions/setup-python@v7
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install HookStorm
+        run: python -m pip install .
+      - name: Run provider and delivery scenarios
+        shell: bash
+        env:
+          HOOKSTORM_SECRET: hookstorm-ci-test-secret
+        run: |
+          set -uo pipefail
+          mkdir -p test-results
+
+          python examples/receiver.py > test-results/receiver.log 2>&1 &
+          receiver_pid=$!
+          cleanup() {
+            kill "$receiver_pid" 2>/dev/null || true
+            wait "$receiver_pid" 2>/dev/null || true
+          }
+          trap cleanup EXIT
+
+          ready=0
+          for attempt in $(seq 1 30); do
+            if python -c "import socket; s=socket.create_connection(('127.0.0.1', 8000), timeout=0.25); s.close()" 2>/dev/null; then
+              ready=1
+              break
+            fi
+            sleep 0.5
+          done
+          if [ "$ready" -ne 1 ]; then
+            cat test-results/receiver.log
+            echo "Demo receiver did not start on 127.0.0.1:8000"
+            exit 1
+          fi
+
+          failed=0
+          run_case() {
+            scenario="$1"
+            target="$2"
+            name="$(basename "$scenario" .yaml)"
+            echo "::group::\${name}"
+            if hookstorm run "$scenario" --target "$target" --format junit --output "test-results/${name}.xml"; then
+              echo "Scenario ${name}: PASS"
+            else
+              code=$?
+              echo "::error::Scenario ${name} failed with exit code ${code}"
+              failed=1
+            fi
+            echo "::endgroup::"
+          }
+
+          run_case examples/stripe-signature.yaml http://127.0.0.1:8000/webhook/signature/stripe
+          run_case examples/github-signature.yaml http://127.0.0.1:8000/webhook/signature/github
+          run_case examples/shopify-signature.yaml http://127.0.0.1:8000/webhook/signature/shopify
+          run_case examples/invalid-signature.yaml http://127.0.0.1:8000/webhook/signature
+          run_case examples/duplicate-delivery.yaml http://127.0.0.1:8000/webhook
+          run_case examples/out-of-order.yaml http://127.0.0.1:8000/webhook
+          run_case examples/payment-retry.yaml http://127.0.0.1:8000/webhook/flaky
+
+          exit "$failed"
+      - name: Upload JUnit reports
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: hookstorm-webhook-junit
+          path: test-results/*.xml
+          if-no-files-found: error
+          retention-days: 14
