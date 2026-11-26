@@ -296,7 +296,7 @@ def _init_command(args: argparse.Namespace) -> int:
     print("     Variable: HOOKSTORM_TARGET_URL")
     print("     Secret:   HOOKSTORM_SECRET")
     print("     Add required reviewers to protect staging credentials.")
-    print("  3. Set HOOKSTORM_TARGET_URL and HOOKSTORM_SECRET locally, then run:")
+    print("  3. Set HOOKSTORM_TARGET_URL and, for signed scenarios, HOOKSTORM_SECRET locally:")
     print(f"     hookstorm doctor {args.scenario_path}")
     print("     Add --connect to check DNS/TCP/TLS without sending an HTTP request.")
     if not args.no_workflow:
