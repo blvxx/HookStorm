@@ -1,0 +1,24 @@
+version: 1
+name: Database-backed idempotency verification
+description: Sends the same event more than once and checks the receiver's SQLite state.
+delivery:
+  duplicate_count: 2
+retry:
+  max_attempts: 2
+  backoff_ms: 100
+events:
+  - id: order.created
+    event_id: evt_order_2001
+    payload:
+      order_id: order_2001
+      total: 12500
+    expect_status: [200]
+    expect_json:
+      duplicate: false
+    expect_duplicate_json:
+      duplicate: true
+verify:
+  url: http://127.0.0.1:8000/__hookstorm/state
+  expect_status: [200]
+  expect_json:
+    processed_events: 1
