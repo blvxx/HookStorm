@@ -75,6 +75,8 @@ def receiver() -> Iterator[tuple[str, dict]]:
                 status, payload = 503, {"retry": True}
             elif self.path.startswith("/signature/"):
                 provider = self.path.rsplit("/", 1)[-1]
+                if provider == "standard-flaky":
+                    provider = "standard"
                 secret = b"test-secret"
                 valid = False
                 if provider == "stripe":
