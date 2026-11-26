@@ -26,8 +26,8 @@ Unknown keys are rejected to catch typos early. Scenarios can be exported with `
 | delay_ms | 0 | Delay before each request, 0–60,000 ms. |
 | timeout_ms | 5000 | HTTP request timeout, 1–300,000 ms. |
 | signature | none | none, valid, invalid, or missing. |
-| signature_provider | generic | generic, stripe, github, or shopify. |
-| signature_timestamp_offset_seconds | 0 | Stripe only; shifts the signed Unix timestamp by -86,400 to +86,400 seconds for replay-window tests. |
+| signature_provider | generic | generic, stripe, github, shopify, or standard_webhooks. |
+| signature_timestamp_offset_seconds | 0 | Stripe and Standard Webhooks; shifts the signed attempt timestamp by -86,400 to +86,400 seconds for replay-window tests. |
 
 Delivery settings may be global or defined per event. Per-event settings override global settings. The `concurrency` setting is global only. Retries and duplicate deliveries belonging to one event stay sequential; independent events may overlap. The report keeps events in scenario order even when requests finish out of order.
 
@@ -35,13 +35,16 @@ For signature valid or invalid, set `HOOKSTORM_SECRET` in the shell. HookStorm s
 
 Provider formats:
 
-| Provider | Header | Signed content / encoding |
+| Provider | Headers | Signed content / encoding |
 |---|---|---|
 | [`stripe`](https://docs.stripe.com/webhooks/signature) | `Stripe-Signature` | HMAC-SHA256 over `<unix_timestamp>.<raw_body>`; header contains `t=<timestamp>,v1=<hex>`. |
 | [`github`](https://docs.github.com/en/webhooks/using-webhooks/validating-webhook-deliveries) | `X-Hub-Signature-256` | HMAC-SHA256 over the raw body, hex encoded with the `sha256=` prefix. |
 | [`shopify`](https://shopify.dev/docs/apps/build/webhooks/verify-deliveries) | `X-Shopify-Hmac-Sha256` | HMAC-SHA256 over the raw body, Base64 encoded. |
+| [`standard_webhooks`](https://www.standardwebhooks.com/) | `webhook-id`, `webhook-timestamp`, `webhook-signature` | HMAC-SHA256 over `<webhook-id>.<unix_timestamp>.<raw_body>`; signature is `v1,<base64>`. |
 
-`signature: invalid` changes the digest while keeping the provider's header shape. `signature: missing` omits the signature header. Stripe's timestamp offset allows testing receivers that enforce timestamp tolerance; HookStorm's demo receiver rejects signatures more than 300 seconds from its current clock.
+For `standard_webhooks`, `HOOKSTORM_SECRET` must use the Standard Webhooks `whsec_` prefix followed by Base64-encoded key material. The decoded HMAC key must be 24–64 bytes. HookStorm sends the scenario's event ID as `webhook-id`, keeps it stable across retries, and generates a fresh `webhook-timestamp` and signature for every delivery attempt. A single v1 signature is generated per attempt; key rotation and asymmetric `v1a` signing are not currently implemented.
+
+`signature: invalid` changes the digest while keeping the provider's header shape. `signature: missing` omits the provider signature headers. Timestamp offsets let you test receivers that enforce timestamp tolerance; the demo receiver rejects signed timestamps more than 300 seconds from its current clock.
 
 ## Retry settings
 
@@ -51,7 +54,7 @@ Provider formats:
 | backoff_ms | 0 | Base exponential backoff, 0–60,000 ms; each actual wait is capped at 60 seconds. |
 | retry_on | [408, 429, 500, 502, 503, 504] | HTTP statuses that trigger another attempt. Timeouts and transport errors are retried while attempts remain. |
 
-Backoff grows exponentially as backoff_ms * 2^(attempt - 1), capped at 60 seconds per wait. Retries preserve the event ID and request body. HookStorm rejects scenarios whose worst-case delivery attempts exceed 20,000.
+Backoff grows exponentially as backoff_ms * 2^(attempt - 1), capped at 60 seconds per wait. Retries preserve the event ID and request body. For timestamped signing formats (Stripe and Standard Webhooks), HookStorm regenerates the timestamp and signature for each attempt. HookStorm rejects scenarios whose worst-case delivery attempts exceed 20,000.
 
 ## Business-state verification
 
@@ -114,6 +117,6 @@ HookStorm sends Content-Type, User-Agent, X-HookStorm-Run, X-Event-ID, X-Event-T
 
 Use `hookstorm run ... --format junit --output test-results/scenario.xml` to export each delivery as a JUnit `testcase`. Duplicate deliveries are separate testcases. HTTP status or JSON assertion mismatches are reported as `failure` elements; timeouts and transport errors without an HTTP response are reported as `error` elements. The report includes event type, event ID, duplicate index, attempt count in failure details, and request latency. It does not include payloads, headers, response bodies, secrets, or URL query strings.
 
-The repository's `Webhook scenario tests` GitHub Actions workflow starts the local demo receiver, executes the provider-signature, retry, duplicate-delivery, and out-of-order examples, and uploads the XML files as a workflow artifact.
+The repository's `Webhook scenario tests` GitHub Actions workflow starts the local demo receiver, executes provider-signature examples (including Standard Webhooks), retry and duplicate-delivery cases, a commit-then-drop ambiguous-acknowledgement case, business-state verification, and out-of-order delivery, then uploads the XML files as a workflow artifact.
 
 For use in another application repository, start from `examples/ci/webhook-regression.yaml` and adapt it to the application's staging webhook contract. The companion `examples/ci/webhook-regression.yml` is a copy-ready GitHub Actions workflow; see [CI integration for application repositories](ci-integration.md) for environment variables, secrets, baseline initialization, and fork-PR behavior.
