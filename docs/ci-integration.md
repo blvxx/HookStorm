@@ -52,7 +52,7 @@ hookstorm doctor scenarios/webhook.yaml
 hookstorm doctor scenarios/webhook.yaml --connect
 ```
 
-The first command checks the scenario, target URL format, and required secret without network access. The second additionally resolves the host, opens a TCP connection, and verifies the TLS handshake and certificate for HTTPS. Use `--verbose` when troubleshooting to list IPv4 / IPv6 addresses, timings, negotiated TLS details, certificate subject / issuer, and expiry date:
+The first command checks the scenario, target URL format, required webhook signing secret, and any verification-probe credentials. For `verify.auth`, it confirms the named environment variable is present and well-formed and rejects authenticated remote HTTP URLs; it never prints or transmits the credential. It does not verify whether the remote application accepts the token. The second command additionally resolves the webhook target host, opens a TCP connection, and verifies the TLS handshake and certificate for HTTPS. Use `--verbose` when troubleshooting to list IPv4 / IPv6 addresses, timings, negotiated TLS details, certificate subject / issuer, and expiry date:
 
 ```bash
 hookstorm doctor scenarios/webhook.yaml --verbose
@@ -81,6 +81,8 @@ Add the following values to that environment:
 |---|---|---|
 | `HOOKSTORM_TARGET_URL` | Variable | Full URL of a dedicated staging/test webhook endpoint. Do not include credentials or query-string tokens. |
 | `HOOKSTORM_SECRET` | Secret | HMAC secret used by signed scenarios (`signature: valid` or `invalid`). Unsigned scenarios do not require it. |
+| `HOOKSTORM_VERIFY_TOKEN` | Optional secret | Example Bearer credential referenced by `verify.auth.token_env`; use the exact variable name from your scenario. |
+| `HOOKSTORM_VERIFY_API_KEY` | Optional secret | Example API key referenced by `verify.auth.key_env`; use the exact variable name from your scenario. |
 | `HOOKSTORM_SCENARIO` | Optional variable | Scenario path. Defaults to `scenarios/webhook.yaml`. |
 | `HOOKSTORM_LATENCY_THRESHOLD_PCT` | Optional variable | Allowed latency increase. Defaults to `20`. |
 

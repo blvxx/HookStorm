@@ -171,6 +171,8 @@ hookstorm doctor scenarios/webhook.yaml --verbose --format json
 
 The JSON document has `schema_version: 1`, an overall `status` / `ready` flag, a stable `summary`, a `network` section describing whether a connection check was requested and performed, and a `checks` array. Each check contains `status`, `label`, `message`, and `details`. The command still returns exit code `0` when ready and `1` when a required check fails; argument/configuration errors use exit code `2`. JSON is written to stdout without text banners, and secret values or the full target URL are not included.
 
+When a scenario defines `verify.auth`, doctor checks that the named Bearer / API-key environment variable is present and follows the accepted credential format. It also requires HTTPS for authenticated non-loopback verification URLs. These are local checks only: doctor does not send the credential or test whether the application accepts it.
+
 The demo receiver verifies the generic format and provider-compatible Stripe, GitHub, and Shopify signatures. Try the provider scenarios:
 
 ~~~bash

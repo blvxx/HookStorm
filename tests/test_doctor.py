@@ -63,6 +63,140 @@ def test_preflight_checks_config_without_contacting_network(tmp_path, monkeypatc
     assert "private" not in " ".join(check.message for check in checks)
 
 
+def _verification_scenario_file(
+    tmp_path: Path,
+    *,
+    url: str = "https://staging.example.test/__hookstorm/state",
+    auth: str = """  auth:
+    type: bearer
+    token_env: HOOKSTORM_VERIFY_TOKEN
+""",
+) -> Path:
+    path = _scenario_file(tmp_path, signature="none")
+    content = path.read_text(encoding="utf-8")
+    content += (
+        "verify:\n"
+        f"  url: {url}\n"
+        "  expect_status: [200]\n"
+        "  expect_json: { processed_events: 1 }\n"
+        + auth
+    )
+    path.write_text(content, encoding="utf-8")
+    return path
+
+
+def test_doctor_checks_bearer_auth_without_sending_credentials(tmp_path) -> None:
+    scenario = _verification_scenario_file(tmp_path)
+    secret = "not-for-output-token"
+    checks = run_preflight(
+        scenario,
+        target="https://staging.example.test/webhook",
+        environment={
+            "HOOKSTORM_VERIFY_TOKEN": secret,
+        },
+    )
+
+    check = _check(checks, "Verification auth", "PASS")
+    assert "HOOKSTORM_VERIFY_TOKEN is set and valid" in check.message
+    assert "value hidden" in check.message
+    assert "no HTTP request was sent" in " ".join(check.details)
+    assert "does not verify whether the endpoint accepts" in " ".join(check.details)
+    assert secret not in str(checks)
+
+
+def test_doctor_fails_when_verification_credential_is_missing(tmp_path) -> None:
+    scenario = _verification_scenario_file(tmp_path)
+    checks = run_preflight(
+        scenario,
+        target="https://staging.example.test/webhook",
+        environment={},
+    )
+
+    check = _check(checks, "Verification auth", "FAIL")
+    assert "HOOKSTORM_VERIFY_TOKEN" in check.message
+
+
+@pytest.mark.parametrize(
+    "credential",
+    ["", "contains whitespace", "токен", "x" * 8_193],
+)
+def test_doctor_rejects_malformed_verification_credential(
+    tmp_path, credential: str
+) -> None:
+    scenario = _verification_scenario_file(tmp_path)
+    checks = run_preflight(
+        scenario,
+        target="https://staging.example.test/webhook",
+        environment={"HOOKSTORM_VERIFY_TOKEN": credential},
+    )
+
+    assert _check(checks, "Verification auth", "FAIL")
+    if credential:
+        assert credential not in str(checks)
+
+
+def test_doctor_checks_api_key_environment_variable(tmp_path) -> None:
+    scenario = _verification_scenario_file(
+        tmp_path,
+        auth="""  auth:
+    type: api_key
+    key_env: HOOKSTORM_VERIFY_API_KEY
+    header: X-Client-Key
+""",
+    )
+    secret = "api-key-hidden"
+    checks = run_preflight(
+        scenario,
+        target="https://staging.example.test/webhook",
+        environment={"HOOKSTORM_VERIFY_API_KEY": secret},
+    )
+
+    check = _check(checks, "Verification auth", "PASS")
+    assert "HOOKSTORM_VERIFY_API_KEY is set and valid" in check.message
+    assert secret not in str(checks)
+
+
+def test_doctor_rejects_remote_http_for_authenticated_verification(tmp_path) -> None:
+    scenario = _verification_scenario_file(
+        tmp_path,
+        url="http://staging.example.test/__hookstorm/state",
+    )
+    checks = run_preflight(
+        scenario,
+        target="http://127.0.0.1:8000/webhook",
+        environment={"HOOKSTORM_VERIFY_TOKEN": "safe-test-token"},
+    )
+
+    check = _check(checks, "Verification auth", "FAIL")
+    assert "require HTTPS" in check.message
+
+
+def test_doctor_allows_http_for_loopback_authenticated_verification(tmp_path) -> None:
+    scenario = _verification_scenario_file(
+        tmp_path,
+        url="http://127.0.0.1:8000/__hookstorm/state",
+    )
+    checks = run_preflight(
+        scenario,
+        target="http://127.0.0.1:8000/webhook",
+        environment={"HOOKSTORM_VERIFY_TOKEN": "safe-test-token"},
+    )
+
+    assert _check(checks, "Verification auth", "PASS")
+
+
+def test_doctor_reports_when_verification_auth_is_not_configured(tmp_path) -> None:
+    scenario = _verification_scenario_file(tmp_path, auth="")
+    checks = run_preflight(
+        scenario,
+        target="http://127.0.0.1:8000/webhook",
+        environment={},
+    )
+
+    check = _check(checks, "Verification auth", "PASS")
+    assert "unauthenticated" in check.message
+
+
 def test_preflight_fails_when_target_or_required_secret_is_missing(tmp_path) -> None:
     scenario = _scenario_file(tmp_path)
     checks = run_preflight(scenario, environment={})
@@ -196,6 +330,24 @@ def test_doctor_cli_does_not_print_target_tokens_or_secret(tmp_path, monkeypatch
     assert "full URL hidden" in output
 
 
+def test_doctor_json_redacts_verification_credentials(tmp_path, monkeypatch, capsys) -> None:
+    scenario = _verification_scenario_file(tmp_path)
+    secret = "json-output-must-not-contain-this"
+    monkeypatch.setenv("HOOKSTORM_TARGET_URL", "https://staging.example.test/webhook")
+    monkeypatch.setenv("HOOKSTORM_VERIFY_TOKEN", secret)
+
+    assert main(["doctor", str(scenario), "--format", "json"]) == 0
+
+    output = capsys.readouterr().out
+    document = json.loads(output)
+    auth_check = next(
+        item for item in document["checks"] if item["label"] == "Verification auth"
+    )
+    assert auth_check["status"] == "PASS"
+    assert "HOOKSTORM_VERIFY_TOKEN" in auth_check["message"]
+    assert secret not in output
+
+
 def test_doctor_cli_returns_one_for_missing_staging_settings(tmp_path, monkeypatch, capsys) -> None:
     scenario = _scenario_file(tmp_path)
     monkeypatch.delenv("HOOKSTORM_TARGET_URL", raising=False)
@@ -245,7 +397,7 @@ def test_verbose_connectivity_reports_ipv4_ipv6_and_partial_failures(monkeypatch
 
     assert result.status == "WARN"
     assert result.message == "1/2 address(es) reachable; 1 address(es) failed"
-    joined = "\\n".join(result.details)
+    joined = "\n".join(result.details)
     assert "DNS IPv4: 192.0.2.10" in joined
     assert "DNS IPv6: 2001:db8::10" in joined
     assert "IPv4 192.0.2.10: TCP connected in" in joined
@@ -304,7 +456,7 @@ def test_verbose_https_reports_tls_and_certificate_metadata(monkeypatch) -> None
 
     assert result.status == "PASS"
     assert result.message == "all 1 resolved address(es) reachable with verified TLS"
-    joined = "\\n".join(result.details)
+    joined = "\n".join(result.details)
     assert "TLSv1.3" in joined
     assert "cipher: TLS_AES_128_GCM_SHA256" in joined
     assert "Certificate subject: commonName=staging.example.test" in joined
@@ -393,11 +545,16 @@ def test_doctor_json_output_is_versioned_and_secret_safe(
     }
     assert document["summary"] == {
         "total_checks": len(document["checks"]),
-        "passed": 3,
+        "passed": 4,
         "failed": 0,
         "warnings": 1,
         "info": 1,
     }
+    auth_check = next(
+        item for item in document["checks"] if item["label"] == "Verification auth"
+    )
+    assert auth_check["status"] == "PASS"
+    assert "not required" in auth_check["message"]
     assert all(
         set(check) == {"status", "label", "message", "details"}
         and isinstance(check["details"], list)
