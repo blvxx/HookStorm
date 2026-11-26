@@ -142,7 +142,23 @@ hookstorm init --signature-provider github \\
 
 Edit the generated scenario to match your actual payload and response. Then configure the GitHub `staging` Environment with `HOOKSTORM_TARGET_URL` as a variable and `HOOKSTORM_SECRET` as a secret. The wizard never writes endpoint URLs or signing secrets into generated files. Existing files are preserved; use `--force` only when you intentionally want to replace both generated files. Use `--no-workflow` to generate only the scenario.
 
-The generated workflow targets a dedicated staging endpoint with the explicit `--allow-remote` opt-in, skips fork-originated PRs, and updates the baseline only from trusted successful runs on `main`. Protect the staging Environment with required reviewers before enabling it for same-repository pull requests. See [CI integration for application repositories](docs/ci-integration.md) for the complete setup.
+The generated workflow targets a dedicated staging endpoint with the explicit `--allow-remote` opt-in, skips fork-originated PRs, and updates the baseline only from trusted successful runs on `main`. Before sending any webhook event, its preflight step validates the scenario, checks that the required environment variables are present, and verifies staging DNS/TCP/TLS connectivity. Protect the staging Environment with required reviewers before enabling it for same-repository pull requests. See [CI integration for application repositories](docs/ci-integration.md) for the complete setup.
+
+Run the same checks locally before the first integration run. Set the endpoint and, for signed scenarios, the HMAC secret:
+
+~~~bash
+export HOOKSTORM_TARGET_URL='https://staging.example.com/webhooks/test'
+export HOOKSTORM_SECRET='your-staging-secret'
+hookstorm doctor scenarios/webhook.yaml
+~~~
+
+Add `--connect` to check DNS, TCP, and HTTPS certificate verification:
+
+~~~bash
+hookstorm doctor scenarios/webhook.yaml --connect
+~~~
+
+The default `doctor` command does not contact the endpoint. The optional connection check sends no HTTP request or webhook event; it only opens a socket (and performs a TLS handshake for HTTPS). It cannot verify the application route, HTTP authentication, or the receiver's response.
 
 The demo receiver verifies the generic format and provider-compatible Stripe, GitHub, and Shopify signatures. Try the provider scenarios:
 
