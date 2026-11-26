@@ -48,7 +48,7 @@ CLI exit code (0 passed, 1 assertions failed, 2 invalid input/configuration)
 - Provider signing formats match Stripe, GitHub, and Shopify webhook headers. These are request generators for authorized test endpoints, not a replacement for each provider's SDK or a general receiver-side verification library.
 - JSON object assertions support recursive subset matching; arrays are compared exactly and in order.
 - A passing status or JSON assertion does not prove the business side effect happened exactly once; verify it independently in your test environment.
-- doctor --connect confirms socket reachability and TLS setup only. It does not verify HTTP routing, application authentication, or webhook handler behavior. Verbose diagnostics check a bounded number of resolved addresses and warn about partial address failures or certificates nearing expiry.
+- doctor checks configured verification credential presence and syntax, and enforces HTTPS for authenticated remote probes. It does not send credentials or confirm that the application accepts them. doctor --connect confirms socket reachability and TLS setup only; it does not verify HTTP routing or webhook handler behavior. Verbose diagnostics check a bounded number of resolved addresses and warn about partial address failures or certificates nearing expiry.
 
 
 ## CI integration
