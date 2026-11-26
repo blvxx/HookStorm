@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import argparse
 import asyncio
+import json
 import os
 import sys
 from collections.abc import Sequence
@@ -11,7 +12,7 @@ from pathlib import Path
 
 from hookstorm import __version__
 from hookstorm.config import load_scenario
-from hookstorm.doctor import run_preflight
+from hookstorm.doctor import build_preflight_document, run_preflight
 from hookstorm.history import (
     HistoryError,
     compare_history_file,
@@ -109,6 +110,12 @@ def _parser() -> argparse.ArgumentParser:
         help="show DNS addresses, per-address timing, and TLS certificate details (implies --connect)",
     )
     doctor.add_argument("--timeout", type=float, default=5.0, help="socket timeout in seconds (0.1–30; default: 5)")
+    doctor.add_argument(
+        "--format",
+        choices=("text", "json"),
+        default="text",
+        help="output format (default: text)",
+    )
 
     validate = subparsers.add_parser("validate", help="validate a scenario without sending requests")
     validate.add_argument("scenario", help="path to a scenario YAML file")
@@ -317,6 +324,7 @@ def _doctor_command(args: argparse.Namespace) -> int:
     if not 0.1 <= args.timeout <= 30:
         print("HookStorm doctor error: --timeout must be between 0.1 and 30 seconds", file=sys.stderr)
         return 2
+    network_mode = "verbose" if args.verbose else "connect" if args.connect else "none"
     checks = run_preflight(
         args.scenario,
         target=args.target,
@@ -325,16 +333,23 @@ def _doctor_command(args: argparse.Namespace) -> int:
         verbose=args.verbose,
         timeout=args.timeout,
     )
-    print(f"HookStorm doctor · {args.scenario}")
-    for check in checks:
-        mark = {"PASS": "✓", "FAIL": "✗", "WARN": "!", "INFO": "i"}[check.status]
-        print(f" {mark} {check.label}: {check.message}")
-        if args.verbose:
-            for detail in check.details:
-                print(f"    {detail}")
-    failed = any(check.status == "FAIL" for check in checks)
-    print("\nPreflight: " + ("NOT READY" if failed else "READY"))
-    return 1 if failed else 0
+    document = build_preflight_document(
+        checks,
+        args.scenario,
+        network_mode=network_mode,
+    )
+    if args.format == "json":
+        sys.stdout.write(json.dumps(document, ensure_ascii=False, indent=2) + "\\n")
+    else:
+        print(f"HookStorm doctor · {args.scenario}")
+        for check in checks:
+            mark = {"PASS": "✓", "FAIL": "✗", "WARN": "!", "INFO": "i"}[check.status]
+            print(f" {mark} {check.label}: {check.message}")
+            if args.verbose:
+                for detail in check.details:
+                    print(f"    {detail}")
+        print("\\nPreflight: " + document["status"])
+    return document["exit_code"]
 
 
 def main(argv: Sequence[str] | None = None) -> int:
