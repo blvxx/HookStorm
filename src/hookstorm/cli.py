@@ -339,7 +339,7 @@ def _doctor_command(args: argparse.Namespace) -> int:
         network_mode=network_mode,
     )
     if args.format == "json":
-        sys.stdout.write(json.dumps(document, ensure_ascii=False, indent=2) + "\\n")
+        sys.stdout.write(json.dumps(document, ensure_ascii=False, indent=2) + "\n")
     else:
         print(f"HookStorm doctor · {args.scenario}")
         for check in checks:
@@ -348,7 +348,7 @@ def _doctor_command(args: argparse.Namespace) -> int:
             if args.verbose:
                 for detail in check.details:
                     print(f"    {detail}")
-        print("\\nPreflight: " + document["status"])
+        print("\nPreflight: " + document["status"])
     return document["exit_code"]
 
 
