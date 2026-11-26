@@ -1,0 +1,21 @@
+version: 1
+name: Commit succeeded but acknowledgement was lost
+description: The receiver commits the business effect, drops the HTTP response, and receives the same event again on retry.
+retry:
+  max_attempts: 3
+  backoff_ms: 100
+events:
+  - id: order.created
+    event_id: evt_order_commit_ack_lost_001
+    payload:
+      order_id: order_ambiguous_001
+      total: 12500
+    expect_status: [200]
+    expect_json:
+      duplicate: true
+      effect_applied: false
+verify:
+  url: http://127.0.0.1:8000/__hookstorm/state
+  expect_status: [200]
+  expect_json:
+    processed_events: 1

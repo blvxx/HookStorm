@@ -138,7 +138,7 @@ def test_rejects_non_json_expected_values() -> None:
 
 
 
-@pytest.mark.parametrize("provider", ["generic", "stripe", "github", "shopify"])
+@pytest.mark.parametrize("provider", ["generic", "stripe", "github", "shopify", "standard_webhooks"])
 def test_accepts_supported_signature_providers(provider: str) -> None:
     data = valid_scenario()
     data["delivery"] = {"signature_provider": provider, "signature": "valid"}
@@ -171,6 +171,33 @@ def test_rejects_timestamp_offset_for_non_stripe_provider() -> None:
         "signature_timestamp_offset_seconds": 30,
     }
     with pytest.raises(ScenarioError, match="only be used with signature_provider: stripe"):
+        validate_scenario(data)
+
+
+def test_standard_webhooks_timestamp_offset_is_supported() -> None:
+    data = valid_scenario()
+    data["delivery"] = {
+        "signature_provider": "standard_webhooks",
+        "signature": "valid",
+        "signature_timestamp_offset_seconds": -60,
+    }
+    normalized = validate_scenario(data)
+    assert normalized["delivery"]["signature_timestamp_offset_seconds"] == -60
+
+
+def test_standard_webhooks_event_id_rejects_period_delimiter() -> None:
+    data = valid_scenario()
+    data["delivery"] = {"signature_provider": "standard_webhooks", "signature": "valid"}
+    data["events"][0]["event_id"] = "evt.with.periods"
+
+    with pytest.raises(ScenarioError, match="must not contain"):
+        validate_scenario(data)
+
+
+def test_rejects_standard_webhooks_managed_headers() -> None:
+    data = valid_scenario()
+    data["events"][0]["headers"] = {"webhook-signature": "attacker"}
+    with pytest.raises(ScenarioError, match="may not override"):
         validate_scenario(data)
 
 
@@ -326,3 +353,22 @@ def test_rejects_non_mapping_verification_auth() -> None:
     with pytest.raises(ScenarioError, match="verify.auth"):
         validate_scenario(data)
 
+
+
+
+def test_per_event_schedule_defaults_to_zero_and_accepts_bounded_offset() -> None:
+    data = valid_scenario()
+    normalized = validate_scenario(data)
+    assert normalized["events"][0]["schedule_after_ms"] == 0
+
+    data["events"][0]["schedule_after_ms"] = 300_000
+    normalized = validate_scenario(data)
+    assert normalized["events"][0]["schedule_after_ms"] == 300_000
+
+
+@pytest.mark.parametrize("offset", [-1, 300_001, True, 1.5, "100"])
+def test_rejects_invalid_per_event_schedule_offset(offset: object) -> None:
+    data = valid_scenario()
+    data["events"][0]["schedule_after_ms"] = offset
+    with pytest.raises(ScenarioError, match="schedule_after_ms"):
+        validate_scenario(data)

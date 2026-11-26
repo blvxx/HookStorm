@@ -5,12 +5,12 @@ build-backend = "setuptools.build_meta"
 [project]
 name = "hookstorm"
 version = "0.1.0"
-description = "A local-first chaos testing CLI for webhook reliability and delivery behavior."
+description = "A local-first webhook reliability and idempotency chaos-testing CLI."
 readme = "README.md"
 requires-python = ">=3.11"
 license = "MIT"
 authors = [{ name = "HookStorm Contributors" }]
-keywords = ["webhooks", "testing", "chaos-engineering", "http", "qa", "reliability"]
+keywords = ["webhooks", "testing", "chaos-engineering", "http", "qa", "reliability", "idempotency", "standard-webhooks"]
 classifiers = [
   "Development Status :: 3 - Alpha",
   "Environment :: Console",

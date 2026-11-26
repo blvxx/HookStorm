@@ -45,7 +45,7 @@ def _parser() -> argparse.ArgumentParser:
     init.add_argument("--workflow-path", default=".github/workflows/webhook-regression.yml")
     init.add_argument(
         "--signature-provider",
-        choices=("generic", "stripe", "github", "shopify"),
+        choices=("generic", "stripe", "github", "shopify", "standard_webhooks"),
         help="webhook signature format (prompted in an interactive terminal; defaults to generic)",
     )
     init.add_argument("--event-type", default="test.ping")
@@ -298,7 +298,9 @@ def _init_command(args: argparse.Namespace) -> int:
     signature_provider = args.signature_provider
     if signature_provider is None and sys.stdin.isatty():
         try:
-            answer = input("Signature provider [generic/stripe/github/shopify] (generic): ").strip()
+            answer = input(
+                "Signature provider [generic/stripe/github/shopify/standard_webhooks] (generic): "
+            ).strip()
         except EOFError:
             answer = ""
         signature_provider = answer or "generic"

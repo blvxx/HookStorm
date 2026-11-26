@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import base64
 import json
 import socket
 from pathlib import Path
@@ -11,14 +12,19 @@ from hookstorm.cli import main
 from hookstorm.doctor import ConnectivityResult, _check_connectivity_detailed, run_preflight
 
 
-def _scenario_file(tmp_path: Path, *, signature: str = "valid") -> Path:
+def _scenario_file(
+    tmp_path: Path,
+    *,
+    signature: str = "valid",
+    provider: str = "generic",
+) -> Path:
     path = tmp_path / "scenario.yaml"
     path.write_text(
         f"""version: 1
 name: Doctor smoke
 delivery:
   signature: {signature}
-  signature_provider: generic
+  signature_provider: {provider}
 events:
   - id: ping
     event_id: evt_doctor_001
@@ -195,6 +201,37 @@ def test_doctor_reports_when_verification_auth_is_not_configured(tmp_path) -> No
 
     check = _check(checks, "Verification auth", "PASS")
     assert "unauthenticated" in check.message
+
+
+def test_doctor_validates_standard_webhooks_secret(tmp_path) -> None:
+    scenario = _scenario_file(tmp_path, signature="valid", provider="standard_webhooks")
+    key = b"hookstorm-test-standard-webhooks-secret"
+    secret = "whsec_" + base64.b64encode(key).decode("ascii")
+
+    checks = run_preflight(
+        scenario,
+        target="http://127.0.0.1:8000/webhook",
+        environment={"HOOKSTORM_SECRET": secret},
+    )
+
+    check = _check(checks, "Signing secret", "PASS")
+    assert "valid Standard Webhooks secret" in check.message
+    assert secret not in str(checks)
+
+
+@pytest.mark.parametrize("secret", ["plain-secret", "whsec_!!!!", "whsec_YQ=="])
+def test_doctor_rejects_malformed_standard_webhooks_secret(tmp_path, secret: str) -> None:
+    scenario = _scenario_file(tmp_path, signature="valid", provider="standard_webhooks")
+
+    checks = run_preflight(
+        scenario,
+        target="http://127.0.0.1:8000/webhook",
+        environment={"HOOKSTORM_SECRET": secret},
+    )
+
+    check = _check(checks, "Signing secret", "FAIL")
+    assert "Standard Webhooks" in check.message
+    assert secret not in str(checks)
 
 
 def test_preflight_fails_when_target_or_required_secret_is_missing(tmp_path) -> None:

@@ -1,0 +1,18 @@
+version: 1
+name: Standard Webhooks stale timestamp rejection
+description: Sends a correctly signed payload with an attempt timestamp outside the five-minute receiver tolerance.
+delivery:
+  signature: valid
+  signature_provider: standard_webhooks
+  signature_timestamp_offset_seconds: -3600
+retry:
+  max_attempts: 1
+events:
+  - id: order.created
+    event_id: evt_standard_webhooks_stale_001
+    payload:
+      order_id: order_stale_001
+    expect_status: [401]
+    expect_json:
+      ok: false
+      provider: standard

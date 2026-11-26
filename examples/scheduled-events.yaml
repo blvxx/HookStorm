@@ -1,0 +1,21 @@
+version: 1
+name: Scheduled webhook rollout
+description: Demonstrates per-event start offsets measured from the beginning of a run.
+delivery:
+  concurrency: 3
+events:
+  - id: inventory.reconciled
+    event_id: evt_schedule_001
+    schedule_after_ms: 0
+    payload:
+      sequence: 1
+  - id: orders.reconciled
+    event_id: evt_schedule_002
+    schedule_after_ms: 250
+    payload:
+      sequence: 2
+  - id: payments.reconciled
+    event_id: evt_schedule_003
+    schedule_after_ms: 500
+    payload:
+      sequence: 3

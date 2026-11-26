@@ -1,0 +1,19 @@
+version: 1
+name: Standard Webhooks HMAC signature
+description: Signs the event ID, per-attempt timestamp, and exact raw body using the Standard Webhooks v1 format.
+delivery:
+  signature: valid
+  signature_provider: standard_webhooks
+retry:
+  max_attempts: 2
+  backoff_ms: 100
+events:
+  - id: order.created
+    event_id: evt_standard_webhooks_001
+    payload:
+      order_id: order_001
+      total: 12500
+    expect_status: [200]
+    expect_json:
+      ok: true
+      provider: standard

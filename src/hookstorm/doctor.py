@@ -15,6 +15,7 @@ from urllib.parse import SplitResult, urlsplit
 from hookstorm import __version__
 from hookstorm.config import load_scenario
 from hookstorm.safety import validate_target
+from hookstorm.standard_webhooks import decode_standard_webhooks_secret
 from hookstorm.verify_auth import (
     resolve_verification_auth_headers,
     validate_verification_auth_transport,
@@ -107,6 +108,27 @@ def _scenario_requires_secret(scenario: dict) -> bool:
     for event in scenario["events"]:
         delivery = {**defaults, **scenario["delivery"], **event["delivery"]}
         if delivery["signature"] in {"valid", "invalid"}:
+            return True
+    return False
+
+
+def _scenario_uses_standard_webhooks(scenario: dict) -> bool:
+    defaults = {
+        "signature": "none",
+        "signature_provider": "generic",
+        "signature_timestamp_offset_seconds": 0,
+        "timeout_ms": 5_000,
+        "duplicate_count": 0,
+        "delay_ms": 0,
+        "concurrency": 1,
+        "order": "in_order",
+    }
+    for event in scenario["events"]:
+        delivery = {**defaults, **scenario["delivery"], **event["delivery"]}
+        if (
+            delivery["signature"] in {"valid", "invalid"}
+            and delivery["signature_provider"] == "standard_webhooks"
+        ):
             return True
     return False
 
@@ -397,17 +419,31 @@ def run_preflight(
             DoctorCheck("INFO", "Signing secret", "skipped because the scenario could not be validated")
         )
     elif _scenario_requires_secret(scenario):
-        if env.get(secret_env, "").strip():
-            checks.append(
-                DoctorCheck("PASS", "Signing secret", f"{secret_env} is set (value hidden)")
-            )
-        else:
+        configured_secret = env.get(secret_env, "")
+        if not configured_secret.strip():
             checks.append(
                 DoctorCheck(
                     "FAIL",
                     "Signing secret",
                     f"this scenario signs requests; set the {secret_env} environment variable",
                 )
+            )
+        elif _scenario_uses_standard_webhooks(scenario):
+            try:
+                decode_standard_webhooks_secret(configured_secret)
+            except ValueError as exc:
+                checks.append(DoctorCheck("FAIL", "Signing secret", str(exc)))
+            else:
+                checks.append(
+                    DoctorCheck(
+                        "PASS",
+                        "Signing secret",
+                        f"{secret_env} is a valid Standard Webhooks secret (value hidden)",
+                    )
+                )
+        else:
+            checks.append(
+                DoctorCheck("PASS", "Signing secret", f"{secret_env} is set (value hidden)")
             )
     else:
         checks.append(

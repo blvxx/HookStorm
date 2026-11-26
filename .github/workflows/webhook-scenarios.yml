@@ -126,11 +126,17 @@ jobs:
           run_case examples/stripe-signature.yaml http://127.0.0.1:8000/webhook/signature/stripe
           run_case examples/github-signature.yaml http://127.0.0.1:8000/webhook/signature/github
           run_case examples/shopify-signature.yaml http://127.0.0.1:8000/webhook/signature/shopify
+          export HOOKSTORM_SECRET='whsec_aG9va3N0b3JtLXN0YW5kYXJkLXdlYmhvb2tzLWRlbW8ta2V5LTMy'
+          run_case examples/standard-webhooks.yaml http://127.0.0.1:8000/webhook/signature/standard
+          run_case examples/standard-webhooks-stale-timestamp.yaml http://127.0.0.1:8000/webhook/signature/standard
+          export HOOKSTORM_SECRET='hookstorm-ci-test-secret'
           run_case examples/invalid-signature.yaml http://127.0.0.1:8000/webhook/signature
           run_case examples/duplicate-delivery.yaml http://127.0.0.1:8000/webhook
           run_case examples/idempotency-verification.yaml http://127.0.0.1:8000/webhook
+          run_case examples/commit-then-drop.yaml http://127.0.0.1:8000/webhook/commit-then-drop
           run_case examples/out-of-order.yaml http://127.0.0.1:8000/webhook
           run_case examples/payment-retry.yaml http://127.0.0.1:8000/webhook/flaky
+          run_case examples/scheduled-events.yaml http://127.0.0.1:8000/webhook
 
           exit "$failed"
 

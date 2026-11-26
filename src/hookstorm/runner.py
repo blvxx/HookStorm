@@ -17,6 +17,10 @@ from urllib.parse import urlsplit, urlunsplit
 import httpx
 
 from hookstorm.safety import validate_target
+from hookstorm.standard_webhooks import (
+    decode_standard_webhooks_secret,
+    standard_webhooks_headers,
+)
 from hookstorm.verify_auth import (
     resolve_verification_auth_headers,
     validate_verification_auth_transport,
@@ -84,11 +88,22 @@ def _signature_headers(
     secret: str,
     mode: str,
     provider: str,
+    event_id: str,
     timestamp_offset_seconds: int = 0,
 ) -> dict[str, str]:
-    """Build provider-compatible webhook signature headers from the exact request bytes."""
+    """Build provider-compatible signature headers for one individual delivery attempt."""
     if mode in {"none", "missing"}:
         return {}
+
+    if provider == "standard_webhooks":
+        timestamp = int(time.time()) + timestamp_offset_seconds
+        return standard_webhooks_headers(
+            secret,
+            event_id,
+            body,
+            timestamp,
+            invalid=mode == "invalid",
+        )
 
     signed_payload = body
     timestamp: int | None = None
@@ -169,15 +184,24 @@ async def run_scenario(
     if scenario["delivery"].get("order", "in_order") == "reverse":
         ordered_events.reverse()
 
-    # Fail before sending any traffic if a signature mode needs a missing secret.
+    # Fail before sending any traffic if a signature mode needs a missing or malformed secret.
     for event in ordered_events:
         effective_delivery = {**default_delivery, **scenario["delivery"], **event["delivery"]}
-        if effective_delivery["signature"] in {"valid", "invalid"} and not secret:
+        if effective_delivery["signature"] not in {"valid", "invalid"}:
+            continue
+        if not secret:
             raise ValueError(
                 "This scenario requires HOOKSTORM_SECRET or the configured secret environment variable."
             )
+        if effective_delivery["signature_provider"] == "standard_webhooks":
+            decode_standard_webhooks_secret(secret)
 
     async def process_event(event: dict[str, Any]) -> list[dict[str, Any]]:
+        scheduled_at = monotonic_started + event.get("schedule_after_ms", 0) / 1000
+        schedule_wait = scheduled_at - time.perf_counter()
+        if schedule_wait > 0:
+            await asyncio.sleep(schedule_wait)
+
         async with semaphore:
             delivery_config = {**default_delivery, **scenario["delivery"], **event["delivery"]}
             event_body = _json_bytes(event["payload"])
@@ -198,20 +222,13 @@ async def run_scenario(
                 "stripe-signature",
                 "x-shopify-hmac-sha256",
                 "x-hookstorm-duplicate-index",
+                "webhook-id",
+                "webhook-timestamp",
+                "webhook-signature",
             }
             for key, value in event["headers"].items():
                 if key.lower() not in reserved:
                     base_headers[key] = value
-
-            base_headers.update(
-                _signature_headers(
-                    event_body,
-                    secret or "",
-                    delivery_config["signature"],
-                    delivery_config["signature_provider"],
-                    delivery_config["signature_timestamp_offset_seconds"],
-                )
-            )
 
             event_deliveries: list[dict[str, Any]] = []
             for duplicate_index in range(delivery_config["duplicate_count"] + 1):
@@ -227,6 +244,16 @@ async def run_scenario(
                     headers = dict(base_headers)
                     headers["X-HookStorm-Attempt"] = str(attempt)
                     headers["X-HookStorm-Duplicate-Index"] = str(duplicate_index)
+                    headers.update(
+                        _signature_headers(
+                            event_body,
+                            secret or "",
+                            delivery_config["signature"],
+                            delivery_config["signature_provider"],
+                            event["event_id"],
+                            delivery_config["signature_timestamp_offset_seconds"],
+                        )
+                    )
                     started_attempt = time.perf_counter()
                     outcome = {
                         "attempt": attempt,
@@ -288,6 +315,7 @@ async def run_scenario(
                         "event_id": event["event_id"],
                         "event_type": event["id"],
                         "duplicate_index": duplicate_index,
+                        "schedule_after_ms": event.get("schedule_after_ms", 0),
                         "signature_provider": delivery_config["signature_provider"],
                         "attempts": attempts,
                         "passed": bool(last["passed"]),

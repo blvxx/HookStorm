@@ -4,6 +4,7 @@ import base64
 import hashlib
 import hmac
 import json
+import socket
 import threading
 import time
 from collections import defaultdict
@@ -74,6 +75,8 @@ def receiver() -> Iterator[tuple[str, dict]]:
                 status, payload = 503, {"retry": True}
             elif self.path.startswith("/signature/"):
                 provider = self.path.rsplit("/", 1)[-1]
+                if provider == "standard-flaky":
+                    provider = "standard"
                 secret = b"test-secret"
                 valid = False
                 if provider == "stripe":
@@ -100,7 +103,36 @@ def receiver() -> Iterator[tuple[str, dict]]:
                     valid = hmac.compare_digest(
                         self.headers.get("X-Shopify-Hmac-Sha256", ""), expected
                     )
+                elif provider == "standard":
+                    standard_secret = b"hookstorm-test-standard-webhooks-secret"
+                    message_id = self.headers.get("webhook-id", "")
+                    timestamp_header = self.headers.get("webhook-timestamp", "")
+                    try:
+                        timestamp = int(timestamp_header)
+                    except ValueError:
+                        timestamp = 0
+                    signed = f"{message_id}.{timestamp_header}.".encode() + body
+                    expected = hmac.new(
+                        standard_secret, signed, hashlib.sha256
+                    ).digest()
+                    supplied_signatures = self.headers.get("webhook-signature", "").split()
+                    valid = (
+                        message_id == event_id
+                        and timestamp > 0
+                        and abs(time.time() - timestamp) <= 300
+                        and any(
+                            version == "v1"
+                            and hmac.compare_digest(
+                                base64.b64decode(signature, validate=True), expected
+                            )
+                            for item in supplied_signatures
+                            for version, separator, signature in [item.partition(",")]
+                            if separator
+                        )
+                    )
                 status = 200 if valid else 401
+                if provider == "standard" and self.path == "/signature/standard-flaky" and state["attempts"][delivery_key] == 1 and valid:
+                    status = 503
                 payload = {"ok": valid, "provider": provider}
             elif self.path == "/signature":
                 expected = "sha256=" + hmac.new(b"test-secret", body, hashlib.sha256).hexdigest()
@@ -108,6 +140,24 @@ def receiver() -> Iterator[tuple[str, dict]]:
                     status, payload = 401, {"ok": False}
                 else:
                     status, payload = 200, {"ok": True}
+            elif self.path == "/commit-then-drop":
+                duplicate = delivery_key in state["effects"]
+                state["seen"].add(delivery_key)
+                state["effects"].add(delivery_key)
+                if state["attempts"][delivery_key] == 1:
+                    # Simulate a durable commit followed by a lost HTTP acknowledgement.
+                    self.close_connection = True
+                    try:
+                        self.connection.shutdown(socket.SHUT_RDWR)
+                    except OSError:
+                        pass
+                    self.connection.close()
+                    return
+                status, payload = 200, {
+                    "ok": True,
+                    "duplicate": duplicate,
+                    "effect_applied": not duplicate,
+                }
             else:
                 duplicate = delivery_key in state["seen"]
                 state["seen"].add(delivery_key)

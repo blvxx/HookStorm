@@ -105,7 +105,8 @@ def _sanitize_result(result: dict[str, Any]) -> dict[str, Any]:
     """Keep only run metadata and assertion outcomes; never persist request/response data."""
     summary_keys = ("total_deliveries", "passed", "failed", "attempts", "success")
     delivery_keys = (
-        "event_id", "event_type", "duplicate_index", "signature_provider", "passed"
+        "event_id", "event_type", "duplicate_index", "schedule_after_ms",
+        "signature_provider", "passed"
     )
     attempt_keys = (
         "attempt", "elapsed_ms", "status_code", "latency_ms", "error",

@@ -41,3 +41,7 @@
 - Add an optional read-only post-delivery business-state probe with run-scoped verification, report output, and history regression checks.
 - Add environment-backed Bearer and API-key authentication for verification probes with preflight checks and secret-safe reporting.
 - Extend `hookstorm doctor` to validate verification credentials and enforce HTTPS for authenticated remote probes without sending credentials.
+- Add Standard Webhooks v1 HMAC signing with `whsec_` key validation, stable message IDs, and fresh timestamped signatures per retry.
+- Add a deterministic commit-then-drop receiver failure and a scenario that verifies idempotent processing after an ambiguous acknowledgement.
+- Extend `hookstorm init` and CI scenarios with Standard Webhooks support.
+- Add per-event run-relative scheduling offsets without blocking available concurrency slots.

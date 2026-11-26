@@ -6,7 +6,7 @@ import time
 
 import pytest
 
-from hookstorm.config import validate_scenario
+from hookstorm.config import ScenarioError, validate_scenario
 from hookstorm.report import render_html, render_json, render_junit
 from hookstorm.runner import run_scenario
 
@@ -250,23 +250,12 @@ def test_stripe_timestamp_offset_can_exercise_receiver_tolerance(receiver) -> No
     assert abs(time.time() - timestamp) >= 3599
 
 
-def test_provider_signature_header_cannot_be_overridden(receiver) -> None:
-    base, state = receiver
-    result = asyncio.run(run_scenario(
+def test_provider_signature_header_cannot_be_overridden() -> None:
+    with pytest.raises(ScenarioError, match="may not override"):
         scenario(
             delivery={"signature": "valid", "signature_provider": "github"},
-            event={
-                "headers": {"X-Hub-Signature-256": "sha256=attacker-controlled"},
-                "expect_status": [200],
-            },
-        ),
-        f"{base}/signature/github",
-        secret="test-secret",
-    ))
-    assert result["summary"]["success"] is True
-    headers = {key.lower(): value for key, value in state["requests"][0]["headers"].items()}
-    assert headers["x-hub-signature-256"] != "sha256=attacker-controlled"
-
+            event={"headers": {"X-Hub-Signature-256": "sha256=attacker-controlled"}},
+        )
 
 def test_missing_provider_signature_omits_provider_header(receiver) -> None:
     base, state = receiver
@@ -281,6 +270,138 @@ def test_missing_provider_signature_omits_provider_header(receiver) -> None:
     headers = {key.lower(): value for key, value in state["requests"][0]["headers"].items()}
     assert "x-shopify-hmac-sha256" not in headers
 
+
+
+def test_standard_webhooks_signature_matches_the_standard(receiver) -> None:
+    base, state = receiver
+    key = b"hookstorm-test-standard-webhooks-secret"
+    secret = "whsec_" + base64.b64encode(key).decode("ascii")
+    result = asyncio.run(run_scenario(
+        scenario(
+            delivery={"signature": "valid", "signature_provider": "standard_webhooks"},
+            event={
+                "expect_status": [200],
+                "expect_json": {"ok": True, "provider": "standard"},
+            },
+        ),
+        f"{base}/signature/standard",
+        secret=secret,
+    ))
+
+    assert result["summary"]["success"] is True
+    headers = {key.lower(): value for key, value in state["requests"][0]["headers"].items()}
+    assert headers["webhook-id"] == "evt_test_1"
+    assert headers["webhook-timestamp"].isdigit()
+    assert headers["webhook-signature"].startswith("v1,")
+
+
+def test_standard_webhooks_invalid_signature_is_rejected(receiver) -> None:
+    base, _ = receiver
+    key = b"hookstorm-test-standard-webhooks-secret"
+    secret = "whsec_" + base64.b64encode(key).decode("ascii")
+    result = asyncio.run(run_scenario(
+        scenario(
+            delivery={"signature": "invalid", "signature_provider": "standard_webhooks"},
+            event={"expect_status": [401], "expect_json": {"ok": False}},
+        ),
+        f"{base}/signature/standard",
+        secret=secret,
+    ))
+
+    assert result["summary"]["success"] is True
+    assert result["deliveries"][0]["attempts"][0]["status_code"] == 401
+
+
+def test_standard_webhooks_stale_timestamp_is_rejected(receiver) -> None:
+    base, _ = receiver
+    key = b"hookstorm-test-standard-webhooks-secret"
+    secret = "whsec_" + base64.b64encode(key).decode("ascii")
+    result = asyncio.run(run_scenario(
+        scenario(
+            delivery={
+                "signature": "valid",
+                "signature_provider": "standard_webhooks",
+                "signature_timestamp_offset_seconds": -3600,
+            },
+            event={"expect_status": [401], "expect_json": {"ok": False, "provider": "standard"}},
+        ),
+        f"{base}/signature/standard",
+        secret=secret,
+    ))
+
+    assert result["summary"]["success"] is True
+    assert result["deliveries"][0]["attempts"][0]["status_code"] == 401
+
+
+def test_standard_webhooks_retry_reuses_id_and_refreshes_attempt_timestamp(receiver) -> None:
+    base, state = receiver
+    key = b"hookstorm-test-standard-webhooks-secret"
+    secret = "whsec_" + base64.b64encode(key).decode("ascii")
+    result = asyncio.run(run_scenario(
+        scenario(
+            delivery={"signature": "valid", "signature_provider": "standard_webhooks"},
+            retry={"max_attempts": 2, "backoff_ms": 1_100},
+            event={"expect_json": {"ok": True}},
+        ),
+        f"{base}/signature/standard-flaky",
+        secret=secret,
+    ))
+
+    assert result["summary"]["success"] is True
+    assert [attempt["status_code"] for attempt in result["deliveries"][0]["attempts"]] == [
+        503, 200
+    ]
+    first, second = [
+        {key.lower(): value for key, value in request["headers"].items()}
+        for request in state["requests"]
+    ]
+    assert first["webhook-id"] == second["webhook-id"] == "evt_test_1"
+    assert int(second["webhook-timestamp"]) > int(first["webhook-timestamp"])
+
+
+@pytest.mark.parametrize("secret", ["not-a-whsec-secret", "whsec_!!!!", "whsec_YQ=="])
+def test_standard_webhooks_invalid_secret_fails_before_sending(receiver, secret: str) -> None:
+    base, state = receiver
+    data = scenario(
+        delivery={"signature": "valid", "signature_provider": "standard_webhooks"}
+    )
+
+    with pytest.raises(ValueError, match="Standard Webhooks"):
+        asyncio.run(run_scenario(data, f"{base}/signature/standard", secret=secret))
+
+    assert state["requests"] == []
+
+
+def test_response_lost_after_business_commit_retries_without_duplicate_effect(receiver) -> None:
+    base, state = receiver
+    data = validate_scenario({
+        "version": 1,
+        "name": "commit succeeded but acknowledgement was lost",
+        "retry": {"max_attempts": 2, "backoff_ms": 1},
+        "events": [{
+            "id": "order.created",
+            "event_id": "evt_commit_ack_lost",
+            "payload": {"order_id": 42},
+            "expect_json": {"duplicate": True, "effect_applied": False},
+        }],
+        "verify": {
+            "url": f"{base}/state",
+            "expect_json": {"processed_events": 1},
+        },
+    })
+
+    result = asyncio.run(run_scenario(data, f"{base}/commit-then-drop"))
+
+    assert result["summary"]["success"] is True
+    attempts = result["deliveries"][0]["attempts"]
+    assert len(attempts) == 2
+    assert attempts[0]["status_code"] is None
+    assert attempts[0]["error"].startswith("request error:")
+    assert attempts[1]["status_code"] == 200
+    assert result["verification"]["passed"] is True
+    run_id = result["run_id"]
+    assert len([key for key in state["effects"] if key[0] == run_id]) == 1
+    assert state["attempts"][(run_id, "evt_commit_ack_lost")] == 2
 
 
 def test_business_state_verification_checks_unique_side_effects(receiver) -> None:
@@ -488,3 +609,39 @@ def test_authenticated_remote_verification_requires_https(receiver, monkeypatch)
     assert state["requests"] == []
     assert state["verification_requests"] == []
 
+
+
+
+def test_scheduled_event_waits_before_acquiring_concurrency_slot(receiver) -> None:
+    base, state = receiver
+    data = validate_scenario({
+        "version": 1,
+        "name": "independent event schedule",
+        "delivery": {"concurrency": 1},
+        "events": [
+            {
+                "id": "delayed.event",
+                "event_id": "evt_delayed",
+                "schedule_after_ms": 150,
+                "payload": {},
+            },
+            {
+                "id": "immediate.event",
+                "event_id": "evt_immediate",
+                "schedule_after_ms": 0,
+                "payload": {},
+            },
+        ],
+    })
+
+    result = asyncio.run(run_scenario(data, base))
+
+    assert result["summary"]["success"] is True
+    assert [item["event_id"] for item in state["requests"]] == [
+        "evt_immediate",
+        "evt_delayed",
+    ]
+    assert result["deliveries"][0]["schedule_after_ms"] == 150
+    assert result["deliveries"][1]["schedule_after_ms"] == 0
+    assert result["deliveries"][0]["attempts"][0]["elapsed_ms"] >= 100
+    assert "scheduled +150 ms" in render_html(result)

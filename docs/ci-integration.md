@@ -12,7 +12,7 @@ After installing HookStorm in your application repository, run:
 hookstorm init
 ~~~
 
-The wizard creates `scenarios/webhook.yaml` and `.github/workflows/webhook-regression.yml`. In an interactive terminal, choose the signature provider (`generic`, `stripe`, `github`, or `shopify`). Without an interactive terminal, the provider defaults to `generic`.
+The wizard creates `scenarios/webhook.yaml` and `.github/workflows/webhook-regression.yml`. In an interactive terminal, choose the signature provider (`generic`, `stripe`, `github`, `shopify`, or `standard_webhooks`). Without an interactive terminal, the provider defaults to `generic`.
 
 Customize the event contract directly from the command line:
 
@@ -37,7 +37,7 @@ scenarios/webhook.yaml
 
 Replace the sample event type, event ID, payload, signature provider, expected HTTP statuses, and JSON assertions with your webhook contract. Keep payloads synthetic and event IDs stable across runs so HookStorm can match the same deliveries when it compares baselines.
 
-The example uses HookStorm's generic HMAC signature. Your test receiver must verify the same secret. You can instead select `stripe`, `github`, or `shopify` when your staging endpoint implements that provider's signature format. For an unsigned test endpoint, set `signature: none`; `hookstorm doctor` detects that no signing secret is needed.
+The example uses HookStorm's generic HMAC signature. Your test receiver must verify the same secret. You can instead select `stripe`, `github`, or `shopify` when your staging endpoint implements that provider's signature format. For Standard Webhooks, choose `standard_webhooks`; its `HOOKSTORM_SECRET` must be the `whsec_` secret supplied for that endpoint. For an unsigned test endpoint, set `signature: none`; `hookstorm doctor` detects that no signing secret is needed.
 
 Validate the scenario locally before connecting it to CI:
 
@@ -80,7 +80,7 @@ Add the following values to that environment:
 | Name | Type | Purpose |
 |---|---|---|
 | `HOOKSTORM_TARGET_URL` | Variable | Full URL of a dedicated staging/test webhook endpoint. Do not include credentials or query-string tokens. |
-| `HOOKSTORM_SECRET` | Secret | HMAC secret used by signed scenarios (`signature: valid` or `invalid`). Unsigned scenarios do not require it. |
+| `HOOKSTORM_SECRET` | Secret | Signing secret used by signed scenarios (`signature: valid` or `invalid`). Standard Webhooks secrets must be `whsec_` followed by Base64 key material; other providers use their documented raw secret format. Unsigned scenarios do not require it. |
 | `HOOKSTORM_VERIFY_TOKEN` | Optional secret | Example Bearer credential referenced by `verify.auth.token_env`; use the exact variable name from your scenario. |
 | `HOOKSTORM_VERIFY_API_KEY` | Optional secret | Example API key referenced by `verify.auth.key_env`; use the exact variable name from your scenario. |
 | `HOOKSTORM_SCENARIO` | Optional variable | Scenario path. Defaults to `scenarios/webhook.yaml`. |
