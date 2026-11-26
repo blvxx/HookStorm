@@ -57,10 +57,10 @@ def _validate_delivery(value: Any, where: str, *, allow_order: bool = True) -> d
         result["concurrency"] = _integer(result["concurrency"], f"{where}.concurrency", minimum=1, maximum=50)
     if "signature_provider" in result and (
         not isinstance(result["signature_provider"], str)
-        or result["signature_provider"] not in {"generic", "stripe", "github", "shopify"}
+        or result["signature_provider"] not in {"generic", "stripe", "github", "shopify", "standard_webhooks"}
     ):
         raise ScenarioError(
-            f"{where}.signature_provider must be generic, stripe, github, or shopify"
+            f"{where}.signature_provider must be generic, stripe, github, shopify, or standard_webhooks"
         )
     if "signature_timestamp_offset_seconds" in result:
         result["signature_timestamp_offset_seconds"] = _integer(
@@ -280,7 +280,14 @@ def validate_scenario(data: Any) -> dict[str, Any]:
         for key, val in headers.items():
             if not re.fullmatch(r"[!#$%&'*+._^|~0-9A-Za-z-]+", key) or any(ch in key + val for ch in "\r\n"):
                 raise ScenarioError(f"{where}.headers contains an invalid header")
-            if key.lower() in {"host", "content-length", "transfer-encoding"}:
+            if key.lower() in {
+                "host", "content-length", "transfer-encoding",
+                "x-hookstorm-run", "x-event-id", "x-event-type",
+                "x-hookstorm-attempt", "x-hookstorm-duplicate-index",
+                "x-hookstorm-signature", "stripe-signature",
+                "x-hub-signature-256", "x-shopify-hmac-sha256",
+                "webhook-id", "webhook-timestamp", "webhook-signature",
+            }:
                 raise ScenarioError(f"{where}.headers may not override {key}")
         event_delivery = _validate_delivery(event.get("delivery", {}), f"{where}.delivery", allow_order=False)
         expect_status = event.get("expect_status", [200, 201, 202, 204])
@@ -322,9 +329,12 @@ def validate_scenario(data: Any) -> dict[str, Any]:
     for event in normalized_events:
         effective_delivery = {**delivery, **event["delivery"]}
         timestamp_offset = effective_delivery.get("signature_timestamp_offset_seconds", 0)
-        if timestamp_offset and effective_delivery.get("signature_provider", "generic") != "stripe":
+        if timestamp_offset and effective_delivery.get("signature_provider", "generic") not in {
+            "stripe", "standard_webhooks"
+        }:
             raise ScenarioError(
-                "signature_timestamp_offset_seconds can only be used with signature_provider: stripe"
+                "signature_timestamp_offset_seconds can only be used with signature_provider: "
+                "stripe or standard_webhooks"
             )
 
     estimated_requests = 0
