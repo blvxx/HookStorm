@@ -1,0 +1,21 @@
+version: 1
+name: Staging webhook contract
+description: >
+  A repeatable smoke test for your staging webhook receiver.
+  Replace the event payload and expected response with your application's contract.
+delivery:
+  signature: valid
+  signature_provider: generic
+  timeout_ms: 5000
+retry:
+  max_attempts: 1
+events:
+  - id: invoice.created
+    event_id: evt_hookstorm_ci_invoice_001
+    payload:
+      invoice_id: hookstorm-test-invoice-001
+      amount: 1250
+      currency: EUR
+    expect_status: [200, 201, 202]
+    expect_json:
+      accepted: true
