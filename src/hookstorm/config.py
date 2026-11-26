@@ -6,6 +6,7 @@ import json
 import re
 from pathlib import Path
 from typing import Any
+from urllib.parse import urlsplit
 
 import yaml
 
@@ -14,7 +15,7 @@ class ScenarioError(ValueError):
     """Raised when a scenario file is invalid."""
 
 
-_ALLOWED_TOP_LEVEL = {"version", "name", "description", "delivery", "retry", "events"}
+_ALLOWED_TOP_LEVEL = {"version", "name", "description", "delivery", "retry", "events", "verify"}
 _ALLOWED_DELIVERY = {
     "order", "duplicate_count", "delay_ms", "timeout_ms", "signature", "concurrency",
     "signature_provider", "signature_timestamp_offset_seconds",
@@ -94,6 +95,67 @@ def _validate_retry(value: Any) -> dict[str, Any]:
     return {"max_attempts": max_attempts, "backoff_ms": backoff_ms, "retry_on": sorted(set(retry_on))}
 
 
+
+def _validate_verify(value: Any) -> dict[str, Any] | None:
+    """Validate an optional read-only business-state probe."""
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise ScenarioError("verify must be a mapping")
+    _unknown_keys(value, {"url", "expect_status", "expect_json", "timeout_ms"}, "verify")
+
+    url = value.get("url")
+    if (
+        not isinstance(url, str)
+        or not url.strip()
+        or len(url) > 2_048
+        or any(char in url for char in "\r\n")
+    ):
+        raise ScenarioError("verify.url must be a non-empty absolute HTTP(S) URL of at most 2048 characters")
+    parsed = urlsplit(url.strip())
+    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+        raise ScenarioError("verify.url must be an absolute http:// or https:// URL")
+    if parsed.username or parsed.password or parsed.fragment:
+        raise ScenarioError("verify.url must not contain embedded credentials or a fragment")
+    try:
+        _ = parsed.port
+    except ValueError as exc:
+        raise ScenarioError("verify.url contains an invalid port") from exc
+
+    expect_status = value.get("expect_status", [200])
+    if isinstance(expect_status, int) and not isinstance(expect_status, bool):
+        expect_status = [expect_status]
+    if not isinstance(expect_status, list) or not expect_status:
+        raise ScenarioError("verify.expect_status must be an integer or non-empty list")
+    if any(
+        isinstance(code, bool) or not isinstance(code, int) or not 100 <= code <= 599
+        for code in expect_status
+    ):
+        raise ScenarioError("verify.expect_status entries must be HTTP status codes")
+
+    expected_json = value.get("expect_json")
+    if not isinstance(expected_json, dict):
+        raise ScenarioError("verify.expect_json must be a JSON object")
+    try:
+        expected_json = json.loads(
+            json.dumps(
+                expected_json, ensure_ascii=False, separators=(",", ":"), allow_nan=False
+            )
+        )
+    except (TypeError, ValueError, UnicodeEncodeError) as exc:
+        raise ScenarioError("verify.expect_json must contain JSON-compatible values") from exc
+
+    timeout_ms = _integer(
+        value.get("timeout_ms", 5_000), "verify.timeout_ms", minimum=1, maximum=300_000
+    )
+    return {
+        "url": url.strip(),
+        "expect_status": sorted(set(expect_status)),
+        "expect_json": expected_json,
+        "timeout_ms": timeout_ms,
+    }
+
+
 def validate_scenario(data: Any) -> dict[str, Any]:
     """Validate and normalize a parsed scenario mapping."""
     if not isinstance(data, dict):
@@ -110,6 +172,7 @@ def validate_scenario(data: Any) -> dict[str, Any]:
 
     delivery = _validate_delivery(data.get("delivery", {}), "delivery")
     retry = _validate_retry(data.get("retry"))
+    verify = _validate_verify(data.get("verify"))
     events = data.get("events")
     if not isinstance(events, list) or not events:
         raise ScenarioError("events must be a non-empty list")
@@ -219,6 +282,7 @@ def validate_scenario(data: Any) -> dict[str, Any]:
         "delivery": delivery,
         "retry": retry,
         "events": normalized_events,
+        "verify": verify,
     }
 
 

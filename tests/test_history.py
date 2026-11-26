@@ -329,3 +329,43 @@ def test_load_history_export_rejects_private_fields_by_whitelisting(tmp_path) ->
 
     loaded = load_history_export(baseline_file)
     assert "payload" not in loaded
+
+
+
+def test_business_state_verification_failure_is_a_history_regression() -> None:
+    baseline = make_result("baseline1")
+    baseline["verification"] = {
+        "method": "GET",
+        "target": "http://127.0.0.1:8000/state",
+        "status_code": 200,
+        "latency_ms": 1.0,
+        "expected_status": True,
+        "expected_json": True,
+        "passed": True,
+    }
+    current = make_result("current1")
+    current["verification"] = {
+        "method": "GET",
+        "target": "http://127.0.0.1:8000/state",
+        "status_code": 200,
+        "latency_ms": 1.1,
+        "error": "response JSON value 'processed_events' did not match the expected value",
+        "expected_status": True,
+        "expected_json": False,
+        "passed": False,
+    }
+
+    comparison = compare_results(current, baseline)
+
+    assert comparison["has_regressions"] is True
+    assert any(item["reason"] == "business-state verification failed" for item in comparison["regressions"])
+
+
+def test_business_state_verification_removal_is_a_history_regression() -> None:
+    baseline = make_result("baseline2")
+    baseline["verification"] = {"passed": True}
+    current = make_result("current2")
+
+    comparison = compare_results(current, baseline)
+
+    assert any(item["reason"] == "business-state verification was removed" for item in comparison["regressions"])

@@ -279,3 +279,92 @@ def test_missing_provider_signature_omits_provider_header(receiver) -> None:
     assert result["summary"]["success"] is True
     headers = {key.lower(): value for key, value in state["requests"][0]["headers"].items()}
     assert "x-shopify-hmac-sha256" not in headers
+
+
+
+def test_business_state_verification_checks_unique_side_effects(receiver) -> None:
+    base, state = receiver
+    data = validate_scenario({
+        "version": 1,
+        "name": "real idempotency check",
+        "delivery": {"duplicate_count": 2},
+        "events": [{
+            "id": "order.created",
+            "event_id": "evt_order_42",
+            "payload": {"order_id": 42},
+            "expect_json": {"duplicate": False},
+            "expect_duplicate_json": {"duplicate": True},
+        }],
+        "verify": {
+            "url": f"{base}/state",
+            "expect_json": {"processed_events": 1},
+        },
+    })
+
+    result = asyncio.run(run_scenario(data, base))
+
+    assert result["summary"]["success"] is True
+    assert result["summary"]["total_deliveries"] == 3
+    assert result["verification"]["method"] == "GET"
+    assert result["verification"]["passed"] is True
+    run_id = result["run_id"]
+    assert len([key for key in state["effects"] if key[0] == run_id]) == 1
+
+
+def test_failed_business_state_verification_fails_the_run(receiver) -> None:
+    base, _ = receiver
+    data = validate_scenario({
+        "version": 1,
+        "name": "business state mismatch",
+        "events": [{
+            "id": "order.created",
+            "event_id": "evt_order_43",
+            "payload": {"order_id": 43},
+        }],
+        "verify": {
+            "url": f"{base}/state",
+            "expect_json": {"processed_events": 2},
+        },
+    })
+
+    result = asyncio.run(run_scenario(data, base))
+
+    assert result["deliveries"][0]["passed"] is True
+    assert result["verification"]["passed"] is False
+    assert result["verification"]["expected_json"] is False
+    assert result["summary"]["success"] is False
+
+
+def test_verification_url_obeys_local_only_safety_before_delivery(receiver) -> None:
+    base, state = receiver
+    data = validate_scenario({
+        "version": 1,
+        "name": "unsafe probe",
+        "events": [{"id": "ping", "event_id": "evt_unsafe", "payload": {}}],
+        "verify": {
+            "url": "http://8.8.8.8/state",
+            "expect_json": {},
+        },
+    })
+
+    with pytest.raises(ValueError, match="Remote IP"):
+        asyncio.run(run_scenario(data, base))
+
+    assert state["requests"] == []
+
+
+def test_verification_query_parameters_are_not_in_results(receiver) -> None:
+    base, _ = receiver
+    data = validate_scenario({
+        "version": 1,
+        "name": "redacted probe URL",
+        "events": [{"id": "ping", "event_id": "evt_redacted", "payload": {}}],
+        "verify": {
+            "url": f"{base}/state?api_key=do-not-store-this",
+            "expect_json": {"processed_events": 1},
+        },
+    })
+    result = asyncio.run(run_scenario(data, base))
+
+    assert result["verification"]["target"] == f"{base}/state"
+    assert "do-not-store-this" not in str(result)

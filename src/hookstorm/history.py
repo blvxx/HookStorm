@@ -129,6 +129,17 @@ def _sanitize_result(result: dict[str, Any]) -> dict[str, Any]:
             for attempt in delivery.get("attempts", [])
         ]
         sanitized["deliveries"].append(item)
+    verification = result.get("verification")
+    if verification is not None:
+        verify_keys = (
+            "method", "target", "status_code", "latency_ms", "error",
+            "expected_status", "expected_json", "passed",
+        )
+        sanitized["verification"] = {
+            key: verification[key] for key in verify_keys if key in verification
+        }
+    else:
+        sanitized["verification"] = None
     return sanitized
 
 
@@ -337,6 +348,25 @@ def compare_results(
                     "reason": f"delivery latency improved by {abs(latency_change_pct)}%",
                 })
         changes.append(change)
+
+    baseline_verification = baseline.get("verification")
+    current_verification = current.get("verification")
+    if baseline_verification is not None or current_verification is not None:
+        if current_verification is None:
+            regressions.append({
+                "reason": "business-state verification was removed",
+                "verification": "missing",
+            })
+        elif not current_verification.get("passed"):
+            regressions.append({
+                "reason": "business-state verification failed",
+                "verification": current_verification,
+            })
+        elif baseline_verification is not None and not baseline_verification.get("passed"):
+            improvements.append({
+                "reason": "business-state verification recovered",
+                "verification": current_verification,
+            })
 
     failed_delta = current_metrics["failed"] - baseline_metrics["failed"]
     pass_rate_delta = round(

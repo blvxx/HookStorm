@@ -12,6 +12,7 @@ A scenario is a YAML document. It describes events, delivery behavior, and expec
 | delivery | no | Default delivery fault settings. |
 | retry | no | Retry policy; defaults to one attempt. |
 | events | yes | One to 500 event definitions. Payloads are limited to 1 MiB each. |
+| verify | no | Optional read-only GET probe for checking backend state after all deliveries. |
 
 Unknown keys are rejected to catch typos early. Scenarios can be exported with `hookstorm export-pytest`; the generated test embeds the normalized scenario and reads its endpoint from `HOOKSTORM_TARGET` at runtime.
 
@@ -51,6 +52,21 @@ Provider formats:
 | retry_on | [408, 429, 500, 502, 503, 504] | HTTP statuses that trigger another attempt. Timeouts and transport errors are retried while attempts remain. |
 
 Backoff grows exponentially as backoff_ms * 2^(attempt - 1), capped at 60 seconds per wait. Retries preserve the event ID and request body. HookStorm rejects scenarios whose worst-case delivery attempts exceed 20,000.
+
+## Business-state verification
+
+The optional top-level verify mapping runs once after all event deliveries have completed. It is intended for a read-only test endpoint that can expose the state produced by the current run.
+
+| Field | Default | Constraints / behavior |
+|---|---|---|
+| url | required | Absolute HTTP(S) URL. Localhost / loopback only unless the CLI uses --allow-remote. Embedded credentials and fragments are rejected. |
+| expect_status | [200] | Accepted HTTP status code or non-empty list of codes from 100 to 599. |
+| expect_json | required | JSON object checked with the same recursive subset-matching rules as event response assertions. |
+| timeout_ms | 5000 | GET timeout, 1–300,000 ms. |
+
+HookStorm sends the generated X-HookStorm-Run header with the GET so a receiver can isolate state for that run. The probe sends no webhook payload and does not mutate the receiver. A status, transport, or JSON assertion failure marks the overall run as failed. JSON and HTML reports include the probe result; JUnit adds a separate business-state probe testcase. Run history stores the sanitized outcome and compares it for regressions.
+
+The probe is not a universal exactly-once guarantee: it verifies only the state your endpoint exposes at the time of the GET. Use isolated test data and an endpoint designed for testing. The current probe supports unauthenticated GET endpoints; it does not configure custom authorization headers.
 
 ## Event fields
 

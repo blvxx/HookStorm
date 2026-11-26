@@ -195,3 +195,40 @@ def test_write_report_supports_junit_xml(tmp_path) -> None:
     output = write_report(result, tmp_path / "reports" / "hookstorm.xml", "junit")
     assert output.is_file()
     assert ET.parse(output).getroot().attrib["tests"] == "1"
+
+
+
+def test_business_state_verification_is_in_html_and_junit_reports() -> None:
+    result = {
+        "scenario": "idempotency",
+        "target": "http://127.0.0.1:8000/webhook",
+        "version": "0.1.0",
+        "duration_ms": 2.0,
+        "summary": {"success": False, "passed": 1, "total_deliveries": 1, "attempts": 1},
+        "deliveries": [{
+            "event_type": "order.created",
+            "event_id": "evt_1",
+            "duplicate_index": 0,
+            "passed": True,
+            "attempts": [{"status_code": 200, "latency_ms": 1.0, "error": None}],
+        }],
+        "verification": {
+            "method": "GET",
+            "target": "http://127.0.0.1:8000/state",
+            "status_code": 200,
+            "latency_ms": 1.0,
+            "error": "state count did not match",
+            "expected_status": True,
+            "expected_json": False,
+            "passed": False,
+        },
+    }
+
+    html = render_html(result)
+    xml = ET.fromstring(render_junit(result))
+
+    assert "Business-state verification" in html
+    assert "state count did not match" in html
+    assert xml.attrib["tests"] == "2"
+    assert xml.attrib["failures"] == "1"
+    assert xml.find("./testcase[@classname='hookstorm.verification']/failure") is not None

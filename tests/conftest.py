@@ -15,12 +15,26 @@ import pytest
 
 @pytest.fixture
 def receiver() -> Iterator[tuple[str, dict]]:
-    state = {"seen": set(), "attempts": defaultdict(int), "requests": [], "active": 0, "max_active": 0}
+    state = {"seen": set(), "effects": set(), "attempts": defaultdict(int), "requests": [], "active": 0, "max_active": 0}
     state_lock = threading.Lock()
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, fmt: str, *args: object) -> None:
             return
+
+        def do_GET(self) -> None:  # noqa: N802
+            if self.path.split("?", 1)[0] != "/state":
+                self.send_error(404)
+                return
+            run_id = self.headers.get("X-HookStorm-Run", "")
+            with state_lock:
+                processed = sum(1 for current_run, _ in state["effects"] if current_run == run_id)
+            encoded = json.dumps({"processed_events": processed}).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "application/json")
+            self.send_header("Content-Length", str(len(encoded)))
+            self.end_headers()
+            self.wfile.write(encoded)
 
         def do_POST(self) -> None:  # noqa: N802
             length = int(self.headers.get("Content-Length", "0"))
@@ -86,7 +100,9 @@ def receiver() -> Iterator[tuple[str, dict]]:
             else:
                 duplicate = delivery_key in state["seen"]
                 state["seen"].add(delivery_key)
+                state["effects"].add(delivery_key)
                 status, payload = 200, {"ok": True, "duplicate": duplicate}
+
             encoded = json.dumps(payload).encode()
             self.send_response(status)
             self.send_header("Content-Type", "application/json")

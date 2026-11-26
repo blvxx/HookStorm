@@ -109,6 +109,25 @@ def render_html(result: dict[str, Any]) -> str:
     target = html.escape(str(result["target"]))
     version = html.escape(str(result["version"]))
     timeline_content = "".join(cards) if cards else '<p class="empty">No delivery attempts were recorded.</p>'
+    verification = result.get("verification")
+    verification_markup = ""
+    if verification is not None:
+        verify_state = "PASS" if verification.get("passed") else "FAIL"
+        verify_status = (
+            str(verification["status_code"])
+            if verification.get("status_code") is not None
+            else "ERR"
+        )
+        verify_error = html.escape(str(verification.get("error") or ""))
+        verify_target = html.escape(str(verification.get("target") or ""))
+        verification_markup = (
+            "<section class='verification'>"
+            "<h2>Business-state verification</h2>"
+            f"<p><strong>{verify_state}</strong> · GET {verify_target} · "
+            f"HTTP {verify_status} · {float(verification.get('latency_ms', 0.0)):.2f} ms</p>"
+            f"<p class='muted'>{verify_error}</p>"
+            "</section>"
+        )
     return f"""<!doctype html>
 <html lang="en">
 <head>
@@ -130,7 +149,7 @@ h2{{font-size:1.15rem;margin:32px 0 14px}}.muted{{color:GrayText}}.eyebrow{{font
 .field{{display:grid;gap:5px;font-size:.8rem;color:GrayText}}input,select,button{{font:inherit;color:CanvasText;background:Canvas;border:1px solid color-mix(in srgb,CanvasText 30%,transparent);border-radius:8px;padding:8px 10px}}
 input{{min-width:min(280px,70vw)}}button{{cursor:pointer;font-weight:650}}button:hover,summary:hover{{border-color:Highlight}}
 #result-count{{margin-left:auto;color:GrayText;font-size:.82rem;padding:8px 0}}
-.timeline{{display:grid;gap:10px}}.delivery-card{{border:1px solid color-mix(in srgb,CanvasText 18%,transparent);border-radius:14px;padding:16px 18px;min-width:0}}
+.verification{{border:1px solid color-mix(in srgb,CanvasText 18%,transparent);border-radius:14px;padding:16px 18px;margin:18px 0}}.verification h2{{margin:0 0 8px}}.verification p{{margin:4px 0;font-size:.88rem;overflow-wrap:anywhere}}.timeline{{display:grid;gap:10px}}.delivery-card{{border:1px solid color-mix(in srgb,CanvasText 18%,transparent);border-radius:14px;padding:16px 18px;min-width:0}}
 .delivery-card[hidden]{{display:none}}.delivery-top{{display:flex;gap:16px;justify-content:space-between;align-items:start;flex-wrap:wrap}}
 .delivery-identity{{display:grid;gap:4px;min-width:0}}.event-type{{font-weight:750}}.delivery-identity code{{font-size:.8rem;color:GrayText;overflow-wrap:anywhere}}
 .delivery-meta{{display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:.78rem;color:GrayText}}
@@ -160,6 +179,7 @@ footer{{margin-top:32px;color:GrayText;font-size:.8rem}}
 <div class="card"><strong>{summary['attempts']}</strong><span>HTTP attempts</span></div>
 <div class="card"><strong>{result['duration_ms']:.0f} ms</strong><span>Total duration</span></div>
 </div>
+{verification_markup}
 <h2>Delivery timeline</h2>
 <div class="toolbar" role="region" aria-label="Timeline filters">
 <label class="field">Result
@@ -233,11 +253,20 @@ def render_junit(result: dict[str, Any]) -> str:
             else:
                 failures += 1
 
+    verification = result.get("verification")
+    if verification is not None:
+        duration_seconds += float(verification.get("latency_ms", 0.0)) / 1000
+        if not verification.get("passed"):
+            if verification.get("status_code") is None:
+                errors += 1
+            else:
+                failures += 1
+
     suite = ET.Element(
         "testsuite",
         {
             "name": str(result["scenario"]),
-            "tests": str(len(deliveries)),
+            "tests": str(len(deliveries) + (1 if verification is not None else 0)),
             "failures": str(failures),
             "errors": str(errors),
             "skipped": "0",
@@ -304,6 +333,34 @@ def render_junit(result: dict[str, Any]) -> str:
                 },
             )
             failure.text = message
+
+    if verification is not None:
+        verify_time = float(verification.get("latency_ms", 0.0)) / 1000
+        verify_case = ET.SubElement(
+            suite,
+            "testcase",
+            {
+                "classname": "hookstorm.verification",
+                "name": "business-state probe",
+                "time": f"{verify_time:.6f}",
+            },
+        )
+        if not verification.get("passed"):
+            message = str(verification.get("error") or "Business-state verification failed")
+            status_code = verification.get("status_code")
+            if status_code is None:
+                ET.SubElement(
+                    verify_case,
+                    "error",
+                    {"message": message, "type": "VerificationError"},
+                )
+            else:
+                failure = ET.SubElement(
+                    verify_case,
+                    "failure",
+                    {"message": message, "type": "VerificationFailure"},
+                )
+                failure.text = message
 
     ET.indent(suite, space="  ")
     return '<?xml version="1.0" encoding="UTF-8"?>\n' + ET.tostring(
