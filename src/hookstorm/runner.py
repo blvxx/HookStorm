@@ -153,7 +153,7 @@ async def run_scenario(
     secret = secret if secret is not None else os.getenv("HOOKSTORM_SECRET")
     started = datetime.now(UTC)
     monotonic_started = time.perf_counter()
-    run_id = uuid.uuid4().hex[:12]
+    run_id = uuid.uuid4().hex
     target_parts = urlsplit(target)
     # Query strings often contain API keys or signed tokens; never copy them into reports.
     reported_target = urlunsplit(
