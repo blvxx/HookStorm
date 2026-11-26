@@ -554,7 +554,7 @@ def test_doctor_json_output_is_versioned_and_secret_safe(
         item for item in document["checks"] if item["label"] == "Verification auth"
     )
     assert auth_check["status"] == "PASS"
-    assert "unauthenticated" in auth_check["message"]
+    assert "not required" in auth_check["message"]
     assert all(
         set(check) == {"status", "label", "message", "details"}
         and isinstance(check["details"], list)
