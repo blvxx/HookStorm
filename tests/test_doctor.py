@@ -114,7 +114,6 @@ def test_doctor_fails_when_verification_credential_is_missing(tmp_path) -> None:
 
     check = _check(checks, "Verification auth", "FAIL")
     assert "HOOKSTORM_VERIFY_TOKEN" in check.message
-    assert "token" not in check.message.lower()
 
 
 @pytest.mark.parametrize(
