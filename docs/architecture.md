@@ -26,7 +26,7 @@ CLI exit code (0 passed, 1 assertions failed, 2 invalid input/configuration)
 
 - config.py: uses yaml.safe_load, rejects unknown keys, applies defaults, and bounds scenario sizes and timings.
 - safety.py: accepts only loopback IPs and localhost by default. --allow-remote is an explicit opt-in.
-- doctor.py: validates the scenario, configured HTTP(S) target, and required signing-secret presence; optional --connect performs DNS/TCP and HTTPS TLS checks without sending an HTTP request or webhook event.
+- doctor.py: validates the scenario, configured HTTP(S) target, and required signing-secret presence; optional --connect performs DNS/TCP and HTTPS TLS checks without sending an HTTP request or webhook event. --verbose reports each resolved IPv4 / IPv6 address, connection timings, negotiated TLS details, and certificate metadata.
 - runner.py: sends requests asynchronously with HTTPX, preserves event IDs, supports bounded concurrency across independent events, generates generic / Stripe / GitHub / Shopify HMAC headers from the exact request bytes, and checks nested JSON responses.
 - report.py: generates JSON, JUnit XML, or self-contained HTML with elapsed-time attempt tracks, search, result filters, and expandable attempt details.
 - history.py: persists a strict whitelist of run metadata and assertion outcomes to local SQLite, exports versioned sanitized JSON baselines, and compares local or portable baselines for pass-rate, coverage, and latency regressions.
@@ -48,7 +48,7 @@ CLI exit code (0 passed, 1 assertions failed, 2 invalid input/configuration)
 - Provider signing formats match Stripe, GitHub, and Shopify webhook headers. These are request generators for authorized test endpoints, not a replacement for each provider's SDK or a general receiver-side verification library.
 - JSON object assertions support recursive subset matching; arrays are compared exactly and in order.
 - A passing status or JSON assertion does not prove the business side effect happened exactly once; verify it independently in your test environment.
-- doctor --connect confirms socket reachability and TLS setup only. It does not verify HTTP routing, application authentication, or webhook handler behavior.
+- doctor --connect confirms socket reachability and TLS setup only. It does not verify HTTP routing, application authentication, or webhook handler behavior. Verbose diagnostics check a bounded number of resolved addresses and warn about partial address failures or certificates nearing expiry.
 
 
 ## CI integration
