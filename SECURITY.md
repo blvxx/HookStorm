@@ -1,0 +1,16 @@
+# Security policy
+
+## Scope
+
+HookStorm sends HTTP requests to a user-configured webhook endpoint. The default policy permits loopback targets only; remote targets require the explicit --allow-remote flag. The project does not operate a hosted relay or collect telemetry.
+
+## Reporting a vulnerability
+
+Please do not disclose exploitable vulnerabilities in a public issue. Use GitHub's private vulnerability reporting feature for this repository, when available. Include affected versions, impact, and a minimal reproduction. Do not include real credentials or customer payloads.
+
+## Safe use
+
+- Use isolated development or staging endpoints.
+- Do not run chaos scenarios against production payment, identity, or critical infrastructure endpoints.
+- Treat report files as potentially sensitive because they contain endpoint URLs and event identifiers.
+- The included demo receiver is for local use only.

@@ -1,0 +1,17 @@
+version: 1
+name: Payment webhook retry
+description: The demo receiver responds with 503 once, then accepts the same event.
+delivery:
+  order: in_order
+retry:
+  max_attempts: 3
+  backoff_ms: 150
+  retry_on: [429, 500, 502, 503, 504]
+events:
+  - id: payment.succeeded
+    event_id: evt_payment_001
+    payload:
+      payment_id: pay_demo_001
+      amount: 4990
+      currency: RUB
+    expect_status: [200]

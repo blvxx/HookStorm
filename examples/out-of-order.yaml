@@ -1,0 +1,16 @@
+version: 1
+name: Out-of-order event delivery
+delivery:
+  order: reverse
+retry:
+  max_attempts: 1
+events:
+  - id: order.created
+    event_id: evt_order_created
+    payload: { order_id: ord_42, sequence: 1 }
+  - id: order.paid
+    event_id: evt_order_paid
+    payload: { order_id: ord_42, sequence: 2 }
+  - id: order.fulfilled
+    event_id: evt_order_fulfilled
+    payload: { order_id: ord_42, sequence: 3 }

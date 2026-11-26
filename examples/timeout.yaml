@@ -1,0 +1,12 @@
+version: 1
+name: Receiver timeout handling
+delivery:
+  timeout_ms: 100
+retry:
+  max_attempts: 2
+  backoff_ms: 100
+events:
+  - id: report.ready
+    event_id: evt_slow_001
+    payload: { report_id: report_001 }
+    expect_status: [200]

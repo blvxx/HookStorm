@@ -1,0 +1,14 @@
+version: 1
+name: Invalid webhook signature
+description: The receiver should reject the request with a bad HMAC.
+delivery:
+  signature: invalid
+retry:
+  max_attempts: 1
+events:
+  - id: invoice.paid
+    event_id: evt_invoice_007
+    payload:
+      invoice_id: inv_007
+      paid: true
+    expect_status: [401]

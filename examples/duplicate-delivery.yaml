@@ -1,0 +1,19 @@
+version: 1
+name: Duplicate delivery and idempotency
+description: Re-sends the same event ID twice after the original delivery.
+delivery:
+  duplicate_count: 2
+retry:
+  max_attempts: 2
+  backoff_ms: 100
+events:
+  - id: order.created
+    event_id: evt_order_1001
+    payload:
+      order_id: order_1001
+      total: 12500
+    expect_status: [200]
+    expect_json:
+      duplicate: false
+    expect_duplicate_json:
+      duplicate: true
