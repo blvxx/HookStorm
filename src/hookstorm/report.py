@@ -308,7 +308,7 @@ def render_junit(result: dict[str, Any]) -> str:
     ET.indent(suite, space="  ")
     return '<?xml version="1.0" encoding="UTF-8"?>\n' + ET.tostring(
         suite, encoding="unicode"
-    ) + "\\n"
+    ) + "\n"
 
 
 def write_report(result: dict[str, Any], path: str | Path, format_name: str) -> Path:
