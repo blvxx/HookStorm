@@ -4,8 +4,6 @@ import shutil
 import subprocess
 from pathlib import Path
 
-
-
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW_PATH = ROOT / "examples" / "ci" / "webhook-regression.yml"
 
