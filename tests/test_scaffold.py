@@ -44,6 +44,16 @@ def test_initialize_project_creates_valid_scenario_and_workflow(tmp_path) -> Non
     assert "https://example" not in workflow_text
 
 
+def test_initialize_project_supports_standard_webhooks(tmp_path) -> None:
+    initialize_project(
+        root=tmp_path,
+        signature_provider="standard_webhooks",
+    )
+
+    scenario = load_scenario(tmp_path / "scenarios" / "webhook.yaml")
+    assert scenario["delivery"]["signature_provider"] == "standard_webhooks"
+
+
 def test_generated_workflow_bash_blocks_have_valid_syntax(tmp_path) -> None:
     bash = shutil.which("bash")
     if bash is None:
