@@ -266,7 +266,7 @@ def test_compare_latest_rejects_baseline_against_itself(tmp_path) -> None:
 def test_history_export_is_portable_and_sanitized(tmp_path) -> None:
     database = tmp_path / "history.sqlite3"
     output = tmp_path / "baselines" / "baseline.json"
-    result = make_result("run_export")
+    result = make_result("run_export1")
     result["payload"] = {"private": "BASELINE_PRIVATE_PAYLOAD"}
     result["secret"] = "BASELINE_PRIVATE_SECRET"
     save_run(result, database)
@@ -279,7 +279,7 @@ def test_history_export_is_portable_and_sanitized(tmp_path) -> None:
     assert "BASELINE_PRIVATE_SECRET" not in raw
 
     loaded = load_history_export(output)
-    assert loaded["run_id"] == "run_export"
+    assert loaded["run_id"] == "run_export1"
     assert loaded["scenario"] == "payment webhook"
     assert "payload" not in loaded
     assert "secret" not in loaded
@@ -293,14 +293,14 @@ def test_compare_history_file_detects_regression_from_another_database(tmp_path)
     export_history_run("latest", baseline_file, baseline_db)
 
     current = make_result(
-        "run_current",
+        "run_current2",
         deliveries=[delivery("evt_payment_001", passed=False, latency_ms=20.0, status_code=500)],
     )
     save_run(current, current_db)
 
     comparison = compare_history_file(baseline_file, path=current_db)
     assert comparison["baseline_run_id"] == "run_baseline"
-    assert comparison["current_run_id"] == "run_current"
+    assert comparison["current_run_id"] == "run_current2"
     assert comparison["has_regressions"] is True
 
 
