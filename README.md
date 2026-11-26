@@ -2,7 +2,7 @@
 
 **Break your webhook delivery flow on purpose — before production does.**
 
-A local-first chaos testing CLI for retries, duplicate events, out-of-order delivery, timeouts, and HMAC signature failures.
+A local-first webhook reliability CLI for retries, duplicate events, out-of-order delivery, timeouts, signature validation, and ambiguous acknowledgements.
 
 [![CI](https://github.com/blvxx/HookStorm/actions/workflows/ci.yml/badge.svg)](https://github.com/blvxx/HookStorm/actions/workflows/ci.yml)
 [![Python](https://img.shields.io/badge/python-3.11%2B-3776AB)](https://www.python.org/)
@@ -29,12 +29,12 @@ HookStorm sends controlled webhook traffic to **your own endpoint** and checks r
 | Out-of-order delivery | delivery.order: reverse |
 | Concurrent event delivery | delivery.concurrency: 1–50 (default: 1) |
 | Slow receiver / timeout | delivery.timeout_ms |
-| Provider HMAC signature | delivery.signature + signature_provider: generic / stripe / github / shopify |
+| Provider-compatible signatures | delivery.signature + signature_provider: generic / stripe / github / shopify / standard_webhooks |
 | Expected HTTP status | expect_status |
 | Nested JSON response assertions | expect_json, expect_duplicate_json |
 | Business-state / idempotency verification after delivery | verify.url, verify.expect_json |
 
-The same event_id is preserved across retries and duplicate deliveries, so the receiver can recognize repeated deliveries. Response assertions alone do not prove that the underlying business operation happened only once; use the optional verify probe below to check backend state independently. Set delivery.concurrency from 1 to 50 to run independent events concurrently; retries and duplicate deliveries for each event remain ordered, and reports retain scenario order.
+The same event_id is preserved across retries and duplicate deliveries, so the receiver can recognize repeated deliveries. HookStorm also includes a commit-then-drop example: the receiver commits the business effect, closes the connection before acknowledging it, and then receives the same event again. The retry response and run-scoped verify probe prove whether the effect was applied only once. Set delivery.concurrency from 1 to 50 to run independent events concurrently; retries and duplicate deliveries for each event remain ordered, and reports retain scenario order.
 
 ## Quick start
 
@@ -173,19 +173,23 @@ The JSON document has `schema_version: 1`, an overall `status` / `ready` flag, a
 
 When a scenario defines `verify.auth`, doctor checks that the named Bearer / API-key environment variable is present and follows the accepted credential format. It also requires HTTPS for authenticated non-loopback verification URLs. These are local checks only: doctor does not send the credential or test whether the application accepts it.
 
-The demo receiver verifies the generic format and provider-compatible Stripe, GitHub, and Shopify signatures. Try the provider scenarios:
+The demo receiver verifies the generic format and provider-compatible Stripe, GitHub, Shopify, and Standard Webhooks signatures. Try the provider scenarios:
 
 ~~~bash
 hookstorm run examples/stripe-signature.yaml --target http://127.0.0.1:8000/webhook/signature/stripe
 hookstorm run examples/github-signature.yaml --target http://127.0.0.1:8000/webhook/signature/github
 hookstorm run examples/shopify-signature.yaml --target http://127.0.0.1:8000/webhook/signature/shopify
+hookstorm run examples/standard-webhooks.yaml --target http://127.0.0.1:8000/webhook/signature/standard
 ~~~
 
 - **Stripe:** `Stripe-Signature: t=...,v1=...`; signs `timestamp.raw_body`.
 - **GitHub:** `X-Hub-Signature-256: sha256=...`; HMAC-SHA256 hex over the raw body.
 - **Shopify:** `X-Shopify-Hmac-Sha256`; Base64-encoded HMAC-SHA256 over the raw body.
+- **Standard Webhooks:** `webhook-id`, `webhook-timestamp`, and `webhook-signature: v1,<base64>`; signs `webhook-id.timestamp.raw_body` using an HMAC key decoded from a `whsec_<base64>` secret.
 
-Set `signature: invalid` to send a deliberately incorrect digest, or `signature: missing` to omit the provider header. Stripe's optional `signature_timestamp_offset_seconds` lets you test stale or future timestamp handling in your own receiver.
+For the Standard Webhooks example, the local demo receiver prints a public, demo-only `whsec_` value at startup. Copy that value to `HOOKSTORM_SECRET` in the HookStorm terminal. Never reuse the demo key for a real endpoint. Standard Webhooks keeps `webhook-id` stable across retries and refreshes the timestamp and signature for each attempt.
+
+Set `signature: invalid` to send a deliberately incorrect digest, or `signature: missing` to omit the provider header. The optional `signature_timestamp_offset_seconds` works with Stripe and Standard Webhooks so you can test stale or future timestamps in your own receiver.
 
 ~~~bash
 # Linux / macOS
@@ -196,6 +200,21 @@ hookstorm run examples/invalid-signature.yaml --target http://127.0.0.1:8000/web
 ~~~
 
 The invalid-signature scenario expects 401, so a correct rejection is reported as a passing test.
+
+## Reproduce a committed event with a lost acknowledgement
+
+One of the most dangerous webhook edge cases is an ambiguous acknowledgement: the handler commits the order or payment, but the connection closes before the sender receives the HTTP response. The sender cannot know whether the operation committed, so it retries.
+
+The included receiver has a dedicated endpoint that reproduces this exact sequence:
+
+~~~bash
+hookstorm run examples/commit-then-drop.yaml \
+  --target http://127.0.0.1:8000/webhook/commit-then-drop
+~~~
+
+The first request is committed to SQLite and then its connection is closed without a response. HookStorm retries with the same event ID and body. The receiver reports that the retry was a duplicate and did not apply a second effect; the final `verify` GET confirms that only one row exists for the run.
+
+This is a local demonstration of at-least-once delivery and idempotent processing. It does not claim that every receiver is transactional: use your own database-backed test endpoint to verify your application's transaction boundary.
 
 ## Verify business state after delivery
 
