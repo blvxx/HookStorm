@@ -321,6 +321,7 @@ CI tests Python 3.11, 3.12, and 3.13 on Linux, plus Python 3.12 on Windows and m
 - [x] Bounded concurrent event delivery groups
 - [x] JUnit XML reports for CI integrations
 - [x] GitHub Actions webhook scenario workflow
+- [x] Staging preflight diagnostics for scenario, secrets, and endpoint connectivity
 - [x] Local SQLite run history and baseline comparison
 - [x] Pass-rate, delivery-coverage, and latency regression detection
 - [ ] Per-event scheduling
