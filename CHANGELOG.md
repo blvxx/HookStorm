@@ -33,3 +33,5 @@
 - Document environment setup, remote-target safety, scenario adaptation, and baseline cache behavior for external projects.
 - Add `hookstorm init` to generate a starter webhook scenario and a pinned GitHub Actions staging workflow with safe no-overwrite defaults.
 - Add tests for generated workflow YAML / Bash syntax, scenario validation, custom providers, path safety, and overwrite behavior.
+- Add `hookstorm doctor` to validate integration scenarios, endpoint configuration, and required signing secrets before webhook delivery.
+- Add optional DNS/TCP and HTTPS TLS preflight checks that send no HTTP request or webhook event, and run them before staging CI tests.

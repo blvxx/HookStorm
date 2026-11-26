@@ -6,7 +6,7 @@ import json
 import re
 from pathlib import Path, PureWindowsPath
 
-HOOKSTORM_INSTALL_REF = "d7d214586885e98604e7a2abed36e51b9dd2c8ec"
+HOOKSTORM_INSTALL_REF = "4aa0e8e2eba7189f6ccc6aa3e8e46d1b0c91efae"
 _SIGNATURE_PROVIDERS = {"generic", "stripe", "github", "shopify"}
 _SAFE_PATH = re.compile(r"^[A-Za-z0-9._/-]+$")
 
@@ -120,23 +120,8 @@ jobs:
           python -m pip install
           "{install}"
 
-      - name: Validate integration settings and scenario
-        shell: bash
-        run: |
-          set -euo pipefail
-          if [[ -z "${{HOOKSTORM_TARGET_URL:-}}" ]]; then
-            echo "::error::Set the staging environment variable HOOKSTORM_TARGET_URL"
-            exit 1
-          fi
-          if [[ -z "${{HOOKSTORM_SECRET:-}}" ]]; then
-            echo "::error::Set the staging environment secret HOOKSTORM_SECRET"
-            exit 1
-          fi
-          if [[ ! -f "$HOOKSTORM_SCENARIO" ]]; then
-            echo "::error::Scenario file not found: $HOOKSTORM_SCENARIO"
-            exit 1
-          fi
-          hookstorm validate "$HOOKSTORM_SCENARIO"
+      - name: Preflight staging endpoint
+        run: hookstorm doctor "$HOOKSTORM_SCENARIO" --connect --secret-env HOOKSTORM_SECRET
 
       - name: Restore main-branch baseline
         uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830

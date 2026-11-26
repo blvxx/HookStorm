@@ -11,6 +11,7 @@ from pathlib import Path
 
 from hookstorm import __version__
 from hookstorm.config import load_scenario
+from hookstorm.doctor import run_preflight
 from hookstorm.history import (
     HistoryError,
     compare_history_file,
@@ -88,6 +89,21 @@ def _parser() -> argparse.ArgumentParser:
     history_export.add_argument("run_id", help="run ID or 'latest'")
     history_export.add_argument("--output", required=True, help="output JSON path")
     history_export.add_argument("--db", help="history database path")
+
+    doctor = subparsers.add_parser(
+        "doctor", help="check staging integration configuration without sending webhook events"
+    )
+    doctor.add_argument(
+        "scenario", nargs="?", default="scenarios/webhook.yaml", help="scenario YAML (default: scenarios/webhook.yaml)"
+    )
+    doctor.add_argument("--target", help="endpoint URL; defaults to HOOKSTORM_TARGET_URL")
+    doctor.add_argument("--secret-env", default="HOOKSTORM_SECRET", help="environment variable for HMAC secret")
+    doctor.add_argument(
+        "--connect",
+        action="store_true",
+        help="check DNS/TCP and HTTPS TLS connectivity without sending an HTTP request",
+    )
+    doctor.add_argument("--timeout", type=float, default=5.0, help="socket timeout in seconds (0.1–30; default: 5)")
 
     validate = subparsers.add_parser("validate", help="validate a scenario without sending requests")
     validate.add_argument("scenario", help="path to a scenario YAML file")
@@ -280,13 +296,36 @@ def _init_command(args: argparse.Namespace) -> int:
     print("     Variable: HOOKSTORM_TARGET_URL")
     print("     Secret:   HOOKSTORM_SECRET")
     print("     Add required reviewers to protect staging credentials.")
+    print("  3. Set HOOKSTORM_TARGET_URL and, for signed scenarios, HOOKSTORM_SECRET locally:")
+    print(f"     hookstorm doctor {args.scenario_path}")
+    print("     Add --connect to check DNS/TCP/TLS without sending an HTTP request.")
     if not args.no_workflow:
-        print(f"  3. Commit {args.workflow_path} and {args.scenario_path}.")
-        print("  4. Run the workflow on main once to create its first baseline.")
+        print(f"  4. Commit {args.workflow_path} and {args.scenario_path}.")
+        print("  5. Run the workflow on main once to create its first baseline.")
     else:
-        print("  3. Add a CI workflow when you are ready to gate pull requests.")
+        print("  4. Add a CI workflow when you are ready to gate pull requests.")
     print("No target URL or secret was written to the generated files.")
     return 0
+
+
+def _doctor_command(args: argparse.Namespace) -> int:
+    if not 0.1 <= args.timeout <= 30:
+        print("HookStorm doctor error: --timeout must be between 0.1 and 30 seconds", file=sys.stderr)
+        return 2
+    checks = run_preflight(
+        args.scenario,
+        target=args.target,
+        secret_env=args.secret_env,
+        connect=args.connect,
+        timeout=args.timeout,
+    )
+    print(f"HookStorm doctor · {args.scenario}")
+    for check in checks:
+        mark = {"PASS": "✓", "FAIL": "✗", "WARN": "!", "INFO": "i"}[check.status]
+        print(f" {mark} {check.label}: {check.message}")
+    failed = any(check.status == "FAIL" for check in checks)
+    print("\nPreflight: " + ("NOT READY" if failed else "READY"))
+    return 1 if failed else 0
 
 
 def main(argv: Sequence[str] | None = None) -> int:
@@ -294,6 +333,8 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         if args.command == "init":
             return _init_command(args)
+        if args.command == "doctor":
+            return _doctor_command(args)
         if args.command == "history":
             if args.history_command == "list":
                 return _history_list_command(args)
