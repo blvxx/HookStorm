@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 
+import pytest
+
 from hookstorm.config import validate_scenario
 from hookstorm.runner import run_scenario
 
@@ -156,3 +158,25 @@ def test_concurrency_limit_runs_events_in_parallel_and_keeps_report_order(receiv
     assert [item["event_id"] for item in result["deliveries"]] == [
         "evt_0", "evt_1", "evt_2", "evt_3"
     ]
+
+
+
+def test_missing_hmac_secret_fails_before_sending_any_requests(receiver, monkeypatch) -> None:
+    base, state = receiver
+    monkeypatch.delenv("HOOKSTORM_SECRET", raising=False)
+    data = {
+        "version": 1,
+        "name": "signature preflight",
+        "events": [
+            {"id": "first", "event_id": "evt_first", "payload": {}},
+            {
+                "id": "signed",
+                "event_id": "evt_signed",
+                "payload": {},
+                "delivery": {"signature": "valid"},
+            },
+        ],
+    }
+    with pytest.raises(ValueError, match="requires HOOKSTORM_SECRET"):
+        asyncio.run(run_scenario(validate_scenario(data), base, secret=None))
+    assert state["requests"] == []
