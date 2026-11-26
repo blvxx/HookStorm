@@ -120,6 +120,12 @@ async def run_scenario(
 ) -> dict[str, Any]:
     """Execute a validated scenario and return a privacy-conscious result document."""
     target = validate_target(target, allow_remote=allow_remote)
+    verify_config = scenario.get("verify")
+    verification_url = (
+        validate_target(verify_config["url"], allow_remote=allow_remote)
+        if verify_config is not None
+        else None
+    )
     secret = secret if secret is not None else os.getenv("HOOKSTORM_SECRET")
     started = datetime.now(UTC)
     monotonic_started = time.perf_counter()
@@ -129,6 +135,13 @@ async def run_scenario(
     reported_target = urlunsplit(
         (target_parts.scheme, target_parts.netloc, target_parts.path, "", "")
     )
+    if verification_url is not None:
+        verify_parts = urlsplit(verification_url)
+        reported_verify_target = urlunsplit(
+            (verify_parts.scheme, verify_parts.netloc, verify_parts.path, "", "")
+        )
+    else:
+        reported_verify_target = None
     all_deliveries: list[dict[str, Any]] = []
     default_delivery = {
         "order": "in_order",
@@ -282,7 +295,66 @@ async def run_scenario(
         event_groups = await asyncio.gather(*(process_event(event) for event in ordered_events))
         all_deliveries = [delivery for group in event_groups for delivery in group]
 
+        verification = None
+        if verify_config is not None and verification_url is not None:
+            verify_started = time.perf_counter()
+            verification = {
+                "method": "GET",
+                "target": reported_verify_target,
+                "status_code": None,
+                "latency_ms": 0.0,
+                "error": None,
+                "expected_status": False,
+                "expected_json": False,
+                "passed": False,
+            }
+            try:
+                response = await client.get(
+                    verification_url,
+                    headers={
+                        "User-Agent": "HookStorm/0.1 (+https://github.com/blvxx/HookStorm)",
+                        "X-HookStorm-Run": run_id,
+                    },
+                    timeout=verify_config["timeout_ms"] / 1000,
+                )
+                verification["status_code"] = response.status_code
+                verification["latency_ms"] = round(
+                    (time.perf_counter() - verify_started) * 1000, 2
+                )
+                verification["expected_status"] = (
+                    response.status_code in verify_config["expect_status"]
+                )
+                try:
+                    matched, mismatch = _matches_subset(
+                        response.json(), verify_config["expect_json"]
+                    )
+                except ValueError:
+                    matched, mismatch = False, "verification response body is not valid JSON"
+                verification["expected_json"] = matched
+                if mismatch:
+                    verification["error"] = mismatch
+                elif not verification["expected_status"]:
+                    verification["error"] = (
+                        f"verification returned unexpected HTTP status {response.status_code}"
+                    )
+                verification["passed"] = (
+                    verification["expected_status"] and verification["expected_json"]
+                )
+            except httpx.TimeoutException:
+                verification["latency_ms"] = round(
+                    (time.perf_counter() - verify_started) * 1000, 2
+                )
+                verification["error"] = "verification request timed out"
+            except httpx.RequestError as exc:
+                verification["latency_ms"] = round(
+                    (time.perf_counter() - verify_started) * 1000, 2
+                )
+                verification["error"] = (
+                    f"verification request error: {type(exc).__name__}"
+                )
+
     passed = sum(1 for delivery in all_deliveries if delivery["passed"])
+    verification_passed = verification is None or bool(verification["passed"])
     return {
         "schema_version": 1,
         "tool": "HookStorm",
@@ -297,7 +369,8 @@ async def run_scenario(
             "passed": passed,
             "failed": len(all_deliveries) - passed,
             "attempts": sum(len(delivery["attempts"]) for delivery in all_deliveries),
-            "success": passed == len(all_deliveries),
+            "success": passed == len(all_deliveries) and verification_passed,
         },
         "deliveries": all_deliveries,
+        "verification": verification,
     }
