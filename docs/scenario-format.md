@@ -20,12 +20,13 @@ Unknown keys are rejected to catch typos early.
 | Field | Default | Constraints / behavior |
 |---|---|---|
 | order | in_order | in_order or reverse; reverse reverses the event list. |
+| concurrency | 1 | Maximum number of independent events sent concurrently; 1–50. |
 | duplicate_count | 0 | Additional deliveries per event, 0–100. Reuses the same event ID and body. |
 | delay_ms | 0 | Delay before each request, 0–60,000 ms. |
 | timeout_ms | 5000 | HTTP request timeout, 1–300,000 ms. |
 | signature | none | none, valid, invalid, or missing. |
 
-Delivery settings may be global or defined per event. Per-event settings override global settings.
+Delivery settings may be global or defined per event. Per-event settings override global settings. The `concurrency` setting is global only. Retries and duplicate deliveries belonging to one event stay sequential; independent events may overlap. The report keeps events in scenario order even when requests finish out of order.
 
 For signature valid or invalid, set HOOKSTORM_SECRET in the shell. The signature is sha256=<hex HMAC-SHA256> over the compact JSON request body and is sent as X-HookStorm-Signature.
 
