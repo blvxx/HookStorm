@@ -118,3 +118,20 @@ def test_concurrency_is_global_not_per_event() -> None:
     data["events"][0]["delivery"] = {"concurrency": 2}
     with pytest.raises(ScenarioError, match="Unknown key"):
         validate_scenario(data)
+
+
+
+def test_normalizes_expected_json_using_json_semantics() -> None:
+    data = valid_scenario()
+    data["events"][0]["expect_json"] = {1: {"accepted": True}}
+    normalized = validate_scenario(data)
+    assert normalized["events"][0]["expect_json"] == {"1": {"accepted": True}}
+
+
+def test_rejects_non_json_expected_values() -> None:
+    from datetime import date
+
+    data = valid_scenario()
+    data["events"][0]["expect_json"] = {"created_at": date.today()}
+    with pytest.raises(ScenarioError, match="JSON-compatible"):
+        validate_scenario(data)
