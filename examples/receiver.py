@@ -10,9 +10,9 @@ import os
 import sqlite3
 import threading
 import time
-from urllib.parse import urlsplit
 from collections import defaultdict
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+from urllib.parse import urlsplit
 
 SEEN: set[tuple[str, str]] = set()
 ATTEMPTS: defaultdict[tuple[str, str], int] = defaultdict(int)
