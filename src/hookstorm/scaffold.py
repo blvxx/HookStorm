@@ -34,9 +34,9 @@ def render_scenario(
     if signature_provider not in _SIGNATURE_PROVIDERS:
         choices = ", ".join(sorted(_SIGNATURE_PROVIDERS))
         raise ValueError(f"Unsupported signature provider '{signature_provider}'. Choose: {choices}")
-    if not event_type or len(event_type) > 256 or any(ch in event_type for ch in "\\r\\n"):
+    if not event_type or len(event_type) > 256 or any(ch in event_type for ch in "\r\n"):
         raise ValueError("event type must contain 1–256 characters and no line breaks")
-    if not event_id or len(event_id) > 256 or any(ch in event_id for ch in "\\r\\n"):
+    if not event_id or len(event_id) > 256 or any(ch in event_id for ch in "\r\n"):
         raise ValueError("event ID must contain 1–256 characters and no line breaks")
 
     return f"""version: 1
