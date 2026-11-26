@@ -6,7 +6,6 @@ import asyncio
 import base64
 import hashlib
 import hmac
-import ipaddress
 import json
 import os
 import time
@@ -18,6 +17,10 @@ from urllib.parse import urlsplit, urlunsplit
 import httpx
 
 from hookstorm.safety import validate_target
+from hookstorm.verify_auth import (
+    resolve_verification_auth_headers,
+    validate_verification_auth_transport,
+)
 
 
 def _json_bytes(value: Any) -> bytes:
@@ -112,37 +115,6 @@ def _signature_headers(
     return {_SIGNATURE_HEADERS[provider]: value}
 
 
-def _verification_auth_headers(auth_config: dict[str, str] | None) -> dict[str, str]:
-    """Resolve verification credentials without exposing values in results or errors."""
-    if auth_config is None:
-        return {}
-
-    if auth_config["type"] == "bearer":
-        env_name = auth_config["token_env"]
-        header_name = "Authorization"
-        prefix = "Bearer "
-    else:
-        env_name = auth_config["key_env"]
-        header_name = auth_config["header"]
-        prefix = ""
-
-    credential = os.getenv(env_name)
-    if not credential:
-        raise ValueError(
-            f"Missing or empty environment variable '{env_name}' required by verify.auth."
-        )
-    if (
-        len(credential) > 8_192
-        or not credential.isascii()
-        or any(ord(char) < 33 or ord(char) > 126 for char in credential)
-    ):
-        raise ValueError(
-            f"Environment variable '{env_name}' must contain 1–8192 printable ASCII "
-            "characters without whitespace."
-        )
-    return {header_name: f"{prefix}{credential}"}
-
-
 async def run_scenario(
     scenario: dict[str, Any],
     target: str,
@@ -158,23 +130,11 @@ async def run_scenario(
         if verify_config is not None
         else None
     )
-    if verify_config is not None and verify_config.get("auth") is not None:
-        verify_parts = urlsplit(verification_url or "")
-        hostname = (verify_parts.hostname or "").rstrip(".").lower()
-        try:
-            is_loopback = ipaddress.ip_address(hostname).is_loopback
-        except ValueError:
-            is_loopback = hostname == "localhost"
-        if verify_parts.scheme != "https" and not is_loopback:
-            raise ValueError(
-                "Authenticated verification probes require HTTPS for non-loopback URLs."
-            )
+    verification_auth_config = verify_config.get("auth") if verify_config else None
+    if verification_url is not None:
+        validate_verification_auth_transport(verification_url, verification_auth_config)
     # Resolve verification credentials before any webhook event is sent.
-    verification_auth_headers = (
-        _verification_auth_headers(verify_config.get("auth"))
-        if verify_config is not None
-        else {}
-    )
+    verification_auth_headers = resolve_verification_auth_headers(verification_auth_config)
     secret = secret if secret is not None else os.getenv("HOOKSTORM_SECRET")
     started = datetime.now(UTC)
     monotonic_started = time.perf_counter()
