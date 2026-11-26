@@ -6,7 +6,7 @@ import json
 import re
 from pathlib import Path, PureWindowsPath
 
-HOOKSTORM_INSTALL_REF = "4aa0e8e2eba7189f6ccc6aa3e8e46d1b0c91efae"
+HOOKSTORM_INSTALL_REF = "8755dc158c732a420e09b83d8bae0e29a10e9206"
 _SIGNATURE_PROVIDERS = {"generic", "stripe", "github", "shopify", "standard_webhooks"}
 _SAFE_PATH = re.compile(r"^[A-Za-z0-9._/-]+$")
 
