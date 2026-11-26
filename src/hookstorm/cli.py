@@ -13,7 +13,9 @@ from hookstorm import __version__
 from hookstorm.config import load_scenario
 from hookstorm.history import (
     HistoryError,
+    compare_history_file,
     compare_history_runs,
+    export_history_run,
     get_run,
     list_runs,
     result_metrics,
