@@ -455,7 +455,7 @@ def export_history_run(
         }
         encoded = json.dumps(
             document, ensure_ascii=False, indent=2, allow_nan=False
-        ) + "\\n"
+        ) + ""
         destination.write_text(encoded, encoding="utf-8")
     except (OSError, TypeError, ValueError) as exc:
         raise HistoryError(f"Cannot export run '{resolved_id}': {exc}") from exc
