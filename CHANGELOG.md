@@ -31,3 +31,5 @@
 - Gate the built-in GitHub Actions webhook scenarios against cached main-branch baselines; refresh baselines only after successful main runs.
 - Add a copy-ready GitHub Actions regression workflow and staging scenario for application repositories, with fork-PR secret isolation and trusted-main baseline refreshes.
 - Document environment setup, remote-target safety, scenario adaptation, and baseline cache behavior for external projects.
+- Add `hookstorm init` to generate a starter webhook scenario and a pinned GitHub Actions staging workflow with safe no-overwrite defaults.
+- Add tests for generated workflow YAML / Bash syntax, scenario validation, custom providers, path safety, and overwrite behavior.
