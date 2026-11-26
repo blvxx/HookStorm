@@ -306,7 +306,7 @@ def render_junit(result: dict[str, Any]) -> str:
             failure.text = message
 
     ET.indent(suite, space="  ")
-    return '<?xml version="1.0" encoding="UTF-8"?>\\n' + ET.tostring(
+    return '<?xml version="1.0" encoding="UTF-8"?>\n' + ET.tostring(
         suite, encoding="unicode"
     ) + "\\n"
 
