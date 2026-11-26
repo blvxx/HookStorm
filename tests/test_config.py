@@ -177,7 +177,7 @@ def test_rejects_timestamp_offset_for_non_stripe_provider() -> None:
 def test_rejects_timestamp_offset_without_explicit_stripe_provider() -> None:
     data = valid_scenario()
     data["delivery"] = {"signature_timestamp_offset_seconds": 30}
-    with pytest.raises(ScenarioError, match="requires signature_provider"):
+    with pytest.raises(ScenarioError, match="only be used with signature_provider: stripe"):
         validate_scenario(data)
 
 
@@ -188,3 +188,12 @@ def test_signature_provider_can_be_overridden_per_event() -> None:
     data["events"][0]["delivery"] = {"signature_provider": "shopify"}
     normalized = validate_scenario(data)
     assert normalized["events"][0]["delivery"]["signature_provider"] == "shopify"
+
+
+
+def test_event_stripe_timestamp_offset_inherits_global_provider() -> None:
+    data = valid_scenario()
+    data["delivery"] = {"signature_provider": "stripe", "signature": "valid"}
+    data["events"][0]["delivery"] = {"signature_timestamp_offset_seconds": -60}
+    normalized = validate_scenario(data)
+    assert normalized["events"][0]["delivery"]["signature_timestamp_offset_seconds"] == -60
