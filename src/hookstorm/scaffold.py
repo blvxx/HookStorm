@@ -98,7 +98,7 @@ jobs:
     runs-on: ubuntu-latest
     environment: staging
     env:
-      HOOKSTORM_SCENARIO: ${{{{ vars.HOOKSTORM_SCENARIO || {scenario} }}}}
+      HOOKSTORM_SCENARIO: ${{{{ vars.HOOKSTORM_SCENARIO || '{scenario_path}' }}}}
       HOOKSTORM_TARGET_URL: ${{{{ vars.HOOKSTORM_TARGET_URL }}}}
       HOOKSTORM_SECRET: ${{{{ secrets.HOOKSTORM_SECRET }}}}
       HOOKSTORM_LATENCY_THRESHOLD_PCT: ${{{{ vars.HOOKSTORM_LATENCY_THRESHOLD_PCT || '20' }}}}
@@ -232,14 +232,18 @@ def initialize_project(
         raise ValueError("workflow path must end in .yaml or .yml")
 
     project_root = Path(root).resolve()
-    scenario_file = project_root / scenario_rel
+    scenario_file = (project_root / scenario_rel).resolve()
+    workflow_file = (project_root / workflow_rel).resolve()
+    if not scenario_file.is_relative_to(project_root) or (
+        include_workflow and not workflow_file.is_relative_to(project_root)
+    ):
+        raise ValueError("Generated files must stay inside the current project directory")
     outputs = [(scenario_file, render_scenario(
         event_type=event_type,
         event_id=event_id,
         signature_provider=signature_provider,
     ))]
     if include_workflow:
-        workflow_file = project_root / workflow_rel
         outputs.append((
             workflow_file,
             render_workflow(
