@@ -1,7 +1,7 @@
 from __future__ import annotations
 
 from hookstorm.cli import main
-from hookstorm.history import get_run, list_runs, save_run
+from hookstorm.history import list_runs, save_run
 
 
 def _scenario_file(tmp_path) -> str:
