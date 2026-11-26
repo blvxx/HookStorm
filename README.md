@@ -235,9 +235,9 @@ SQLite history is local to a runner. Export a sanitized JSON baseline to carry i
 hookstorm history export latest --output .hookstorm-baselines/payment.json
 
 # Run the same scenario in a later job after restoring that file
-hookstorm run scenarios/payment.yaml --target http://127.0.0.1:8000/webhook \\
+hookstorm run scenarios/payment.yaml --target http://127.0.0.1:8000/webhook \
   --history-db .hookstorm/history.sqlite3
-hookstorm history compare-file .hookstorm-baselines/payment.json \\
+hookstorm history compare-file .hookstorm-baselines/payment.json \
   --db .hookstorm/history.sqlite3 --latency-threshold-pct 20
 ~~~
 
