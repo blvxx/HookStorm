@@ -173,7 +173,7 @@ def run_preflight(
     else:
         try:
             detail = _check_connectivity(parsed_target, timeout)
-        except (OSError, ssl.SSLError, TimeoutError, ValueError) as exc:
+        except (OSError, ValueError) as exc:
             checks.append(
                 DoctorCheck(
                     "FAIL",
