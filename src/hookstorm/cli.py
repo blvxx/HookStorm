@@ -86,9 +86,120 @@ def _print_summary(result: dict) -> None:
             print(f"   {latest['error']}")
 
 
+def _history_list_command(args: argparse.Namespace) -> int:
+    runs = list_runs(args.db, limit=args.limit, scenario=args.scenario)
+    if not runs:
+        print("No runs found in local history.")
+        return 0
+    print("RUN ID         RESULT  PASS RATE  DELIVERIES  P95 LATENCY  SCENARIO")
+    for item in runs:
+        state = "PASS" if item["success"] else "FAIL"
+        delivery_count = f"{item['passed']}/{item['total_deliveries']}"
+        print(
+            f"{item['run_id']:<14} {state:<7} "
+            f"{item['pass_rate_pct']:>7.2f}%  {delivery_count:<10} "
+            f"{item['p95_latency_ms']:>8.2f} ms  {item['scenario']}"
+        )
+        print(f"  {item['started_at']} · {item['duration_ms']:.0f} ms · {item['target']}")
+    return 0
+
+
+def _history_show_command(args: argparse.Namespace) -> int:
+    result = get_run(args.run_id, args.db)
+    metrics = result_metrics(result)
+    state = "PASS" if result["summary"]["success"] else "FAIL"
+    print(f"Run {result['run_id']} · {state} · {result['scenario']}")
+    print(f"Started: {result['started_at']}")
+    print(f"Target:  {result['target']}")
+    print(
+        f"Deliveries: {metrics['passed']}/{metrics['total_deliveries']} passed · "
+        f"Attempts: {metrics['attempts']} · Duration: {metrics['duration_ms']:.0f} ms"
+    )
+    print(
+        f"Pass rate: {metrics['pass_rate_pct']:.2f}% · "
+        f"p50: {metrics['p50_latency_ms']:.2f} ms · "
+        f"p95: {metrics['p95_latency_ms']:.2f} ms"
+    )
+    for delivery in result.get("deliveries", []):
+        attempts = delivery.get("attempts", [])
+        latest = attempts[-1] if attempts else {}
+        state = "PASS" if delivery.get("passed") else "FAIL"
+        status = latest.get("status_code")
+        print(
+            f"  {state:<4} {delivery.get('event_type')} "
+            f"[{delivery.get('event_id')}] duplicate={delivery.get('duplicate_index', 0)} "
+            f"attempts={len(attempts)} HTTP={status if status is not None else 'ERR'}"
+        )
+    return 0
+
+
+def _history_compare_command(args: argparse.Namespace) -> int:
+    comparison = compare_history_runs(
+        args.baseline_run_id,
+        current_run_id=args.current,
+        path=args.db,
+        latency_threshold_pct=args.latency_threshold_pct,
+    )
+    print(
+        f"Comparing {comparison['current_run_id']} against baseline "
+        f"{comparison['baseline_run_id']}"
+    )
+    print(
+        f"Scenario: {comparison['current_scenario']} "
+        f"(baseline: {comparison['baseline_scenario']})"
+    )
+    if not comparison["same_scenario"]:
+        print("WARNING: scenario names differ; interpret coverage and metric changes carefully.")
+    baseline = comparison["baseline"]
+    current = comparison["current"]
+    delta = comparison["delta"]
+    print(
+        f"Pass rate: {baseline['pass_rate_pct']:.2f}% -> "
+        f"{current['pass_rate_pct']:.2f}% ({delta['pass_rate_pct']:+.2f} pp)"
+    )
+    print(
+        f"Failed deliveries: {baseline['failed']} -> {current['failed']} "
+        f"({delta['failed_deliveries']:+d})"
+    )
+    print(
+        f"p95 delivery latency: {baseline['p95_latency_ms']:.2f} -> "
+        f"{current['p95_latency_ms']:.2f} ms"
+        + (
+            f" ({delta['p95_latency_pct']:+.2f}%)"
+            if delta["p95_latency_pct"] is not None
+            else ""
+        )
+    )
+    print(
+        f"Run duration: {baseline['duration_ms']:.0f} -> "
+        f"{current['duration_ms']:.0f} ms ({delta['duration_ms']:+.0f} ms)"
+    )
+
+    if comparison["regressions"]:
+        print(f"\nREGRESSIONS ({len(comparison['regressions'])})")
+        for item in comparison["regressions"]:
+            print(f"  ! {item['reason']}: {item.get('delivery', 'overall metric')}")
+    else:
+        print("\nNO REGRESSIONS DETECTED")
+
+    if comparison["improvements"]:
+        print(f"\nIMPROVEMENTS ({len(comparison['improvements'])})")
+        for item in comparison["improvements"]:
+            print(f"  + {item['reason']}: {item.get('delivery', 'overall metric')}")
+    return 1 if comparison["has_regressions"] else 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
+        if args.command == "history":
+            if args.history_command == "list":
+                return _history_list_command(args)
+            if args.history_command == "show":
+                return _history_show_command(args)
+            if args.history_command == "compare":
+                return _history_compare_command(args)
+
         scenario = load_scenario(args.scenario)
         if args.command == "validate":
             print(f"Scenario valid: {scenario['name']} ({len(scenario['events'])} event(s))")
@@ -102,8 +213,18 @@ def main(argv: Sequence[str] | None = None) -> int:
         result = asyncio.run(
             run_scenario(scenario, args.target, allow_remote=args.allow_remote, secret=secret)
         )
+
+        history_id = None
+        if not args.no_history:
+            try:
+                history_id = save_run(result, args.history_db)
+            except HistoryError as exc:
+                print(f"History warning: {exc}", file=sys.stderr)
+
         if args.format == "json" and not args.output:
             sys.stdout.write(render_json(result))
+            if history_id:
+                print(f"History: {history_id}", file=sys.stderr)
         else:
             default_names = {
                 "html": "hookstorm-report.html",
@@ -114,14 +235,16 @@ def main(argv: Sequence[str] | None = None) -> int:
             write_report(result, output, args.format)
             _print_summary(result)
             print(f"Report: {output.resolve()}")
+            if history_id:
+                print(f"History: {history_id}")
+            elif args.no_history:
+                print("History: disabled for this run")
         return 0 if result["summary"]["success"] else 1
-    except ValueError as exc:
+    except (HistoryError, ValueError) as exc:
         print(f"HookStorm error: {exc}", file=sys.stderr)
         return 2
     except KeyboardInterrupt:
         print("\nInterrupted.", file=sys.stderr)
         return 130
-
-
 if __name__ == "__main__":
     raise SystemExit(main())
