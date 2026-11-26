@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import socket
 from pathlib import Path
 from urllib.parse import urlsplit
@@ -349,3 +350,115 @@ def test_doctor_verbose_implies_connect_and_prints_details(
     assert "DNS lookup completed in 0.50 ms" in output
     assert "TLS: TLSv1.3" in output
     assert "private-secret" not in output
+
+
+def test_doctor_json_output_is_versioned_and_secret_safe(
+    tmp_path, monkeypatch, capsys
+) -> None:
+    scenario = _scenario_file(tmp_path)
+    monkeypatch.setenv(
+        "HOOKSTORM_TARGET_URL",
+        "https://staging.example.test/webhook?token=private-token",
+    )
+    monkeypatch.setenv("HOOKSTORM_SECRET", "private-secret")
+
+    assert main(["doctor", str(scenario), "--format", "json"]) == 0
+
+    output = capsys.readouterr().out
+    document = json.loads(output)
+    assert set(document) == {
+        "schema_version",
+        "tool",
+        "tool_version",
+        "command",
+        "scenario",
+        "status",
+        "ready",
+        "exit_code",
+        "network",
+        "summary",
+        "checks",
+    }
+    assert document["schema_version"] == 1
+    assert document["tool"] == "HookStorm"
+    assert document["command"] == "doctor"
+    assert document["scenario"] == str(scenario)
+    assert document["status"] == "READY"
+    assert document["ready"] is True
+    assert document["exit_code"] == 0
+    assert document["network"] == {
+        "mode": "none",
+        "requested": False,
+        "performed": False,
+    }
+    assert document["summary"] == {
+        "total_checks": len(document["checks"]),
+        "passed": 2,
+        "failed": 0,
+        "warnings": 1,
+        "info": 1,
+    }
+    assert all(
+        set(check) == {"status", "label", "message", "details"}
+        and isinstance(check["details"], list)
+        for check in document["checks"]
+    )
+    assert "private-token" not in output
+    assert "private-secret" not in output
+
+
+def test_doctor_json_output_preserves_failure_exit_code(
+    tmp_path, monkeypatch, capsys
+) -> None:
+    scenario = _scenario_file(tmp_path)
+    monkeypatch.delenv("HOOKSTORM_TARGET_URL", raising=False)
+    monkeypatch.delenv("HOOKSTORM_SECRET", raising=False)
+
+    assert main(["doctor", str(scenario), "--format", "json"]) == 1
+
+    document = json.loads(capsys.readouterr().out)
+    assert document["status"] == "NOT_READY"
+    assert document["ready"] is False
+    assert document["exit_code"] == 1
+    assert document["summary"]["failed"] == 2
+    failed_labels = {
+        check["label"] for check in document["checks"] if check["status"] == "FAIL"
+    }
+    assert failed_labels == {"Target", "Signing secret"}
+
+
+def test_doctor_json_verbose_includes_network_details(
+    tmp_path, monkeypatch, capsys
+) -> None:
+    scenario = _scenario_file(tmp_path)
+    monkeypatch.setenv("HOOKSTORM_TARGET_URL", "https://staging.example.test/webhook")
+    monkeypatch.setenv("HOOKSTORM_SECRET", "private-secret")
+    monkeypatch.setattr(
+        "hookstorm.doctor._check_connectivity_detailed",
+        lambda *_args: ConnectivityResult(
+            "PASS",
+            "all 1 resolved address(es) reachable with verified TLS",
+            (
+                "DNS IPv4: 192.0.2.25",
+                "IPv4 192.0.2.25: TCP connected in 1.00 ms",
+                "TLS: TLSv1.3; cipher: TLS_AES_128_GCM_SHA256",
+                "Certificate expires: 2030-12-01T00:00:00+00:00",
+            ),
+        ),
+    )
+
+    assert main(["doctor", str(scenario), "--verbose", "--format", "json"]) == 0
+
+    output = capsys.readouterr().out
+    document = json.loads(output)
+    assert document["network"] == {
+        "mode": "verbose",
+        "requested": True,
+        "performed": True,
+    }
+    network = next(check for check in document["checks"] if check["label"] == "Network")
+    assert network["status"] == "PASS"
+    assert network["details"][0] == "DNS IPv4: 192.0.2.25"
+    assert "TLSv1.3" in network["details"][2]
+    assert "private-secret" not in output
+    assert "Preflight:" not in output
