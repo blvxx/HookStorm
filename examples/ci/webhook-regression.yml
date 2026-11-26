@@ -76,7 +76,7 @@ jobs:
         uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
         with:
           path: .hookstorm-baselines/
-          key: hookstorm-baseline-main-${{ github.sha }}
+          key: hookstorm-baseline-main-${{ github.sha }}-${{ github.run_id }}
           restore-keys: |
             hookstorm-baseline-main-
 
