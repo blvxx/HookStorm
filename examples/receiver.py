@@ -142,7 +142,10 @@ class Handler(BaseHTTPRequestHandler):
                 expected = "sha256=" + hmac.new(SECRET.encode(), raw, hashlib.sha256).hexdigest()
                 valid = hmac.compare_digest(supplied, expected)
             if not valid:
-                self._reply(401, {"ok": False, "error": "invalid signature"})
+                error_payload = {"ok": False, "error": "invalid signature"}
+                if self.path.startswith("/webhook/signature/standard"):
+                    error_payload["provider"] = "standard"
+                self._reply(401, error_payload)
                 return
 
         ATTEMPTS[delivery_key] += 1
@@ -178,15 +181,15 @@ class Handler(BaseHTTPRequestHandler):
             self.connection.close()
             return
 
-        self._reply(
-            200,
-            {
-                "ok": True,
-                "event_id": event_id,
-                "duplicate": duplicate,
-                "effect_applied": cursor.rowcount == 1,
-            },
-        )
+        success_payload = {
+            "ok": True,
+            "event_id": event_id,
+            "duplicate": duplicate,
+            "effect_applied": cursor.rowcount == 1,
+        }
+        if self.path.startswith("/webhook/signature/standard"):
+            success_payload["provider"] = "standard"
+        self._reply(200, success_payload)
 
 
 def main() -> None:
