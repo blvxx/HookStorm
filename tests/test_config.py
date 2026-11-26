@@ -197,3 +197,70 @@ def test_event_stripe_timestamp_offset_inherits_global_provider() -> None:
     data["events"][0]["delivery"] = {"signature_timestamp_offset_seconds": -60}
     normalized = validate_scenario(data)
     assert normalized["events"][0]["delivery"]["signature_timestamp_offset_seconds"] == -60
+
+
+
+def test_validates_business_state_verification_defaults() -> None:
+    data = valid_scenario()
+    data["verify"] = {
+        "url": "http://127.0.0.1:8000/__hookstorm/state",
+        "expect_json": {"processed_events": 1},
+    }
+    verify = validate_scenario(data)["verify"]
+    assert verify["expect_status"] == [200]
+    assert verify["timeout_ms"] == 5_000
+    assert verify["expect_json"] == {"processed_events": 1}
+
+
+def test_verify_is_optional_and_defaults_to_none() -> None:
+    assert validate_scenario(valid_scenario())["verify"] is None
+
+
+@pytest.mark.parametrize("url", ["", "/state", "ftp://localhost/state", "http://user:pass@localhost/state", "http://localhost/state#fragment"])
+def test_rejects_invalid_verification_urls(url: str) -> None:
+    data = valid_scenario()
+    data["verify"] = {"url": url, "expect_json": {"processed_events": 1}}
+    with pytest.raises(ScenarioError, match="verify.url"):
+        validate_scenario(data)
+
+
+def test_rejects_unknown_verification_keys() -> None:
+    data = valid_scenario()
+    data["verify"] = {
+        "url": "http://127.0.0.1/state",
+        "expect_json": {},
+        "shell": "echo unsafe",
+    }
+    with pytest.raises(ScenarioError, match="Unknown key"):
+        validate_scenario(data)
+
+
+@pytest.mark.parametrize("status", [[], [0], [600], [True], "200"])
+def test_rejects_invalid_verification_status(status: object) -> None:
+    data = valid_scenario()
+    data["verify"] = {
+        "url": "http://127.0.0.1/state",
+        "expect_status": status,
+        "expect_json": {},
+    }
+    with pytest.raises(ScenarioError, match="verify.expect_status"):
+        validate_scenario(data)
+
+
+def test_requires_json_object_for_verification() -> None:
+    data = valid_scenario()
+    data["verify"] = {"url": "http://127.0.0.1/state", "expect_json": [1]}
+    with pytest.raises(ScenarioError, match="verify.expect_json"):
+        validate_scenario(data)
+
+
+@pytest.mark.parametrize("timeout", [0, 300_001, True, 1.5, "100"])
+def test_rejects_invalid_verification_timeout(timeout: object) -> None:
+    data = valid_scenario()
+    data["verify"] = {
+        "url": "http://127.0.0.1/state",
+        "expect_json": {},
+        "timeout_ms": timeout,
+    }
+    with pytest.raises(ScenarioError, match="verify.timeout_ms"):
+        validate_scenario(data)
