@@ -6,7 +6,6 @@ import json
 import os
 import sqlite3
 from pathlib import Path
-from statistics import median
 from typing import Any
 
 _DEFAULT_DB = Path.home() / ".hookstorm" / "history.sqlite3"
