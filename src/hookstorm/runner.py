@@ -328,9 +328,24 @@ async def run_scenario(
         trust_env=False,
         timeout=httpx.Timeout(30.0, connect=5.0),
     ) as client:
-        # gather() retains input order in the result, even when requests finish out of order.
-        event_groups = await asyncio.gather(*(process_event(event) for event in ordered_events))
-        all_deliveries = [delivery for group in event_groups for delivery in group]
+        # Start the earliest scheduled events first, even if setup overhead means
+        # multiple offsets have already elapsed. Restore scenario order after execution.
+        execution_order = sorted(
+            range(len(ordered_events)),
+            key=lambda index: ordered_events[index].get("schedule_after_ms", 0),
+        )
+        scheduled_groups = await asyncio.gather(
+            *(process_event(ordered_events[index]) for index in execution_order)
+        )
+        groups_by_scenario_index = {
+            index: group
+            for index, group in zip(execution_order, scheduled_groups, strict=True)
+        }
+        all_deliveries = [
+            delivery
+            for index in range(len(ordered_events))
+            for delivery in groups_by_scenario_index[index]
+        ]
 
         verification = None
         if verify_config is not None and verification_url is not None:
