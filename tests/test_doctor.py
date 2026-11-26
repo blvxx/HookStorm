@@ -75,10 +75,10 @@ def _verification_scenario_file(
     path = _scenario_file(tmp_path, signature="none")
     content = path.read_text(encoding="utf-8")
     content += (
-        "verify:\\n"
-        f"  url: {url}\\n"
-        "  expect_status: [200]\\n"
-        "  expect_json: { processed_events: 1 }\\n"
+        "verify:\n"
+        f"  url: {url}\n"
+        "  expect_status: [200]\n"
+        "  expect_json: { processed_events: 1 }\n"
         + auth
     )
     path.write_text(content, encoding="utf-8")
@@ -378,7 +378,7 @@ def test_verbose_connectivity_reports_ipv4_ipv6_and_partial_failures(monkeypatch
 
     assert result.status == "WARN"
     assert result.message == "1/2 address(es) reachable; 1 address(es) failed"
-    joined = "\\n".join(result.details)
+    joined = "\n".join(result.details)
     assert "DNS IPv4: 192.0.2.10" in joined
     assert "DNS IPv6: 2001:db8::10" in joined
     assert "IPv4 192.0.2.10: TCP connected in" in joined
@@ -437,7 +437,7 @@ def test_verbose_https_reports_tls_and_certificate_metadata(monkeypatch) -> None
 
     assert result.status == "PASS"
     assert result.message == "all 1 resolved address(es) reachable with verified TLS"
-    joined = "\\n".join(result.details)
+    joined = "\n".join(result.details)
     assert "TLSv1.3" in joined
     assert "cipher: TLS_AES_128_GCM_SHA256" in joined
     assert "Certificate subject: commonName=staging.example.test" in joined
