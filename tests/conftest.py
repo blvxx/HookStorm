@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import json
 import threading
+import time
 from collections import defaultdict
 from collections.abc import Iterator
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -11,7 +12,8 @@ import pytest
 
 @pytest.fixture
 def receiver() -> Iterator[tuple[str, dict]]:
-    state = {"seen": set(), "attempts": defaultdict(int), "requests": []}
+    state = {"seen": set(), "attempts": defaultdict(int), "requests": [], "active": 0, "max_active": 0}
+    state_lock = threading.Lock()
 
     class Handler(BaseHTTPRequestHandler):
         def log_message(self, fmt: str, *args: object) -> None:
@@ -27,7 +29,20 @@ def receiver() -> Iterator[tuple[str, dict]]:
                 {"run_id": run_id, "event_id": event_id, "headers": dict(self.headers), "body": body}
             )
             state["attempts"][delivery_key] += 1
-            if self.path == "/flaky" and state["attempts"][delivery_key] == 1:
+            if self.path == "/slow":
+                with state_lock:
+                    state["active"] += 1
+                    state["max_active"] = max(state["max_active"], state["active"])
+                time.sleep(0.08)
+                with state_lock:
+                    state["active"] -= 1
+                status, payload = 200, {"ok": True}
+            elif self.path == "/nested":
+                status, payload = 200, {
+                    "ok": True,
+                    "metadata": {"delivery": {"accepted": True, "sequence": 7}},
+                }
+            elif self.path == "/flaky" and state["attempts"][delivery_key] == 1:
                 status, payload = 503, {"retry": True}
             elif self.path == "/signature":
                 import hashlib
