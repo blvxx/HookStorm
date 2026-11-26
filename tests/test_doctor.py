@@ -72,8 +72,8 @@ def test_preflight_fails_when_target_or_required_secret_is_missing(tmp_path) -> 
 def test_preflight_uses_event_level_signature_overrides(tmp_path) -> None:
     path = _scenario_file(tmp_path, signature="none")
     content = path.read_text(encoding="utf-8").replace(
-        "    payload:\\n      ok: true",
-        "    delivery:\\n      signature: valid\\n    payload:\\n      ok: true",
+        "    payload:\n      ok: true",
+        "    delivery:\n      signature: valid\n    payload:\n      ok: true",
     )
     path.write_text(content, encoding="utf-8")
     checks = run_preflight(
