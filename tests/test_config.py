@@ -264,3 +264,65 @@ def test_rejects_invalid_verification_timeout(timeout: object) -> None:
     }
     with pytest.raises(ScenarioError, match="verify.timeout_ms"):
         validate_scenario(data)
+
+
+def test_validates_bearer_verification_auth_by_environment_name() -> None:
+    data = valid_scenario()
+    data["verify"] = {
+        "url": "http://127.0.0.1:8000/state",
+        "expect_json": {},
+        "auth": {"type": "bearer", "token_env": "HOOKSTORM_VERIFY_TOKEN"},
+    }
+    assert validate_scenario(data)["verify"]["auth"] == {
+        "type": "bearer",
+        "token_env": "HOOKSTORM_VERIFY_TOKEN",
+    }
+
+
+def test_validates_api_key_verification_auth_defaults() -> None:
+    data = valid_scenario()
+    data["verify"] = {
+        "url": "http://127.0.0.1:8000/state",
+        "expect_json": {},
+        "auth": {"type": "api_key", "key_env": "HOOKSTORM_VERIFY_API_KEY"},
+    }
+    assert validate_scenario(data)["verify"]["auth"] == {
+        "type": "api_key",
+        "key_env": "HOOKSTORM_VERIFY_API_KEY",
+        "header": "X-API-Key",
+    }
+
+
+@pytest.mark.parametrize(
+    "auth",
+    [
+        {"type": "basic", "token_env": "HOOKSTORM_TOKEN"},
+        {"type": "bearer", "token_env": "BAD-NAME"},
+        {"type": "bearer", "token_env": ""},
+        {"type": "api_key", "key_env": "HOOKSTORM_KEY", "header": "bad header"},
+        {"type": "api_key", "key_env": "HOOKSTORM_KEY", "header": "Authorization"},
+        {"type": "api_key", "key_env": "HOOKSTORM_KEY", "header": "X-HookStorm-Run"},
+        {"type": "api_key", "key_env": "HOOKSTORM_KEY", "unexpected": "value"},
+    ],
+)
+def test_rejects_invalid_verification_auth(auth: dict) -> None:
+    data = valid_scenario()
+    data["verify"] = {
+        "url": "http://127.0.0.1:8000/state",
+        "expect_json": {},
+        "auth": auth,
+    }
+    with pytest.raises(ScenarioError, match="verify.auth"):
+        validate_scenario(data)
+
+
+def test_rejects_non_mapping_verification_auth() -> None:
+    data = valid_scenario()
+    data["verify"] = {
+        "url": "http://127.0.0.1:8000/state",
+        "expect_json": {},
+        "auth": "HOOKSTORM_TOKEN",
+    }
+    with pytest.raises(ScenarioError, match="verify.auth"):
+        validate_scenario(data)
+
