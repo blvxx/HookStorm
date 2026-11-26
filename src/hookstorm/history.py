@@ -101,6 +101,37 @@ def result_metrics(result: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+def _sanitize_result(result: dict[str, Any]) -> dict[str, Any]:
+    """Keep only run metadata and assertion outcomes; never persist request/response data."""
+    summary_keys = ("total_deliveries", "passed", "failed", "attempts", "success")
+    delivery_keys = (
+        "event_id", "event_type", "duplicate_index", "signature_provider", "passed"
+    )
+    attempt_keys = (
+        "attempt", "elapsed_ms", "status_code", "latency_ms", "error",
+        "expected_status", "expected_json", "passed",
+    )
+    sanitized = {
+        key: result[key]
+        for key in ("schema_version", "tool", "version", "run_id", "scenario", "target", "started_at", "duration_ms")
+        if key in result
+    }
+    sanitized["summary"] = {
+        key: result["summary"][key]
+        for key in summary_keys
+        if key in result["summary"]
+    }
+    sanitized["deliveries"] = []
+    for delivery in result.get("deliveries", []):
+        item = {key: delivery[key] for key in delivery_keys if key in delivery}
+        item["attempts"] = [
+            {key: attempt[key] for key in attempt_keys if key in attempt}
+            for attempt in delivery.get("attempts", [])
+        ]
+        sanitized["deliveries"].append(item)
+    return sanitized
+
+
 def save_run(result: dict[str, Any], path: str | Path | None = None) -> str:
     """Persist a sanitized HookStorm result and return its run ID."""
     required = ("run_id", "scenario", "started_at", "target", "summary", "deliveries")
@@ -108,9 +139,12 @@ def save_run(result: dict[str, Any], path: str | Path | None = None) -> str:
     if missing:
         raise HistoryError(f"Cannot save incomplete run result; missing: {', '.join(missing)}")
 
-    metrics = result_metrics(result)
+    safe_result = _sanitize_result(result)
+    metrics = result_metrics(safe_result)
     try:
-        encoded = json.dumps(result, ensure_ascii=False, separators=(",", ":"), allow_nan=False)
+        encoded = json.dumps(
+            safe_result, ensure_ascii=False, separators=(",", ":"), allow_nan=False
+        )
     except (TypeError, ValueError) as exc:
         raise HistoryError(f"Cannot serialize run result for history: {exc}") from exc
 
