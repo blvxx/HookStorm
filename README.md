@@ -180,6 +180,7 @@ hookstorm run examples/stripe-signature.yaml --target http://127.0.0.1:8000/webh
 hookstorm run examples/github-signature.yaml --target http://127.0.0.1:8000/webhook/signature/github
 hookstorm run examples/shopify-signature.yaml --target http://127.0.0.1:8000/webhook/signature/shopify
 hookstorm run examples/standard-webhooks.yaml --target http://127.0.0.1:8000/webhook/signature/standard
+hookstorm run examples/standard-webhooks-stale-timestamp.yaml --target http://127.0.0.1:8000/webhook/signature/standard
 ~~~
 
 - **Stripe:** `Stripe-Signature: t=...,v1=...`; signs `timestamp.raw_body`.
@@ -199,7 +200,7 @@ $env:HOOKSTORM_SECRET = 'local-demo-secret'
 hookstorm run examples/invalid-signature.yaml --target http://127.0.0.1:8000/webhook/signature
 ~~~
 
-The invalid-signature scenario expects 401, so a correct rejection is reported as a passing test.
+The invalid-signature scenario expects 401, so a correct rejection is reported as a passing test. The `standard-webhooks-stale-timestamp.yaml` example sends a valid HMAC with a timestamp one hour in the past; the demo receiver rejects it because it falls outside the five-minute replay window.
 
 For Standard Webhooks, copy the `whsec_` demo secret printed by `examples/receiver.py` into `HOOKSTORM_SECRET` in the HookStorm terminal. This key is intentionally public and for local demonstration only. Real integrations must use the secret issued for their endpoint.
 
