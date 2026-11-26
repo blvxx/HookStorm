@@ -1,0 +1,20 @@
+version: 1
+name: Stripe-compatible webhook signature
+description: Sends a Stripe-style timestamped HMAC-SHA256 signature.
+delivery:
+  signature: valid
+  signature_provider: stripe
+  signature_timestamp_offset_seconds: 0
+retry:
+  max_attempts: 1
+events:
+  - id: invoice.paid
+    event_id: evt_stripe_demo_001
+    payload:
+      id: evt_stripe_demo_001
+      type: invoice.paid
+      data:
+        object:
+          id: in_demo_001
+    expect_status: [200]
+    expect_json: { ok: true }

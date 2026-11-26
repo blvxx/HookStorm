@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import base64
 import hashlib
 import hmac
 import json
@@ -44,9 +45,39 @@ class Handler(BaseHTTPRequestHandler):
             time.sleep(1.0)
 
         if SECRET and self.path.startswith("/webhook/signature"):
-            supplied = self.headers.get("X-HookStorm-Signature", "")
-            expected = "sha256=" + hmac.new(SECRET.encode(), raw, hashlib.sha256).hexdigest()
-            if not hmac.compare_digest(supplied, expected):
+            if self.path.startswith("/webhook/signature/stripe"):
+                supplied = self.headers.get("Stripe-Signature", "")
+                parts: dict[str, list[str]] = defaultdict(list)
+                for item in supplied.split(","):
+                    key, separator, value = item.partition("=")
+                    if separator:
+                        parts[key.strip()].append(value.strip())
+                try:
+                    timestamp = int(parts.get("t", [""])[0])
+                except ValueError:
+                    timestamp = 0
+                signed = str(timestamp).encode("ascii") + b"." + raw
+                expected = hmac.new(SECRET.encode(), signed, hashlib.sha256).hexdigest()
+                valid = (
+                    timestamp > 0
+                    and abs(time.time() - timestamp) <= 300
+                    and any(hmac.compare_digest(value, expected) for value in parts.get("v1", []))
+                )
+            elif self.path.startswith("/webhook/signature/github"):
+                supplied = self.headers.get("X-Hub-Signature-256", "")
+                expected = "sha256=" + hmac.new(SECRET.encode(), raw, hashlib.sha256).hexdigest()
+                valid = hmac.compare_digest(supplied, expected)
+            elif self.path.startswith("/webhook/signature/shopify"):
+                supplied = self.headers.get("X-Shopify-Hmac-Sha256", "")
+                expected = base64.b64encode(
+                    hmac.new(SECRET.encode(), raw, hashlib.sha256).digest()
+                ).decode("ascii")
+                valid = hmac.compare_digest(supplied, expected)
+            else:
+                supplied = self.headers.get("X-HookStorm-Signature", "")
+                expected = "sha256=" + hmac.new(SECRET.encode(), raw, hashlib.sha256).hexdigest()
+                valid = hmac.compare_digest(supplied, expected)
+            if not valid:
                 self._reply(401, {"ok": False, "error": "invalid signature"})
                 return
 
@@ -64,8 +95,9 @@ def main() -> None:
     address = ("127.0.0.1", 8000)
     print(f"HookStorm demo receiver listening on http://{address[0]}:{address[1]}")
     print("Endpoints: /webhook, /webhook/flaky, /webhook/slow, /webhook/signature")
+    print("Provider signatures: /webhook/signature/stripe, /github, /shopify")
     if SECRET:
-        print("HMAC validation enabled for /webhook/signature")
+        print("HMAC validation enabled for generic, Stripe, GitHub, and Shopify endpoints")
     with ThreadingHTTPServer(address, Handler) as server:
         try:
             server.serve_forever()

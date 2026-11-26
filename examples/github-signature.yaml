@@ -1,0 +1,17 @@
+version: 1
+name: GitHub-compatible webhook signature
+description: Sends X-Hub-Signature-256 with an HMAC-SHA256 hex digest.
+delivery:
+  signature: valid
+  signature_provider: github
+retry:
+  max_attempts: 1
+events:
+  - id: issues.opened
+    event_id: evt_github_demo_001
+    payload:
+      action: opened
+      issue:
+        number: 42
+    expect_status: [200]
+    expect_json: { ok: true }

@@ -15,7 +15,10 @@ class ScenarioError(ValueError):
 
 
 _ALLOWED_TOP_LEVEL = {"version", "name", "description", "delivery", "retry", "events"}
-_ALLOWED_DELIVERY = {"order", "duplicate_count", "delay_ms", "timeout_ms", "signature", "concurrency"}
+_ALLOWED_DELIVERY = {
+    "order", "duplicate_count", "delay_ms", "timeout_ms", "signature", "concurrency",
+    "signature_provider", "signature_timestamp_offset_seconds",
+}
 _ALLOWED_RETRY = {"max_attempts", "backoff_ms", "retry_on"}
 _ALLOWED_EVENT = {
     "id", "event_id", "payload", "headers", "delivery",
@@ -51,9 +54,26 @@ def _validate_delivery(value: Any, where: str, *, allow_order: bool = True) -> d
         result["delay_ms"] = _integer(result["delay_ms"], f"{where}.delay_ms", minimum=0, maximum=60_000)
     if "concurrency" in result:
         result["concurrency"] = _integer(result["concurrency"], f"{where}.concurrency", minimum=1, maximum=50)
+    if "signature_provider" in result and (
+        not isinstance(result["signature_provider"], str)
+        or result["signature_provider"] not in {"generic", "stripe", "github", "shopify"}
+    ):
+        raise ScenarioError(
+            f"{where}.signature_provider must be generic, stripe, github, or shopify"
+        )
+    if "signature_timestamp_offset_seconds" in result:
+        result["signature_timestamp_offset_seconds"] = _integer(
+            result["signature_timestamp_offset_seconds"],
+            f"{where}.signature_timestamp_offset_seconds",
+            minimum=-86_400,
+            maximum=86_400,
+        )
     if "timeout_ms" in result:
         result["timeout_ms"] = _integer(result["timeout_ms"], f"{where}.timeout_ms", minimum=1, maximum=300_000)
-    if "signature" in result and (not isinstance(result["signature"], str) or result["signature"] not in {"none", "valid", "invalid", "missing"}):
+    if "signature" in result and (
+        not isinstance(result["signature"], str)
+        or result["signature"] not in {"none", "valid", "invalid", "missing"}
+    ):
         raise ScenarioError(f"{where}.signature must be none, valid, invalid, or missing")
     return result
 
@@ -174,6 +194,14 @@ def validate_scenario(data: Any) -> dict[str, Any]:
             "expect_json": expectations["expect_json"],
             "expect_duplicate_json": expectations["expect_duplicate_json"],
         })
+
+    for event in normalized_events:
+        effective_delivery = {**delivery, **event["delivery"]}
+        timestamp_offset = effective_delivery.get("signature_timestamp_offset_seconds", 0)
+        if timestamp_offset and effective_delivery.get("signature_provider", "generic") != "stripe":
+            raise ScenarioError(
+                "signature_timestamp_offset_seconds can only be used with signature_provider: stripe"
+            )
 
     estimated_requests = 0
     for event in normalized_events:

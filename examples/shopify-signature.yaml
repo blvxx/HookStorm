@@ -1,0 +1,16 @@
+version: 1
+name: Shopify-compatible webhook signature
+description: Sends X-Shopify-Hmac-Sha256 with a Base64-encoded HMAC-SHA256 digest.
+delivery:
+  signature: valid
+  signature_provider: shopify
+retry:
+  max_attempts: 1
+events:
+  - id: orders.created
+    event_id: evt_shopify_demo_001
+    payload:
+      id: 1001
+      email: customer@example.test
+    expect_status: [200]
+    expect_json: { ok: true }

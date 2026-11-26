@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import base64
+import hashlib
+import hmac
 import json
 import threading
 import time
@@ -44,10 +47,37 @@ def receiver() -> Iterator[tuple[str, dict]]:
                 }
             elif self.path == "/flaky" and state["attempts"][delivery_key] == 1:
                 status, payload = 503, {"retry": True}
+            elif self.path.startswith("/signature/"):
+                provider = self.path.rsplit("/", 1)[-1]
+                secret = b"test-secret"
+                valid = False
+                if provider == "stripe":
+                    parts = dict(
+                        item.split("=", 1)
+                        for item in self.headers.get("Stripe-Signature", "").split(",")
+                        if "=" in item
+                    )
+                    try:
+                        timestamp = int(parts.get("t", ""))
+                    except ValueError:
+                        timestamp = 0
+                    if timestamp and abs(time.time() - timestamp) <= 300:
+                        signed = str(timestamp).encode("ascii") + b"." + body
+                        expected = hmac.new(secret, signed, hashlib.sha256).hexdigest()
+                        valid = hmac.compare_digest(parts.get("v1", ""), expected)
+                elif provider == "github":
+                    expected = "sha256=" + hmac.new(secret, body, hashlib.sha256).hexdigest()
+                    valid = hmac.compare_digest(
+                        self.headers.get("X-Hub-Signature-256", ""), expected
+                    )
+                elif provider == "shopify":
+                    expected = base64.b64encode(hmac.new(secret, body, hashlib.sha256).digest()).decode()
+                    valid = hmac.compare_digest(
+                        self.headers.get("X-Shopify-Hmac-Sha256", ""), expected
+                    )
+                status = 200 if valid else 401
+                payload = {"ok": valid, "provider": provider}
             elif self.path == "/signature":
-                import hashlib
-                import hmac
-
                 expected = "sha256=" + hmac.new(b"test-secret", body, hashlib.sha256).hexdigest()
                 if self.headers.get("X-HookStorm-Signature") != expected:
                     status, payload = 401, {"ok": False}

@@ -1,6 +1,8 @@
 from __future__ import annotations
 
 import asyncio
+import base64
+import time
 
 import pytest
 
@@ -180,3 +182,100 @@ def test_missing_hmac_secret_fails_before_sending_any_requests(receiver, monkeyp
     with pytest.raises(ValueError, match="requires HOOKSTORM_SECRET"):
         asyncio.run(run_scenario(validate_scenario(data), base, secret=None))
     assert state["requests"] == []
+
+
+
+@pytest.mark.parametrize("provider", ["stripe", "github", "shopify"])
+def test_provider_signature_headers_are_accepted(receiver, provider: str) -> None:
+    base, state = receiver
+    result = asyncio.run(run_scenario(
+        scenario(
+            delivery={"signature": "valid", "signature_provider": provider},
+            event={
+                "expect_status": [200],
+                "expect_json": {"ok": True, "provider": provider},
+            },
+        ),
+        f"{base}/signature/{provider}",
+        secret="test-secret",
+    ))
+    assert result["summary"]["success"] is True
+    headers = {key.lower(): value for key, value in state["requests"][0]["headers"].items()}
+    if provider == "stripe":
+        signature = headers["stripe-signature"]
+        assert signature.startswith("t=")
+        assert ",v1=" in signature
+    elif provider == "github":
+        assert headers["x-hub-signature-256"].startswith("sha256=")
+    else:
+        decoded = base64.b64decode(headers["x-shopify-hmac-sha256"], validate=True)
+        assert len(decoded) == 32
+
+
+@pytest.mark.parametrize("provider", ["stripe", "github", "shopify"])
+def test_provider_invalid_signatures_are_rejected(receiver, provider: str) -> None:
+    base, _ = receiver
+    result = asyncio.run(run_scenario(
+        scenario(
+            delivery={"signature": "invalid", "signature_provider": provider},
+            event={"expect_status": [401], "expect_json": {"ok": False}},
+        ),
+        f"{base}/signature/{provider}",
+        secret="test-secret",
+    ))
+    assert result["summary"]["success"] is True
+    assert result["deliveries"][0]["attempts"][0]["status_code"] == 401
+
+
+def test_stripe_timestamp_offset_can_exercise_receiver_tolerance(receiver) -> None:
+    base, state = receiver
+    result = asyncio.run(run_scenario(
+        scenario(
+            delivery={
+                "signature": "valid",
+                "signature_provider": "stripe",
+                "signature_timestamp_offset_seconds": -3600,
+            },
+            event={"expect_status": [401]},
+        ),
+        f"{base}/signature/stripe",
+        secret="test-secret",
+    ))
+    assert result["summary"]["success"] is True
+    header = {
+        key.lower(): value for key, value in state["requests"][0]["headers"].items()
+    }["stripe-signature"]
+    timestamp = int(header.split(",", 1)[0].split("=", 1)[1])
+    assert abs(time.time() - timestamp) >= 3599
+
+
+def test_provider_signature_header_cannot_be_overridden(receiver) -> None:
+    base, state = receiver
+    result = asyncio.run(run_scenario(
+        scenario(
+            delivery={"signature": "valid", "signature_provider": "github"},
+            event={
+                "headers": {"X-Hub-Signature-256": "sha256=attacker-controlled"},
+                "expect_status": [200],
+            },
+        ),
+        f"{base}/signature/github",
+        secret="test-secret",
+    ))
+    assert result["summary"]["success"] is True
+    headers = {key.lower(): value for key, value in state["requests"][0]["headers"].items()}
+    assert headers["x-hub-signature-256"] != "sha256=attacker-controlled"
+
+
+def test_missing_provider_signature_omits_provider_header(receiver) -> None:
+    base, state = receiver
+    result = asyncio.run(run_scenario(
+        scenario(
+            delivery={"signature": "missing", "signature_provider": "shopify"},
+            event={"expect_status": [401]},
+        ),
+        f"{base}/signature/shopify",
+    ))
+    assert result["summary"]["success"] is True
+    headers = {key.lower(): value for key, value in state["requests"][0]["headers"].items()}
+    assert "x-shopify-hmac-sha256" not in headers

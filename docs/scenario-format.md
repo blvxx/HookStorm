@@ -25,10 +25,22 @@ Unknown keys are rejected to catch typos early. Scenarios can be exported with `
 | delay_ms | 0 | Delay before each request, 0–60,000 ms. |
 | timeout_ms | 5000 | HTTP request timeout, 1–300,000 ms. |
 | signature | none | none, valid, invalid, or missing. |
+| signature_provider | generic | generic, stripe, github, or shopify. |
+| signature_timestamp_offset_seconds | 0 | Stripe only; shifts the signed Unix timestamp by -86,400 to +86,400 seconds for replay-window tests. |
 
 Delivery settings may be global or defined per event. Per-event settings override global settings. The `concurrency` setting is global only. Retries and duplicate deliveries belonging to one event stay sequential; independent events may overlap. The report keeps events in scenario order even when requests finish out of order.
 
-For signature valid or invalid, set HOOKSTORM_SECRET in the shell. The signature is sha256=<hex HMAC-SHA256> over the compact JSON request body and is sent as X-HookStorm-Signature.
+For signature valid or invalid, set `HOOKSTORM_SECRET` in the shell. HookStorm signs the exact compact JSON request bytes sent over HTTP. The default `generic` provider preserves the legacy `X-HookStorm-Signature: sha256=<hex>` format.
+
+Provider formats:
+
+| Provider | Header | Signed content / encoding |
+|---|---|---|
+| [`stripe`](https://docs.stripe.com/webhooks/signature) | `Stripe-Signature` | HMAC-SHA256 over `<unix_timestamp>.<raw_body>`; header contains `t=<timestamp>,v1=<hex>`. |
+| [`github`](https://docs.github.com/en/webhooks/using-webhooks/validating-webhook-deliveries) | `X-Hub-Signature-256` | HMAC-SHA256 over the raw body, hex encoded with the `sha256=` prefix. |
+| [`shopify`](https://shopify.dev/docs/apps/build/webhooks/verify-deliveries) | `X-Shopify-Hmac-Sha256` | HMAC-SHA256 over the raw body, Base64 encoded. |
+
+`signature: invalid` changes the digest while keeping the provider's header shape. `signature: missing` omits the signature header. Stripe's timestamp offset allows testing receivers that enforce timestamp tolerance; HookStorm's demo receiver rejects signatures more than 300 seconds from its current clock.
 
 ## Retry settings
 
