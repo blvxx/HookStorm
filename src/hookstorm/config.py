@@ -300,9 +300,6 @@ def validate_scenario(data: Any) -> dict[str, Any]:
                 raise ScenarioError(
                     f"{where}.headers contains an invalid HTTP header name or non-ASCII/control value"
                 )
-        header_bytes = sum(len(key) + len(value) for key, value in headers.items())
-        if len(headers) > 64 or header_bytes > 16_384:
-            raise ScenarioError(f"{where}.headers exceed the 64-header / 16 KiB limit")
             if key.lower() in {
                 "host", "content-length", "transfer-encoding",
                 "x-hookstorm-run", "x-event-id", "x-event-type",
@@ -312,6 +309,9 @@ def validate_scenario(data: Any) -> dict[str, Any]:
                 "webhook-id", "webhook-timestamp", "webhook-signature",
             }:
                 raise ScenarioError(f"{where}.headers may not override {key}")
+        header_bytes = sum(len(key) + len(value) for key, value in headers.items())
+        if len(headers) > 64 or header_bytes > 16_384:
+            raise ScenarioError(f"{where}.headers exceed the 64-header / 16 KiB limit")
         event_delivery = _validate_delivery(event.get("delivery", {}), f"{where}.delivery", allow_order=False)
         expect_status = event.get("expect_status", [200, 201, 202, 204])
         if isinstance(expect_status, int) and not isinstance(expect_status, bool):
