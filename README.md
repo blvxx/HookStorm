@@ -29,7 +29,7 @@ HookStorm sends controlled webhook traffic to **your own endpoint** and checks r
 | Out-of-order delivery | delivery.order: reverse |
 | Concurrent event delivery | delivery.concurrency: 1–50 (default: 1) |
 | Slow receiver / timeout | delivery.timeout_ms |
-| HMAC signature | delivery.signature: valid / invalid / missing |
+| Provider HMAC signature | delivery.signature + signature_provider: generic / stripe / github / shopify |
 | Expected HTTP status | expect_status |
 | Nested JSON response assertions | expect_json, expect_duplicate_json |
 
@@ -109,7 +109,33 @@ hookstorm run examples/timeout.yaml --target http://127.0.0.1:8000/webhook/slow
 
 The timeout example is intentionally expected to fail: it proves that HookStorm detects a receiver that takes longer than the configured timeout.
 
-For HMAC examples, set the same development secret in both terminals. The demo receiver checks signatures on /webhook/signature when HOOKSTORM_SECRET is set.
+For signature examples, start the demo receiver with the same development secret in its terminal, then set it in the HookStorm terminal:
+
+~~~bash
+# Linux / macOS — set in both terminals
+export HOOKSTORM_SECRET='local-demo-secret'
+python examples/receiver.py
+~~~
+
+~~~powershell
+# Windows PowerShell — set in both terminals
+$env:HOOKSTORM_SECRET = "local-demo-secret"
+python examples/receiver.py
+~~~
+
+The demo receiver verifies the generic format and provider-compatible Stripe, GitHub, and Shopify signatures. Try the provider scenarios:
+
+~~~bash
+hookstorm run examples/stripe-signature.yaml --target http://127.0.0.1:8000/webhook/signature/stripe
+hookstorm run examples/github-signature.yaml --target http://127.0.0.1:8000/webhook/signature/github
+hookstorm run examples/shopify-signature.yaml --target http://127.0.0.1:8000/webhook/signature/shopify
+~~~
+
+- **Stripe:** `Stripe-Signature: t=...,v1=...`; signs `timestamp.raw_body`.
+- **GitHub:** `X-Hub-Signature-256: sha256=...`; HMAC-SHA256 hex over the raw body.
+- **Shopify:** `X-Shopify-Hmac-Sha256`; Base64-encoded HMAC-SHA256 over the raw body.
+
+Set `signature: invalid` to send a deliberately incorrect digest, or `signature: missing` to omit the provider header. Stripe's optional `signature_timestamp_offset_seconds` lets you test stale or future timestamp handling in your own receiver.
 
 ~~~bash
 # Linux / macOS
@@ -156,7 +182,7 @@ hookstorm run examples/payment-retry.yaml --target http://127.0.0.1:8000/webhook
 hookstorm run examples/payment-retry.yaml --target http://127.0.0.1:8000/webhook/flaky --format json
 ~~~
 
-Reports include event IDs, delivery/attempt counts, status codes, latency, and pass/fail checks. They intentionally omit request payloads, request headers, response bodies, and secrets.
+Reports include event IDs, delivery/attempt counts, elapsed attempt timing, status codes, latency, and pass/fail checks. The self-contained HTML report adds a searchable and filterable delivery timeline, attempt expansion, and pass/fail filters. Reports intentionally omit request payloads, request headers, response bodies, and secrets.
 
 ## Safety and privacy
 
@@ -192,7 +218,7 @@ CI tests Python 3.11, 3.12, and 3.13 on Linux, plus Python 3.12 on Windows and m
 - [ ] Per-event scheduling
 - [x] Export scenarios as pytest tests
 - [ ] Interactive run timeline / optional local dashboard
-- [ ] More provider-style signature adapters
+- [x] Stripe, GitHub, and Shopify provider-style signature adapters
 
 ## Contributing
 
