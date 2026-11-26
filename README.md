@@ -32,7 +32,7 @@ HookStorm sends controlled webhook traffic to **your own endpoint** and checks r
 | Expected HTTP status | expect_status |
 | Expected JSON response fields | expect_json, expect_duplicate_json |
 
-The same event_id is preserved across retries and duplicate deliveries, allowing an idempotency implementation to be checked rather than merely sending unrelated repeated requests.
+The same event_id is preserved across retries and duplicate deliveries, allowing an idempotency implementation to be checked rather than merely sending unrelated repeated requests. Set `delivery.concurrency` from 1 to 50 to run independent events concurrently; retries and duplicate deliveries for each event remain ordered, and reports retain scenario order.
 
 ## Quick start
 
@@ -169,7 +169,7 @@ CI tests Python 3.11, 3.12, and 3.13 on Linux, plus Python 3.12 on Windows and m
 - [x] HMAC signature modes and response assertions
 - [x] HTML / JSON reports
 - [x] Local demo receiver and CI test suite
-- [ ] Per-event scheduling and concurrent delivery groups
+- [x] Bounded concurrent event delivery groups\n- [ ] Per-event scheduling
 - [ ] Export scenarios as pytest tests
 - [ ] Interactive run timeline / optional local dashboard
 - [ ] More provider-style signature adapters
