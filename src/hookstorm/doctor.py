@@ -122,16 +122,15 @@ def _check_connectivity_detailed(
             seen.add(key)
 
     details = [f"DNS lookup completed in {dns_ms:.2f} ms ({len(addresses)} unique address(es))"]
-    for family, _socktype, _proto, sockaddr in addresses:
-        address = sockaddr[0]
-        family_name = "IPv6" if family == socket.AF_INET6 else "IPv4"
-        details.append(f"DNS {family_name}: {address}")
-
     if not addresses:
         return ConnectivityResult("FAIL", "DNS returned no usable addresses", tuple(details))
 
     skipped = max(0, len(addresses) - _MAX_DIAGNOSTIC_ADDRESSES)
     addresses = addresses[:_MAX_DIAGNOSTIC_ADDRESSES]
+    for family, _socktype, _proto, sockaddr in addresses:
+        address = sockaddr[0]
+        family_name = "IPv6" if family == socket.AF_INET6 else "IPv4"
+        details.append(f"DNS {family_name}: {address}")
     if skipped:
         details.append(
             f"Only the first {_MAX_DIAGNOSTIC_ADDRESSES} addresses will be checked; {skipped} skipped"
@@ -139,6 +138,7 @@ def _check_connectivity_detailed(
 
     successful = 0
     failed = 0
+    certificate_warning = False
     for family, socktype, proto, sockaddr in addresses:
         address = sockaddr[0]
         family_name = "IPv6" if family == socket.AF_INET6 else "IPv4"
@@ -178,10 +178,12 @@ def _check_connectivity_detailed(
                     remaining_days = remaining.total_seconds() / 86_400
                     details.append(f"  Certificate expires: {expires_at.isoformat()}")
                     if remaining_days < 0:
+                        certificate_warning = True
                         details.append(
                             f"  WARNING: certificate expired {-remaining_days:.1f} day(s) ago"
                         )
                     elif remaining_days <= _CERTIFICATE_WARNING_DAYS:
+                        certificate_warning = True
                         details.append(
                             f"  WARNING: certificate expires in {remaining_days:.1f} day(s)"
                         )
@@ -213,7 +215,7 @@ def _check_connectivity_detailed(
             tuple(details),
         )
     return ConnectivityResult(
-        "PASS",
+        "WARN" if certificate_warning else "PASS",
         f"all {successful} resolved address(es) reachable"
         + (" with verified TLS" if parsed.scheme == "https" else ""),
         tuple(details),
