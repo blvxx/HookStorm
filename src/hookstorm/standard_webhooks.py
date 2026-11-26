@@ -32,7 +32,7 @@ def standard_webhooks_headers(
 ) -> dict[str, str]:
     """Create Standard Webhooks metadata and a v1 HMAC signature for one attempt."""
     key = decode_standard_webhooks_secret(secret)
-    signed = f"{event_id}.{timestamp}.".encode("utf-8") + body
+    signed = f"{event_id}.{timestamp}.".encode() + body
     digest = bytearray(hmac.new(key, signed, hashlib.sha256).digest())
     if invalid:
         digest[0] ^= 0x01
