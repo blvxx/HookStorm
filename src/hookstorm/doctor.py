@@ -15,6 +15,10 @@ from urllib.parse import SplitResult, urlsplit
 from hookstorm import __version__
 from hookstorm.config import load_scenario
 from hookstorm.safety import validate_target
+from hookstorm.verify_auth import (
+    resolve_verification_auth_headers,
+    validate_verification_auth_transport,
+)
 
 _MAX_DIAGNOSTIC_ADDRESSES = 12
 _CERTIFICATE_WARNING_DAYS = 30
@@ -105,6 +109,56 @@ def _scenario_requires_secret(scenario: dict) -> bool:
         if delivery["signature"] in {"valid", "invalid"}:
             return True
     return False
+
+
+def _verification_auth_check(
+    scenario: dict | None,
+    environment: Mapping[str, str],
+) -> DoctorCheck:
+    """Check that verification credentials are configured without contacting the endpoint."""
+    if scenario is None:
+        return DoctorCheck(
+            "INFO",
+            "Verification auth",
+            "skipped because the scenario could not be validated",
+        )
+
+    verify_config = scenario.get("verify")
+    if verify_config is None:
+        return DoctorCheck(
+            "PASS",
+            "Verification auth",
+            "not required (no business-state verification probe configured)",
+        )
+
+    auth_config = verify_config.get("auth")
+    if auth_config is None:
+        return DoctorCheck(
+            "PASS",
+            "Verification auth",
+            "not configured; the verification probe will be unauthenticated",
+        )
+
+    try:
+        validate_verification_auth_transport(verify_config["url"], auth_config)
+        resolve_verification_auth_headers(auth_config, environment)
+    except ValueError as exc:
+        return DoctorCheck("FAIL", "Verification auth", str(exc))
+
+    env_name = (
+        auth_config["token_env"]
+        if auth_config["type"] == "bearer"
+        else auth_config["key_env"]
+    )
+    return DoctorCheck(
+        "PASS",
+        "Verification auth",
+        f"{env_name} is set and valid (value hidden)",
+        (
+            "credential format checked locally; no HTTP request was sent",
+            "doctor does not verify whether the endpoint accepts this credential",
+        ),
+    )
 
 
 def _parse_target(target: str) -> tuple[str, SplitResult]:
@@ -283,7 +337,7 @@ def run_preflight(
     verbose: bool = False,
     timeout: float = 5.0,
 ) -> list[DoctorCheck]:
-    """Check scenario, endpoint configuration, signing secret, and optional socket reachability."""
+    """Check scenario, endpoint configuration, credentials, and optional socket reachability."""
     env = os.environ if environment is None else environment
     checks: list[DoctorCheck] = []
 
@@ -363,6 +417,8 @@ def run_preflight(
                 "not required by this scenario (no valid or invalid signature mode)",
             )
         )
+
+    checks.append(_verification_auth_check(scenario, env))
 
     if not connect:
         checks.append(
