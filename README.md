@@ -82,6 +82,23 @@ Validate a scenario without sending requests:
 hookstorm validate examples/duplicate-delivery.yaml
 ~~~
 
+Export a scenario as a pytest integration test:
+
+~~~bash
+hookstorm export-pytest examples/payment-retry.yaml --output tests/test_payment_webhook.py
+~~~
+
+The generated test reads its target from `HOOKSTORM_TARGET` and the optional HMAC secret from `HOOKSTORM_SECRET`. It does not embed an endpoint or secret. Remote targets remain blocked unless `HOOKSTORM_ALLOW_REMOTE=1` is explicitly set.
+
+~~~bash
+# Linux / macOS
+HOOKSTORM_TARGET=http://127.0.0.1:8000/webhook/flaky pytest tests/test_payment_webhook.py
+
+# Windows PowerShell
+$env:HOOKSTORM_TARGET = "http://127.0.0.1:8000/webhook/flaky"
+pytest tests/test_payment_webhook.py
+~~~
+
 ## Try the scenarios
 
 ~~~bash
@@ -173,7 +190,7 @@ CI tests Python 3.11, 3.12, and 3.13 on Linux, plus Python 3.12 on Windows and m
 - [x] Local demo receiver and CI test suite
 - [x] Bounded concurrent event delivery groups
 - [ ] Per-event scheduling
-- [ ] Export scenarios as pytest tests
+- [x] Export scenarios as pytest tests
 - [ ] Interactive run timeline / optional local dashboard
 - [ ] More provider-style signature adapters
 
