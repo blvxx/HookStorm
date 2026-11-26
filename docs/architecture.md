@@ -26,7 +26,7 @@ CLI exit code (0 passed, 1 assertions failed, 2 invalid input/configuration)
 
 - config.py: uses yaml.safe_load, rejects unknown keys, applies defaults, and bounds scenario sizes and timings.
 - safety.py: accepts only loopback IPs and localhost by default. --allow-remote is an explicit opt-in.
-- doctor.py: validates the scenario, configured HTTP(S) target, and required signing-secret presence; optional --connect performs DNS/TCP and HTTPS TLS checks without sending an HTTP request or webhook event. --verbose reports each resolved IPv4 / IPv6 address, connection timings, negotiated TLS details, and certificate metadata.
+- doctor.py: validates the scenario, configured HTTP(S) target, and required signing-secret presence; optional --connect performs DNS/TCP and HTTPS TLS checks without sending an HTTP request or webhook event. --verbose reports each resolved IPv4 / IPv6 address, connection timings, negotiated TLS details, and certificate metadata. Its versioned JSON output (schema version 1) exposes readiness, check summaries, network-check state, and per-check details for scripts and CI consumers.
 - runner.py: sends requests asynchronously with HTTPX, preserves event IDs, supports bounded concurrency across independent events, generates generic / Stripe / GitHub / Shopify HMAC headers from the exact request bytes, and checks nested JSON responses.
 - report.py: generates JSON, JUnit XML, or self-contained HTML with elapsed-time attempt tracks, search, result filters, and expandable attempt details.
 - history.py: persists a strict whitelist of run metadata and assertion outcomes to local SQLite, exports versioned sanitized JSON baselines, and compares local or portable baselines for pass-rate, coverage, and latency regressions.
