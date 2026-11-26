@@ -182,6 +182,14 @@ hookstorm run examples/payment-retry.yaml --target http://127.0.0.1:8000/webhook
 hookstorm run examples/payment-retry.yaml --target http://127.0.0.1:8000/webhook/flaky --format json
 ~~~
 
+Export delivery checks as JUnit XML for CI systems:
+
+~~~bash
+hookstorm run examples/payment-retry.yaml --target http://127.0.0.1:8000/webhook/flaky --format junit --output test-results/payment-retry.xml
+~~~
+
+JUnit output creates one testcase per event delivery (including duplicates), records assertion failures separately from transport errors, and omits payloads, secrets, and URL query strings. GitHub Actions runs the built-in webhook scenarios and uploads JUnit XML reports as workflow artifacts.
+
 Reports include event IDs, delivery/attempt counts, elapsed attempt timing, status codes, latency, and pass/fail checks. The self-contained HTML report adds a searchable and filterable delivery timeline, attempt expansion, and pass/fail filters. Reports intentionally omit request payloads, request headers, response bodies, and secrets.
 
 ## Safety and privacy
@@ -215,6 +223,8 @@ CI tests Python 3.11, 3.12, and 3.13 on Linux, plus Python 3.12 on Windows and m
 - [x] HTML / JSON reports
 - [x] Local demo receiver and CI test suite
 - [x] Bounded concurrent event delivery groups
+- [x] JUnit XML reports for CI integrations
+- [x] GitHub Actions webhook scenario workflow
 - [ ] Per-event scheduling
 - [x] Export scenarios as pytest tests
 - [ ] Interactive run timeline / optional local dashboard

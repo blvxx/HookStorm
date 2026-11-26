@@ -70,3 +70,10 @@ JSON object expectations are recursive subset matches: additional object keys ar
 ## Built-in request headers
 
 HookStorm sends Content-Type, User-Agent, X-HookStorm-Run, X-Event-ID, X-Event-Type, X-HookStorm-Attempt, and X-HookStorm-Duplicate-Index. Custom headers may not override transport-managed headers or Host, Content-Length, and Transfer-Encoding.
+
+
+## CI reports
+
+Use `hookstorm run ... --format junit --output test-results/scenario.xml` to export each delivery as a JUnit `testcase`. Duplicate deliveries are separate testcases. HTTP status or JSON assertion mismatches are reported as `failure` elements; timeouts and transport errors without an HTTP response are reported as `error` elements. The report includes event type, event ID, duplicate index, attempt count in failure details, and request latency. It does not include payloads, headers, response bodies, secrets, or URL query strings.
+
+The repository's `Webhook scenario tests` GitHub Actions workflow starts the local demo receiver, executes the provider-signature, retry, duplicate-delivery, and out-of-order examples, and uploads the XML files as a workflow artifact.

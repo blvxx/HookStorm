@@ -21,3 +21,6 @@
 - Add Stripe timestamp offsets for receiver replay-window tests.
 - Add a searchable HTML delivery timeline with result filters and expandable attempt details.
 - Extend the local demo receiver and add provider-specific example scenarios.
+- Add JUnit XML reports with per-delivery testcases and distinct assertion-failure / transport-error elements.
+- Publish pytest JUnit results from every OS / Python CI matrix job.
+- Add a GitHub Actions workflow that runs local provider-signature, retry, duplicate, and out-of-order scenarios and uploads JUnit artifacts.

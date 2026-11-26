@@ -38,7 +38,17 @@ jobs:
         run: python -m pip install -e '.[dev]'
       - name: Lint
         run: ruff check .
+      - name: Prepare test result directory
+        run: python -c "from pathlib import Path; Path('test-results').mkdir(exist_ok=True)"
       - name: Test
-        run: pytest
+        run: pytest --junitxml=test-results/pytest.xml
+      - name: Upload pytest JUnit report
+        if: always()
+        uses: actions/upload-artifact@v7
+        with:
+          name: pytest-results-${{ matrix.os }}-py${{ matrix.python-version }}
+          path: test-results/pytest.xml
+          if-no-files-found: error
+          retention-days: 14
       - name: Build package
         run: python -m pip wheel --no-deps . --wheel-dir dist
