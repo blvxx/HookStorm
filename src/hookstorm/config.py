@@ -96,13 +96,73 @@ def _validate_retry(value: Any) -> dict[str, Any]:
 
 
 
+def _validate_verify_auth(value: Any) -> dict[str, str] | None:
+    """Validate environment-backed authentication for a verification probe."""
+    if value is None:
+        return None
+    if not isinstance(value, dict):
+        raise ScenarioError("verify.auth must be a mapping")
+
+    auth_type = value.get("type")
+    if auth_type == "bearer":
+        _unknown_keys(value, {"type", "token_env"}, "verify.auth")
+        env_key = "token_env"
+    elif auth_type == "api_key":
+        _unknown_keys(value, {"type", "key_env", "header"}, "verify.auth")
+        env_key = "key_env"
+    else:
+        raise ScenarioError("verify.auth.type must be 'bearer' or 'api_key'")
+
+    env_name = value.get(env_key)
+    if (
+        not isinstance(env_name, str)
+        or not re.fullmatch(r"[A-Za-z_][A-Za-z0-9_]{0,127}", env_name)
+    ):
+        raise ScenarioError(f"verify.auth.{env_key} must be a valid environment variable name")
+
+    if auth_type == "bearer":
+        return {"type": "bearer", "token_env": env_name}
+
+    header = value.get("header", "X-API-Key")
+    if not isinstance(header, str) or not re.fullmatch(
+        r"[!#$%&'*+.^_`|~0-9A-Za-z-]+", header
+    ):
+        raise ScenarioError("verify.auth.header must be a valid HTTP header name")
+    reserved_headers = {
+        "authorization",
+        "connection",
+        "content-length",
+        "content-type",
+        "host",
+        "keep-alive",
+        "proxy-connection",
+        "te",
+        "trailer",
+        "transfer-encoding",
+        "upgrade",
+        "user-agent",
+        "x-event-id",
+        "x-event-type",
+        "x-hookstorm-attempt",
+        "x-hookstorm-duplicate-index",
+        "x-hookstorm-run",
+    }
+    if header.lower() in reserved_headers:
+        raise ScenarioError(
+            f"verify.auth.header may not override transport-managed header '{header}'"
+        )
+    return {"type": "api_key", "key_env": env_name, "header": header}
+
+
 def _validate_verify(value: Any) -> dict[str, Any] | None:
     """Validate an optional read-only business-state probe."""
     if value is None:
         return None
     if not isinstance(value, dict):
         raise ScenarioError("verify must be a mapping")
-    _unknown_keys(value, {"url", "expect_status", "expect_json", "timeout_ms"}, "verify")
+    _unknown_keys(
+        value, {"url", "expect_status", "expect_json", "timeout_ms", "auth"}, "verify"
+    )
 
     url = value.get("url")
     if (
@@ -153,6 +213,7 @@ def _validate_verify(value: Any) -> dict[str, Any] | None:
         "expect_status": sorted(set(expect_status)),
         "expect_json": expected_json,
         "timeout_ms": timeout_ms,
+        "auth": _validate_verify_auth(value.get("auth")),
     }
 
 

@@ -15,7 +15,15 @@ import pytest
 
 @pytest.fixture
 def receiver() -> Iterator[tuple[str, dict]]:
-    state = {"seen": set(), "effects": set(), "attempts": defaultdict(int), "requests": [], "active": 0, "max_active": 0}
+    state = {
+        "seen": set(),
+        "effects": set(),
+        "attempts": defaultdict(int),
+        "requests": [],
+        "verification_requests": [],
+        "active": 0,
+        "max_active": 0,
+    }
     state_lock = threading.Lock()
 
     class Handler(BaseHTTPRequestHandler):
@@ -28,6 +36,9 @@ def receiver() -> Iterator[tuple[str, dict]]:
                 return
             run_id = self.headers.get("X-HookStorm-Run", "")
             with state_lock:
+                state["verification_requests"].append(
+                    {"run_id": run_id, "headers": dict(self.headers)}
+                )
                 processed = sum(1 for current_run, _ in state["effects"] if current_run == run_id)
             encoded = json.dumps({"processed_events": processed}).encode()
             self.send_response(200)

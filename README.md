@@ -218,7 +218,40 @@ hookstorm run examples/idempotency-verification.yaml \
 
 The included receiver uses SQLite with a unique (run_id, event_id) key to simulate an idempotent business write. It exposes the run-scoped count at GET /__hookstorm/state. The scenario sends one event three times and verifies that only one row was created.
 
-Verification URLs follow the same local-only default as webhook targets. Use --allow-remote only for an authorized test environment. HookStorm stores only the probe URL path (not query parameters), status, timing, and assertion outcome; it never stores the response body. The probe currently supports unauthenticated GET endpoints and sends only X-HookStorm-Run plus the HookStorm user-agent.
+Verification URLs follow the same local-only default as webhook targets. Use --allow-remote only for an authorized test environment. HookStorm stores only the probe URL path (not query parameters), status, timing, and assertion outcome; it never stores the response body or authentication values.
+
+Private verification endpoints can use environment-backed authentication. The scenario stores only the environment variable name, never the credential itself:
+
+~~~yaml
+verify:
+  url: https://staging.example.test/__hookstorm/state
+  expect_json:
+    processed_events: 1
+  auth:
+    type: bearer
+    token_env: HOOKSTORM_VERIFY_TOKEN
+~~~
+
+For an API key header, use `type: api_key` and `key_env`; the header defaults to `X-API-Key`, or set a safe custom header:
+
+~~~yaml
+  auth:
+    type: api_key
+    key_env: HOOKSTORM_VERIFY_API_KEY
+    header: X-Client-Key
+~~~
+
+Set the environment variable in the shell before running HookStorm:
+
+~~~bash
+# Linux / macOS
+export HOOKSTORM_VERIFY_TOKEN='your-staging-token'
+
+# Windows PowerShell
+$env:HOOKSTORM_VERIFY_TOKEN = 'your-staging-token'
+~~~
+
+HookStorm resolves and validates the credential before sending any webhook events. A missing, empty, or malformed value stops the run before traffic is sent. Credentials are sent only on the read-only verification GET; they are not included in terminal output, JSON / HTML / JUnit reports, or run history. Bearer credentials use the `Authorization: Bearer` header. API-key header names cannot override HookStorm-managed or hop-by-hop headers. Authenticated remote verification URLs must use HTTPS; HTTP is allowed only for localhost / loopback development endpoints.
 
 ## Write your own scenario
 

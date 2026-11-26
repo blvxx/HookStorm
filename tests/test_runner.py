@@ -7,6 +7,7 @@ import time
 import pytest
 
 from hookstorm.config import validate_scenario
+from hookstorm.report import render_html, render_json, render_junit
 from hookstorm.runner import run_scenario
 
 
@@ -368,3 +369,122 @@ def test_verification_query_parameters_are_not_in_results(receiver) -> None:
 
     assert result["verification"]["target"] == f"{base}/state"
     assert "do-not-store-this" not in str(result)
+
+
+def test_verify_bearer_auth_is_sent_but_never_reported(receiver, monkeypatch) -> None:
+    base, state = receiver
+    token = "bearer-super-secret-token"
+    monkeypatch.setenv("HOOKSTORM_VERIFY_TOKEN", token)
+    data = validate_scenario({
+        "version": 1,
+        "name": "bearer verify auth",
+        "events": [{"id": "ping", "event_id": "evt_bearer", "payload": {}}],
+        "verify": {
+            "url": f"{base}/state",
+            "expect_json": {"processed_events": 1},
+            "auth": {"type": "bearer", "token_env": "HOOKSTORM_VERIFY_TOKEN"},
+        },
+    })
+
+    result = asyncio.run(run_scenario(data, base))
+
+    assert result["summary"]["success"] is True
+    headers = state["verification_requests"][0]["headers"]
+    assert headers["Authorization"] == f"Bearer {token}"
+    assert token not in render_json(result)
+    assert token not in render_html(result)
+    assert token not in render_junit(result)
+
+
+def test_verify_api_key_auth_supports_custom_header(receiver, monkeypatch) -> None:
+    base, state = receiver
+    key = "api-key-super-secret"
+    monkeypatch.setenv("HOOKSTORM_VERIFY_API_KEY", key)
+    data = validate_scenario({
+        "version": 1,
+        "name": "api key verify auth",
+        "events": [{"id": "ping", "event_id": "evt_api_key", "payload": {}}],
+        "verify": {
+            "url": f"{base}/state",
+            "expect_json": {"processed_events": 1},
+            "auth": {
+                "type": "api_key",
+                "key_env": "HOOKSTORM_VERIFY_API_KEY",
+                "header": "X-Client-Key",
+            },
+        },
+    })
+
+    result = asyncio.run(run_scenario(data, base))
+
+    assert result["summary"]["success"] is True
+    headers = state["verification_requests"][0]["headers"]
+    assert headers["X-Client-Key"] == key
+    assert key not in str(result)
+
+
+def test_missing_verify_auth_fails_before_sending_webhooks(receiver, monkeypatch) -> None:
+    base, state = receiver
+    monkeypatch.delenv("HOOKSTORM_VERIFY_TOKEN", raising=False)
+    data = validate_scenario({
+        "version": 1,
+        "name": "missing verify auth",
+        "events": [{"id": "ping", "event_id": "evt_missing_auth", "payload": {}}],
+        "verify": {
+            "url": f"{base}/state",
+            "expect_json": {"processed_events": 1},
+            "auth": {"type": "bearer", "token_env": "HOOKSTORM_VERIFY_TOKEN"},
+        },
+    })
+
+    with pytest.raises(ValueError, match="HOOKSTORM_VERIFY_TOKEN"):
+        asyncio.run(run_scenario(data, base))
+
+    assert state["requests"] == []
+    assert state["verification_requests"] == []
+
+
+@pytest.mark.parametrize("credential", ["contains whitespace", "invalid\r\nX-Injected: yes"])
+def test_invalid_verify_auth_value_fails_before_sending_webhooks(
+    receiver, monkeypatch, credential: str
+) -> None:
+    base, state = receiver
+    monkeypatch.setenv("HOOKSTORM_VERIFY_TOKEN", credential)
+    data = validate_scenario({
+        "version": 1,
+        "name": "invalid verify auth",
+        "events": [{"id": "ping", "event_id": "evt_invalid_auth", "payload": {}}],
+        "verify": {
+            "url": f"{base}/state",
+            "expect_json": {"processed_events": 1},
+            "auth": {"type": "bearer", "token_env": "HOOKSTORM_VERIFY_TOKEN"},
+        },
+    })
+
+    with pytest.raises(ValueError, match="printable ASCII"):
+        asyncio.run(run_scenario(data, base))
+
+    assert state["requests"] == []
+    assert state["verification_requests"] == []
+
+
+def test_authenticated_remote_verification_requires_https(receiver, monkeypatch) -> None:
+    base, state = receiver
+    monkeypatch.setenv("HOOKSTORM_VERIFY_TOKEN", "test-token")
+    data = validate_scenario({
+        "version": 1,
+        "name": "remote http verify auth",
+        "events": [{"id": "ping", "event_id": "evt_remote_http", "payload": {}}],
+        "verify": {
+            "url": "http://example.com/state",
+            "expect_json": {},
+            "auth": {"type": "bearer", "token_env": "HOOKSTORM_VERIFY_TOKEN"},
+        },
+    })
+
+    with pytest.raises(ValueError, match="require HTTPS"):
+        asyncio.run(run_scenario(data, base, allow_remote=True))
+
+    assert state["requests"] == []
+    assert state["verification_requests"] == []
+
