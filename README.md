@@ -218,6 +218,8 @@ The first request is committed to SQLite and then its connection is closed witho
 
 This is a local demonstration of at-least-once delivery and idempotent processing. It does not claim that every receiver is transactional: use your own database-backed test endpoint to verify your application's transaction boundary.
 
+For the failure model, receiver transaction boundary, and application-specific adaptation notes, see [Ambiguous webhook acknowledgements](docs/ambiguous-acknowledgements.md).
+
 ## Verify business state after delivery
 
 A successful webhook response does not prove that an order, payment, or other business operation was written exactly once. Add a read-only verification endpoint to your test receiver and configure a verify block:
