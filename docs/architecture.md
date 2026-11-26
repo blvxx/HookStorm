@@ -24,8 +24,8 @@ CLI exit code (0 passed, 1 assertions failed, 2 invalid input/configuration)
 
 - config.py: uses yaml.safe_load, rejects unknown keys, applies defaults, and bounds scenario sizes and timings.
 - safety.py: accepts only loopback IPs and localhost by default. --allow-remote is an explicit opt-in.
-- runner.py: sends requests asynchronously with HTTPX, preserves event IDs, supports bounded concurrency across independent events, computes optional HMAC signatures, and checks nested JSON responses.
-- report.py: generates JSON or self-contained HTML. Payloads, request headers, response bodies, and secrets are not stored.
+- runner.py: sends requests asynchronously with HTTPX, preserves event IDs, supports bounded concurrency across independent events, generates generic / Stripe / GitHub / Shopify HMAC headers from the exact request bytes, and checks nested JSON responses.
+- report.py: generates JSON or self-contained HTML with elapsed-time attempt tracks, search, result filters, and expandable attempt details. Payloads, request headers, response bodies, and secrets are not stored.
 - examples/receiver.py: standard-library local demo server; never use it as a public endpoint.
 - pytest_export.py: generates pytest integration modules with an embedded, normalized scenario and runtime-only target / secret environment variables.
 
@@ -40,6 +40,6 @@ CLI exit code (0 passed, 1 assertions failed, 2 invalid input/configuration)
 
 - Concurrency applies across independent events; retries and duplicate deliveries within one event remain sequential. With concurrency above 1, request completion order is intentionally nondeterministic.
 - A timeout does not prove the receiver rolled back work. The handler may finish after the sender stops waiting.
-- HMAC mode is a generic raw-body SHA-256 convention, not a drop-in for every provider.
+- Provider signing formats match Stripe, GitHub, and Shopify webhook headers. These are request generators for authorized test endpoints, not a replacement for each provider's SDK or a general receiver-side verification library.
 - JSON object assertions support recursive subset matching; arrays are compared exactly and in order.
 - A passing status or JSON assertion does not prove the business side effect happened exactly once; verify it independently in your test environment.
