@@ -86,7 +86,7 @@ auth:
 
 The `header` field is optional and defaults to `X-API-Key`. A custom API-key header must be a valid HTTP header name and may not replace Authorization, HookStorm-managed headers, or hop-by-hop headers. Bearer tokens are sent as `Authorization: Bearer <token>`.
 
-The named environment variable is resolved before any webhook delivery starts. Missing, empty, oversized, non-ASCII, or whitespace-containing credentials fail preflight without sending webhook traffic. Credential values are sent only on the verification GET and are never copied to terminal output, reports, or run history. Store the variable in your CI secret manager or local shell environment; do not put the value in YAML.
+The named environment variable is resolved before any webhook delivery starts. Missing, empty, oversized, non-ASCII, or whitespace-containing credentials fail preflight without sending webhook traffic. Credential values are sent only on the verification GET and are never copied to terminal output, reports, or run history. Authenticated remote verification URLs must use HTTPS; plain HTTP is allowed only for localhost or loopback development endpoints. Store the variable in your CI secret manager or local shell environment; do not put the value in YAML.
 
 The probe is not a universal exactly-once guarantee: it verifies only the state your endpoint exposes at the time of the GET. Use isolated test data and an endpoint designed for testing.
 
