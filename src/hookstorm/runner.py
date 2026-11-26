@@ -11,6 +11,7 @@ import time
 import uuid
 from datetime import UTC, datetime
 from typing import Any
+from urllib.parse import urlsplit, urlunsplit
 
 import httpx
 
@@ -54,6 +55,11 @@ async def run_scenario(
     started = datetime.now(UTC)
     monotonic_started = time.perf_counter()
     run_id = uuid.uuid4().hex[:12]
+    target_parts = urlsplit(target)
+    # Query strings often contain API keys or signed tokens; never copy them into reports.
+    reported_target = urlunsplit(
+        (target_parts.scheme, target_parts.netloc, target_parts.path, "", "")
+    )
     all_deliveries: list[dict[str, Any]] = []
     default_delivery = {
         "order": "in_order", "duplicate_count": 0, "delay_ms": 0,
@@ -64,7 +70,7 @@ async def run_scenario(
     if scenario["delivery"].get("order", "in_order") == "reverse":
         ordered_events.reverse()
 
-    async with httpx.AsyncClient(follow_redirects=False, timeout=httpx.Timeout(30.0, connect=5.0)) as client:
+    async with httpx.AsyncClient(follow_redirects=False, trust_env=False, timeout=httpx.Timeout(30.0, connect=5.0)) as client:
         for event in ordered_events:
             delivery_config = {**default_delivery, **scenario["delivery"], **event["delivery"]}
             event_body = _json_bytes(event["payload"])
@@ -141,7 +147,7 @@ async def run_scenario(
                     if not retryable or attempt >= retry["max_attempts"]:
                         break
                     if retry["backoff_ms"]:
-                        await asyncio.sleep((retry["backoff_ms"] * (2 ** (attempt - 1))) / 1000)
+                        await asyncio.sleep(min(retry["backoff_ms"] * (2 ** (attempt - 1)), 60_000) / 1000)
 
                 last = attempts[-1]
                 all_deliveries.append({
@@ -155,7 +161,7 @@ async def run_scenario(
     passed = sum(1 for delivery in all_deliveries if delivery["passed"])
     return {
         "schema_version": 1, "tool": "HookStorm", "version": "0.1.0", "run_id": run_id,
-        "scenario": scenario["name"], "target": target, "started_at": started.isoformat(),
+        "scenario": scenario["name"], "target": reported_target, "started_at": started.isoformat(),
         "duration_ms": round((time.perf_counter() - monotonic_started) * 1000, 2),
         "summary": {
             "total_deliveries": len(all_deliveries), "passed": passed,

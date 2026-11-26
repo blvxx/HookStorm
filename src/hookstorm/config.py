@@ -26,7 +26,7 @@ _ALLOWED_EVENT = {
 def _unknown_keys(data: dict[str, Any], allowed: set[str], where: str) -> None:
     unknown = set(data) - allowed
     if unknown:
-        raise ScenarioError(f"Unknown key(s) in {where}: {', '.join(sorted(unknown))}")
+        raise ScenarioError(f"Unknown key(s) in {where}: {', '.join(sorted(map(str, unknown)))}")
 
 
 def _integer(value: Any, name: str, *, minimum: int, maximum: int) -> int:
@@ -43,7 +43,7 @@ def _validate_delivery(value: Any, where: str, *, allow_order: bool = True) -> d
     allowed = _ALLOWED_DELIVERY if allow_order else _ALLOWED_DELIVERY - {"order"}
     _unknown_keys(value, allowed, where)
     result = dict(value)
-    if "order" in result and result["order"] not in {"in_order", "reverse"}:
+    if "order" in result and (not isinstance(result["order"], str) or result["order"] not in {"in_order", "reverse"}):
         raise ScenarioError(f"{where}.order must be 'in_order' or 'reverse'")
     if "duplicate_count" in result:
         result["duplicate_count"] = _integer(result["duplicate_count"], f"{where}.duplicate_count", minimum=0, maximum=100)
@@ -51,7 +51,7 @@ def _validate_delivery(value: Any, where: str, *, allow_order: bool = True) -> d
         result["delay_ms"] = _integer(result["delay_ms"], f"{where}.delay_ms", minimum=0, maximum=60_000)
     if "timeout_ms" in result:
         result["timeout_ms"] = _integer(result["timeout_ms"], f"{where}.timeout_ms", minimum=1, maximum=300_000)
-    if "signature" in result and result["signature"] not in {"none", "valid", "invalid", "missing"}:
+    if "signature" in result and (not isinstance(result["signature"], str) or result["signature"] not in {"none", "valid", "invalid", "missing"}):
         raise ScenarioError(f"{where}.signature must be none, valid, invalid, or missing")
     return result
 
@@ -77,7 +77,7 @@ def validate_scenario(data: Any) -> dict[str, Any]:
     if not isinstance(data, dict):
         raise ScenarioError("Scenario root must be a YAML mapping")
     _unknown_keys(data, _ALLOWED_TOP_LEVEL, "scenario")
-    if data.get("version") != 1:
+    if isinstance(data.get("version"), bool) or not isinstance(data.get("version"), int) or data.get("version") != 1:
         raise ScenarioError("Scenario version must be 1")
     name = data.get("name")
     if not isinstance(name, str) or not name.strip():
@@ -102,18 +102,35 @@ def validate_scenario(data: Any) -> dict[str, Any]:
         _unknown_keys(event, _ALLOWED_EVENT, where)
         event_id = event.get("event_id")
         event_type = event.get("id")
-        if not isinstance(event_id, str) or not event_id.strip():
-            raise ScenarioError(f"{where}.event_id must be a non-empty string")
-        if not isinstance(event_type, str) or not event_type.strip():
-            raise ScenarioError(f"{where}.id must be a non-empty string")
+        if (
+            not isinstance(event_id, str)
+            or not event_id.strip()
+            or len(event_id) > 256
+            or any(char in event_id for char in "\r\n")
+        ):
+            raise ScenarioError(f"{where}.event_id must be a non-empty header-safe string of at most 256 characters")
+        if (
+            not isinstance(event_type, str)
+            or not event_type.strip()
+            or len(event_type) > 256
+            or any(char in event_type for char in "\r\n")
+        ):
+            raise ScenarioError(f"{where}.id must be a non-empty header-safe string of at most 256 characters")
         payload = event.get("payload", {})
         try:
-            json.dumps(payload, ensure_ascii=False, allow_nan=False)
-        except (TypeError, ValueError) as exc:
+            encoded_payload = json.dumps(
+                payload, ensure_ascii=False, separators=(",", ":"), allow_nan=False
+            ).encode("utf-8")
+        except (TypeError, ValueError, UnicodeEncodeError) as exc:
             raise ScenarioError(f"{where}.payload must be valid JSON-compatible data") from exc
+        if len(encoded_payload) > 1_048_576:
+            raise ScenarioError(f"{where}.payload exceeds the 1 MiB limit")
         headers = event.get("headers", {})
         if not isinstance(headers, dict) or any(not isinstance(k, str) or not isinstance(v, str) for k, v in headers.items()):
             raise ScenarioError(f"{where}.headers must be a mapping of string keys to string values")
+        header_bytes = sum(len(k.encode("utf-8")) + len(v.encode("utf-8")) for k, v in headers.items())
+        if len(headers) > 64 or header_bytes > 16_384:
+            raise ScenarioError(f"{where}.headers exceed the 64-header / 16 KiB limit")
         for key, val in headers.items():
             if not re.fullmatch(r"[!#$%&'*+._^|~0-9A-Za-z-]+", key) or any(ch in key + val for ch in "\r\n"):
                 raise ScenarioError(f"{where}.headers contains an invalid header")
@@ -141,6 +158,15 @@ def validate_scenario(data: Any) -> dict[str, Any]:
             "expect_json": event.get("expect_json"),
             "expect_duplicate_json": event.get("expect_duplicate_json"),
         })
+
+    estimated_requests = 0
+    for event in normalized_events:
+        effective_delivery = {**delivery, **event["delivery"]}
+        estimated_requests += (effective_delivery.get("duplicate_count", 0) + 1) * retry["max_attempts"]
+    if estimated_requests > 20_000:
+        raise ScenarioError(
+            "Scenario could require more than 20,000 HTTP attempts; reduce events, duplicates, or retries"
+        )
 
     return {
         "version": 1,
