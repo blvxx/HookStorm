@@ -99,6 +99,8 @@ def test_repeated_runs_get_distinct_run_ids_and_clean_idempotency_state(receiver
     second = asyncio.run(run_scenario(test_scenario, base))
     assert first["summary"]["success"] is True
     assert second["summary"]["success"] is True
+    assert len(first["run_id"]) == 32
+    assert len(second["run_id"]) == 32
     assert first["run_id"] != second["run_id"]
     assert len({request["run_id"] for request in state["requests"]}) == 2
 
