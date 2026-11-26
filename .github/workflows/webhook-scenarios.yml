@@ -20,6 +20,11 @@ on:
 permissions:
   contents: read
 
+# Keep baseline refreshes on main in a single ordered workflow run.
+concurrency:
+  group: webhook-scenarios-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   scenarios:
     runs-on: ubuntu-latest
