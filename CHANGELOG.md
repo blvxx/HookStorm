@@ -35,3 +35,4 @@
 - Add tests for generated workflow YAML / Bash syntax, scenario validation, custom providers, path safety, and overwrite behavior.
 - Add `hookstorm doctor` to validate integration scenarios, endpoint configuration, and required signing secrets before webhook delivery.
 - Add optional DNS/TCP and HTTPS TLS preflight checks that send no HTTP request or webhook event, and run them before staging CI tests.
+- Add `hookstorm doctor --verbose` with DNS IPv4 / IPv6 results, per-address connection timings, TLS protocol and cipher details, and certificate expiry diagnostics.
