@@ -37,3 +37,5 @@
 - Add optional DNS/TCP and HTTPS TLS preflight checks that send no HTTP request or webhook event, and run them before staging CI tests.
 - Add `hookstorm doctor --verbose` with DNS IPv4 / IPv6 results, per-address connection timings, TLS protocol and cipher details, and certificate expiry diagnostics.
 - Add `hookstorm doctor --format json` with versioned machine-readable check results, readiness status, summaries, and CI-friendly exit codes.
+
+- Add an optional read-only post-delivery business-state probe with run-scoped verification, report output, and history regression checks.
