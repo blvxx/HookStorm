@@ -39,6 +39,17 @@ def _integer(value: Any, name: str, *, minimum: int, maximum: int) -> int:
     return value
 
 
+def _is_safe_header_value(value: str, *, allow_horizontal_tab: bool = True) -> bool:
+    """Accept printable ASCII HTTP field values and, optionally, horizontal tabs."""
+    for character in value:
+        codepoint = ord(character)
+        if allow_horizontal_tab and codepoint == 0x09:
+            continue
+        if not 0x20 <= codepoint <= 0x7E:
+            return False
+    return True
+
+
 def _validate_delivery(value: Any, where: str, *, allow_order: bool = True) -> dict[str, Any]:
     if value is None:
         return {}
@@ -241,6 +252,7 @@ def validate_scenario(data: Any) -> dict[str, Any]:
         raise ScenarioError("A scenario may contain at most 500 events")
 
     normalized_events: list[dict[str, Any]] = []
+    seen_event_ids: set[str] = set()
     for index, event in enumerate(events):
         where = f"events[{index}]"
         if not isinstance(event, dict):
@@ -252,16 +264,19 @@ def validate_scenario(data: Any) -> dict[str, Any]:
             not isinstance(event_id, str)
             or not event_id.strip()
             or len(event_id) > 256
-            or any(char in event_id for char in "\r\n")
+            or not _is_safe_header_value(event_id, allow_horizontal_tab=False)
         ):
-            raise ScenarioError(f"{where}.event_id must be a non-empty header-safe string of at most 256 characters")
+            raise ScenarioError(f"{where}.event_id must be a non-empty ASCII header-safe string of at most 256 characters")
         if (
             not isinstance(event_type, str)
             or not event_type.strip()
             or len(event_type) > 256
-            or any(char in event_type for char in "\r\n")
+            or not _is_safe_header_value(event_type, allow_horizontal_tab=False)
         ):
-            raise ScenarioError(f"{where}.id must be a non-empty header-safe string of at most 256 characters")
+            raise ScenarioError(f"{where}.id must be a non-empty ASCII header-safe string of at most 256 characters")
+        if event_id in seen_event_ids:
+            raise ScenarioError(f"{where}.event_id must be unique within a scenario")
+        seen_event_ids.add(event_id)
         payload = event.get("payload", {})
         try:
             encoded_payload = json.dumps(
@@ -272,14 +287,22 @@ def validate_scenario(data: Any) -> dict[str, Any]:
         if len(encoded_payload) > 1_048_576:
             raise ScenarioError(f"{where}.payload exceeds the 1 MiB limit")
         headers = event.get("headers", {})
-        if not isinstance(headers, dict) or any(not isinstance(k, str) or not isinstance(v, str) for k, v in headers.items()):
+        if not isinstance(headers, dict) or any(
+            not isinstance(key, str) or not isinstance(value, str)
+            for key, value in headers.items()
+        ):
             raise ScenarioError(f"{where}.headers must be a mapping of string keys to string values")
-        header_bytes = sum(len(k.encode("utf-8")) + len(v.encode("utf-8")) for k, v in headers.items())
+        for key, value in headers.items():
+            if (
+                not re.fullmatch(r"[!#$%&'*+._^|~0-9A-Za-z-]+", key)
+                or not _is_safe_header_value(value)
+            ):
+                raise ScenarioError(
+                    f"{where}.headers contains an invalid HTTP header name or non-ASCII/control value"
+                )
+        header_bytes = sum(len(key) + len(value) for key, value in headers.items())
         if len(headers) > 64 or header_bytes > 16_384:
             raise ScenarioError(f"{where}.headers exceed the 64-header / 16 KiB limit")
-        for key, val in headers.items():
-            if not re.fullmatch(r"[!#$%&'*+._^|~0-9A-Za-z-]+", key) or any(ch in key + val for ch in "\r\n"):
-                raise ScenarioError(f"{where}.headers contains an invalid header")
             if key.lower() in {
                 "host", "content-length", "transfer-encoding",
                 "x-hookstorm-run", "x-event-id", "x-event-type",
