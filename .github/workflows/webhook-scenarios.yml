@@ -20,6 +20,11 @@ on:
 permissions:
   contents: read
 
+# Keep baseline refreshes on main in a single ordered workflow run.
+concurrency:
+  group: webhook-scenarios-${{ github.ref }}
+  cancel-in-progress: false
+
 jobs:
   scenarios:
     runs-on: ubuntu-latest
@@ -32,6 +37,8 @@ jobs:
           cache: pip
       - name: Install HookStorm
         run: python -m pip install .
+      - name: Validate external CI example scenario
+        run: hookstorm validate examples/ci/webhook-regression.yaml
 
       - name: Restore main-branch webhook baselines
         uses: actions/cache/restore@v4

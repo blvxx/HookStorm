@@ -23,3 +23,5 @@ reports/
 *.sqlite3-*
 
 hookstorm-baselines/
+
+.hookstorm-baselines/

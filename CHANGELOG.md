@@ -29,3 +29,5 @@
 - Detect pass-rate, failed-delivery, delivery-coverage, per-delivery latency, and p95 latency regressions; return a CI-friendly nonzero exit code when regressions are found.
 - Add versioned, sanitized JSON baseline export and `history compare-file` for comparing runs across ephemeral CI runners.
 - Gate the built-in GitHub Actions webhook scenarios against cached main-branch baselines; refresh baselines only after successful main runs.
+- Add a copy-ready GitHub Actions regression workflow and staging scenario for application repositories, with fork-PR secret isolation and trusted-main baseline refreshes.
+- Document environment setup, remote-target safety, scenario adaptation, and baseline cache behavior for external projects.
