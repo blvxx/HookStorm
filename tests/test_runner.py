@@ -84,3 +84,23 @@ def test_expected_401_can_be_a_pass(receiver) -> None:
     ))
     assert result["summary"]["success"] is True
     assert result["deliveries"][0]["attempts"][0]["status_code"] == 401
+
+
+def test_repeated_runs_get_distinct_run_ids_and_clean_idempotency_state(receiver) -> None:
+    base, state = receiver
+    test_scenario = scenario(event={"expect_json": {"duplicate": False}})
+    first = asyncio.run(run_scenario(test_scenario, base))
+    second = asyncio.run(run_scenario(test_scenario, base))
+    assert first["summary"]["success"] is True
+    assert second["summary"]["success"] is True
+    assert first["run_id"] != second["run_id"]
+    assert len({request["run_id"] for request in state["requests"]}) == 2
+
+
+def test_missing_signature_is_sent_as_absence_and_can_be_expected(receiver) -> None:
+    base, _ = receiver
+    result = asyncio.run(run_scenario(
+        scenario(delivery={"signature": "missing"}, event={"expect_status": [401]}),
+        f"{base}/signature",
+    ))
+    assert result["summary"]["success"] is True

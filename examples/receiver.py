@@ -10,8 +10,8 @@ import time
 from collections import defaultdict
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 
-SEEN: set[str] = set()
-ATTEMPTS: defaultdict[str, int] = defaultdict(int)
+SEEN: set[tuple[str, str]] = set()
+ATTEMPTS: defaultdict[tuple[str, str], int] = defaultdict(int)
 SECRET = os.getenv("HOOKSTORM_SECRET", "")
 
 
@@ -27,12 +27,18 @@ class Handler(BaseHTTPRequestHandler):
         self.send_header("Content-Type", "application/json")
         self.send_header("Content-Length", str(len(body)))
         self.end_headers()
-        self.wfile.write(body)
+        try:
+            self.wfile.write(body)
+        except (BrokenPipeError, ConnectionResetError):
+            # Expected when HookStorm intentionally times out a slow delivery.
+            pass
 
     def do_POST(self) -> None:  # noqa: N802 - stdlib handler API
         length = int(self.headers.get("Content-Length", "0"))
         raw = self.rfile.read(length)
         event_id = self.headers.get("X-Event-ID", "missing-id")
+        run_id = self.headers.get("X-HookStorm-Run", "manual")
+        delivery_key = (run_id, event_id)
 
         if self.path.startswith("/webhook/slow"):
             time.sleep(1.0)
@@ -44,13 +50,13 @@ class Handler(BaseHTTPRequestHandler):
                 self._reply(401, {"ok": False, "error": "invalid signature"})
                 return
 
-        ATTEMPTS[event_id] += 1
-        if self.path.startswith("/webhook/flaky") and ATTEMPTS[event_id] == 1:
+        ATTEMPTS[delivery_key] += 1
+        if self.path.startswith("/webhook/flaky") and ATTEMPTS[delivery_key] == 1:
             self._reply(503, {"ok": False, "retry": True})
             return
 
-        duplicate = event_id in SEEN
-        SEEN.add(event_id)
+        duplicate = delivery_key in SEEN
+        SEEN.add(delivery_key)
         self._reply(200, {"ok": True, "event_id": event_id, "duplicate": duplicate})
 
 

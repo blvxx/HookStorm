@@ -21,9 +21,13 @@ def receiver() -> Iterator[tuple[str, dict]]:
             length = int(self.headers.get("Content-Length", "0"))
             body = self.rfile.read(length)
             event_id = self.headers.get("X-Event-ID", "")
-            state["requests"].append({"event_id": event_id, "headers": dict(self.headers), "body": body})
-            state["attempts"][event_id] += 1
-            if self.path == "/flaky" and state["attempts"][event_id] == 1:
+            run_id = self.headers.get("X-HookStorm-Run", "manual")
+            delivery_key = (run_id, event_id)
+            state["requests"].append(
+                {"run_id": run_id, "event_id": event_id, "headers": dict(self.headers), "body": body}
+            )
+            state["attempts"][delivery_key] += 1
+            if self.path == "/flaky" and state["attempts"][delivery_key] == 1:
                 status, payload = 503, {"retry": True}
             elif self.path == "/signature":
                 import hashlib
@@ -35,8 +39,8 @@ def receiver() -> Iterator[tuple[str, dict]]:
                 else:
                     status, payload = 200, {"ok": True}
             else:
-                duplicate = event_id in state["seen"]
-                state["seen"].add(event_id)
+                duplicate = delivery_key in state["seen"]
+                state["seen"].add(delivery_key)
                 status, payload = 200, {"ok": True, "duplicate": duplicate}
             encoded = json.dumps(payload).encode()
             self.send_response(status)

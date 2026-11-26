@@ -11,7 +11,7 @@ A scenario is a YAML document. It describes events, delivery behavior, and expec
 | description | no | Optional explanation. |
 | delivery | no | Default delivery fault settings. |
 | retry | no | Retry policy; defaults to one attempt. |
-| events | yes | One to 500 event definitions. |
+| events | yes | One to 500 event definitions. Payloads are limited to 1 MiB each. |
 
 Unknown keys are rejected to catch typos early.
 
@@ -34,19 +34,19 @@ For signature valid or invalid, set HOOKSTORM_SECRET in the shell. The signature
 | Field | Default | Constraints / behavior |
 |---|---|---|
 | max_attempts | 1 | Total tries per delivery, 1–10 (including the first request). |
-| backoff_ms | 0 | Base exponential backoff, 0–60,000 ms. |
+| backoff_ms | 0 | Base exponential backoff, 0–60,000 ms; each actual wait is capped at 60 seconds. |
 | retry_on | [408, 429, 500, 502, 503, 504] | HTTP statuses that trigger another attempt. Timeouts and transport errors are retried while attempts remain. |
 
-Backoff grows as backoff_ms * 2^(attempt - 1). Retries preserve the event ID and request body.
+Backoff grows exponentially as backoff_ms * 2^(attempt - 1), capped at 60 seconds per wait. Retries preserve the event ID and request body. HookStorm rejects scenarios whose worst-case delivery attempts exceed 20,000.
 
 ## Event fields
 
 | Field | Required | Meaning |
 |---|---:|---|
-| id | yes | Event type, for example invoice.paid. |
-| event_id | yes | Stable event identifier reused across retries and duplicates. |
+| id | yes | Event type, for example invoice.paid (1–256 characters, no line breaks). |
+| event_id | yes | Stable event identifier reused across retries and duplicates (1–256 characters, no line breaks). |
 | payload | no | JSON-compatible value; defaults to {}. |
-| headers | no | Additional string headers. Transport-managed headers cannot be overridden. |
+| headers | no | Additional string headers (up to 64 headers / 16 KiB total). Names and values cannot contain line breaks. Transport-managed headers cannot be overridden. |
 | delivery | no | Per-event delivery overrides. |
 | expect_status | no | Accepted final HTTP status code or list; defaults to [200, 201, 202, 204]. |
 | expect_json | no | Expected top-level JSON fields for the first delivery. |

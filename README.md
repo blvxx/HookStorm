@@ -75,6 +75,8 @@ hookstorm run examples/out-of-order.yaml --target http://127.0.0.1:8000/webhook
 hookstorm run examples/timeout.yaml --target http://127.0.0.1:8000/webhook/slow
 ~~~
 
+The timeout example is intentionally expected to fail: it proves that HookStorm detects a receiver that takes longer than the configured timeout.
+
 For HMAC examples, set the same development secret in both terminals. The demo receiver checks signatures on /webhook/signature when HOOKSTORM_SECRET is set.
 
 ~~~bash
