@@ -370,13 +370,18 @@ def compare_history_runs(
     latency_threshold_pct: float = 20.0,
 ) -> dict[str, Any]:
     """Load and compare two records from the local history database."""
+    baseline = get_run(baseline_run_id, path)
     if current_run_id == "latest":
         recent = list_runs(path, limit=1)
         if not recent:
             raise HistoryError("No runs are stored in local history yet")
         current_run_id = recent[0]["run_id"]
+        if current_run_id == baseline_run_id:
+            raise HistoryError(
+                "The latest run is the selected baseline. Run the scenario again "
+                "or provide --current with another run ID."
+            )
     current = get_run(current_run_id, path)
-    baseline = get_run(baseline_run_id, path)
     return compare_results(
         current,
         baseline,
