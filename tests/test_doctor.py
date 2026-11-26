@@ -66,7 +66,23 @@ def test_preflight_fails_when_target_or_required_secret_is_missing(tmp_path) -> 
 
     assert _check(checks, "Target", "FAIL")
     assert _check(checks, "Signing secret", "FAIL")
-    assert not any(check.status == "PASS" for check in checks)
+    assert _check(checks, "Scenario", "PASS")
+
+
+def test_preflight_uses_event_level_signature_overrides(tmp_path) -> None:
+    path = _scenario_file(tmp_path, signature="none")
+    content = path.read_text(encoding="utf-8").replace(
+        "    payload:\\n      ok: true",
+        "    delivery:\\n      signature: valid\\n    payload:\\n      ok: true",
+    )
+    path.write_text(content, encoding="utf-8")
+    checks = run_preflight(
+        path,
+        target="http://127.0.0.1:8000/webhook",
+        environment={},
+    )
+
+    assert _check(checks, "Signing secret", "FAIL")
 
 
 def test_preflight_does_not_require_secret_for_unsigned_scenario(tmp_path) -> None:
