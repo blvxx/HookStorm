@@ -161,6 +161,15 @@ hookstorm doctor scenarios/webhook.yaml --verbose
 
 The default `doctor` command does not contact the endpoint. `--connect` resolves the host and opens a socket (plus a TLS handshake for HTTPS). `--verbose` implies `--connect` and reports each resolved IPv4 / IPv6 address, DNS lookup time, per-address TCP connection time, negotiated TLS version and cipher, certificate subject / issuer, and expiry date. It warns when an address fails while another succeeds, or when a certificate is nearing expiry. No HTTP request or webhook event is sent, so these checks cannot verify the application route, HTTP authentication, or the receiver's response.
 
+For scripts and CI integrations, use the versioned JSON output:
+
+~~~bash
+hookstorm doctor scenarios/webhook.yaml --format json
+hookstorm doctor scenarios/webhook.yaml --verbose --format json
+~~~
+
+The JSON document has `schema_version: 1`, an overall `status` / `ready` flag, a stable `summary`, a `network` section describing whether a connection check was requested and performed, and a `checks` array. Each check contains `status`, `label`, `message`, and `details`. The command still returns exit code `0` when ready and `1` when a required check fails; argument/configuration errors use exit code `2`. JSON is written to stdout without text banners, and secret values or the full target URL are not included.
+
 The demo receiver verifies the generic format and provider-compatible Stripe, GitHub, and Shopify signatures. Try the provider scenarios:
 
 ~~~bash

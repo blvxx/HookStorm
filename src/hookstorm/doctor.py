@@ -6,12 +6,13 @@ import os
 import socket
 import ssl
 import time
-from collections.abc import Mapping
+from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
 from urllib.parse import SplitResult, urlsplit
 
+from hookstorm import __version__
 from hookstorm.config import load_scenario
 from hookstorm.safety import validate_target
 
@@ -36,6 +37,56 @@ class ConnectivityResult:
     status: str
     message: str
     details: tuple[str, ...] = ()
+
+
+def build_preflight_document(
+    checks: Sequence[DoctorCheck],
+    scenario_path: str | Path,
+    *,
+    network_mode: str = "none",
+) -> dict:
+    """Build the stable, secret-safe JSON representation of doctor results."""
+    if network_mode not in {"none", "connect", "verbose"}:
+        raise ValueError("network_mode must be 'none', 'connect', or 'verbose'")
+
+    counts = {
+        "passed": sum(check.status == "PASS" for check in checks),
+        "failed": sum(check.status == "FAIL" for check in checks),
+        "warnings": sum(check.status == "WARN" for check in checks),
+        "info": sum(check.status == "INFO" for check in checks),
+    }
+    network_check = next((check for check in checks if check.label == "Network"), None)
+    network_performed = network_check is not None and network_check.status != "INFO"
+    ready = counts["failed"] == 0
+
+    return {
+        "schema_version": 1,
+        "tool": "HookStorm",
+        "tool_version": __version__,
+        "command": "doctor",
+        "scenario": str(scenario_path),
+        "status": "READY" if ready else "NOT_READY",
+        "ready": ready,
+        "exit_code": 0 if ready else 1,
+        "network": {
+            "mode": network_mode,
+            "requested": network_mode != "none",
+            "performed": network_performed,
+        },
+        "summary": {
+            "total_checks": len(checks),
+            **counts,
+        },
+        "checks": [
+            {
+                "status": check.status,
+                "label": check.label,
+                "message": check.message,
+                "details": list(check.details),
+            }
+            for check in checks
+        ],
+    }
 
 
 def _scenario_requires_secret(scenario: dict) -> bool:

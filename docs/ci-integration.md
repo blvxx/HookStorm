@@ -60,6 +60,15 @@ hookstorm doctor scenarios/webhook.yaml --verbose
 
 Verbose mode implies `--connect`. It does not send an HTTP request or webhook event, so it cannot validate the route, application-level authentication, or the handler's response. The command exits with code `1` when a required check fails.
 
+For automation that needs to inspect individual checks, request structured JSON:
+
+```bash
+hookstorm doctor scenarios/webhook.yaml --format json
+hookstorm doctor scenarios/webhook.yaml --verbose --format json
+```
+
+The versioned document currently uses `schema_version: 1` and includes an overall readiness result, check counts, network-check metadata, and each individual check with its details. The CLI exit code remains authoritative for shell gating: `0` means ready, `1` means a required check failed, and `2` indicates invalid command arguments. JSON is written to stdout; diagnostics do not include secret values or the complete endpoint URL.
+
 ## 2. Configure the staging environment
 
 In your GitHub repository, open **Settings → Environments** and create an environment named `staging`.
