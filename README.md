@@ -247,6 +247,10 @@ The repository's `.github/workflows/webhook-scenarios.yml` demonstrates the full
 
 The comparison checks pass rate, failed deliveries, per-delivery latency, p95 delivery latency, and delivery coverage. Latency is calculated as the sum of HTTP attempt times for each delivery (retry backoff is excluded). A regression exits with code `1`, so the command can fail a CI step. Use `--no-history` on `hookstorm run` to skip persistence, `--history-db PATH` to choose a database for a run, or set `HOOKSTORM_HISTORY_DB` for a shared local default.
 
+### Use HookStorm in another repository
+
+A copy-ready GitHub Actions workflow and matching staging scenario are available in `examples/ci/`. Follow [the external CI integration guide](docs/ci-integration.md) to configure a staging endpoint, HMAC secret, cached baseline, and pull-request regression gate.
+
 ## Safety and privacy
 
 - **Local-only by default.** Targets must resolve to loopback. A remote URL requires the explicit --allow-remote switch.
