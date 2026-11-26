@@ -231,3 +231,41 @@ def test_history_export_and_compare_file_cli(tmp_path, capsys) -> None:
     assert exit_code == 1
     assert "REGRESSIONS" in output
     assert "run_current_file" in output
+
+
+def test_init_command_creates_project_files_and_prints_next_steps(
+    tmp_path, monkeypatch, capsys
+) -> None:
+    monkeypatch.chdir(tmp_path)
+
+    assert main([
+        "init",
+        "--signature-provider", "stripe",
+        "--event-type", "invoice.created",
+        "--event-id", "evt_init_invoice_001",
+    ]) == 0
+
+    scenario = tmp_path / "scenarios" / "webhook.yaml"
+    workflow = tmp_path / ".github" / "workflows" / "webhook-regression.yml"
+    assert scenario.is_file()
+    assert workflow.is_file()
+    assert "signature_provider: stripe" in scenario.read_text(encoding="utf-8")
+    output = capsys.readouterr().out
+    assert "Next steps:" in output
+    assert "HOOKSTORM_TARGET_URL" in output
+    assert "HOOKSTORM_SECRET" in output
+    assert "No target URL or secret was written" in output
+
+
+def test_init_command_refuses_to_overwrite_without_force(
+    tmp_path, monkeypatch, capsys
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    scenario = tmp_path / "scenarios" / "webhook.yaml"
+    scenario.parent.mkdir(parents=True)
+    scenario.write_text("preserve existing scenario", encoding="utf-8")
+
+    assert main(["init"]) == 2
+    assert scenario.read_text(encoding="utf-8") == "preserve existing scenario"
+    assert not (tmp_path / ".github" / "workflows" / "webhook-regression.yml").exists()
+    assert "Use --force" in capsys.readouterr().err

@@ -29,6 +29,7 @@ CLI exit code (0 passed, 1 assertions failed, 2 invalid input/configuration)
 - history.py: persists a strict whitelist of run metadata and assertion outcomes to local SQLite, exports versioned sanitized JSON baselines, and compares local or portable baselines for pass-rate, coverage, and latency regressions.
 - examples/receiver.py: standard-library local demo server; never use it as a public endpoint.
 - pytest_export.py: generates pytest integration modules with an embedded, normalized scenario and runtime-only target / secret environment variables.
+- scaffold.py: generates an application-specific starter YAML scenario and a pinned GitHub Actions staging workflow; preserves existing files unless the caller explicitly passes `--force`, and never embeds target URLs or signing secrets.
 
 ## Deliberate trade-offs
 

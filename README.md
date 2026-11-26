@@ -123,6 +123,27 @@ $env:HOOKSTORM_SECRET = "local-demo-secret"
 python examples/receiver.py
 ~~~
 
+### Bootstrap a webhook CI integration in your own project
+
+From the root of the application repository (after installing HookStorm), run:
+
+~~~bash
+hookstorm init
+~~~
+
+The wizard creates `scenarios/webhook.yaml` and `.github/workflows/webhook-regression.yml`. In an interactive terminal it asks which signature format your staging receiver uses; non-interactive runs default to `generic`.
+
+You can also choose the provider and event contract explicitly:
+
+~~~bash
+hookstorm init --signature-provider github \\
+  --event-type issues.opened --event-id evt_issues_opened_001
+~~~
+
+Edit the generated scenario to match your actual payload and response. Then configure the GitHub `staging` Environment with `HOOKSTORM_TARGET_URL` as a variable and `HOOKSTORM_SECRET` as a secret. The wizard never writes endpoint URLs or signing secrets into generated files. Existing files are preserved; use `--force` only when you intentionally want to replace both generated files. Use `--no-workflow` to generate only the scenario.
+
+The generated workflow targets a dedicated staging endpoint with the explicit `--allow-remote` opt-in, skips fork-originated PRs, and updates the baseline only from trusted successful runs on `main`. Protect the staging Environment with required reviewers before enabling it for same-repository pull requests. See [CI integration for application repositories](docs/ci-integration.md) for the complete setup.
+
 The demo receiver verifies the generic format and provider-compatible Stripe, GitHub, and Shopify signatures. Try the provider scenarios:
 
 ~~~bash

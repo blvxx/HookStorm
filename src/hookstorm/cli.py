@@ -24,6 +24,7 @@ from hookstorm.history import (
 from hookstorm.pytest_export import write_pytest
 from hookstorm.report import render_json, write_report
 from hookstorm.runner import run_scenario
+from hookstorm.scaffold import initialize_project
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -34,6 +35,21 @@ def _parser() -> argparse.ArgumentParser:
     )
     parser.add_argument("--version", action="version", version=f"HookStorm {__version__}")
     subparsers = parser.add_subparsers(dest="command", required=True)
+
+    init = subparsers.add_parser(
+        "init", help="create a starter webhook scenario and GitHub Actions workflow"
+    )
+    init.add_argument("--scenario-path", default="scenarios/webhook.yaml")
+    init.add_argument("--workflow-path", default=".github/workflows/webhook-regression.yml")
+    init.add_argument(
+        "--signature-provider",
+        choices=("generic", "stripe", "github", "shopify"),
+        help="webhook signature format (prompted in an interactive terminal; defaults to generic)",
+    )
+    init.add_argument("--event-type", default="test.ping")
+    init.add_argument("--event-id", default="evt_hookstorm_init_001")
+    init.add_argument("--no-workflow", action="store_true", help="create only the YAML scenario")
+    init.add_argument("--force", action="store_true", help="overwrite generated files if they exist")
 
     run = subparsers.add_parser("run", help="execute a YAML scenario against a webhook endpoint")
     run.add_argument("scenario", help="path to a scenario YAML file")
@@ -236,9 +252,48 @@ def _history_export_command(args: argparse.Namespace) -> int:
     return 0
 
 
+def _init_command(args: argparse.Namespace) -> int:
+    signature_provider = args.signature_provider
+    if signature_provider is None and sys.stdin.isatty():
+        try:
+            answer = input("Signature provider [generic/stripe/github/shopify] (generic): ").strip()
+        except EOFError:
+            answer = ""
+        signature_provider = answer or "generic"
+    signature_provider = signature_provider or "generic"
+
+    written = initialize_project(
+        scenario_path=args.scenario_path,
+        workflow_path=args.workflow_path,
+        event_type=args.event_type,
+        event_id=args.event_id,
+        signature_provider=signature_provider,
+        include_workflow=not args.no_workflow,
+        force=args.force,
+    )
+    print("HookStorm project files created:")
+    for path in written:
+        print(f"  + {path.relative_to(Path.cwd())}")
+    print("\nNext steps:")
+    print(f"  1. Edit {args.scenario_path}: replace the sample payload and expected response.")
+    print("  2. Configure GitHub Environment 'staging':")
+    print("     Variable: HOOKSTORM_TARGET_URL")
+    print("     Secret:   HOOKSTORM_SECRET")
+    print("     Add required reviewers to protect staging credentials.")
+    if not args.no_workflow:
+        print(f"  3. Commit {args.workflow_path} and {args.scenario_path}.")
+        print("  4. Run the workflow on main once to create its first baseline.")
+    else:
+        print("  3. Add a CI workflow when you are ready to gate pull requests.")
+    print("No target URL or secret was written to the generated files.")
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
+        if args.command == "init":
+            return _init_command(args)
         if args.command == "history":
             if args.history_command == "list":
                 return _history_list_command(args)
@@ -291,7 +346,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             elif args.no_history:
                 print("History: disabled for this run")
         return 0 if result["summary"]["success"] else 1
-    except (HistoryError, ValueError) as exc:
+    except (HistoryError, ValueError, OSError) as exc:
         print(f"HookStorm error: {exc}", file=sys.stderr)
         return 2
     except KeyboardInterrupt:
