@@ -342,12 +342,12 @@ def test_verification_url_obeys_local_only_safety_before_delivery(receiver) -> N
         "name": "unsafe probe",
         "events": [{"id": "ping", "event_id": "evt_unsafe", "payload": {}}],
         "verify": {
-            "url": "http://example.com/state",
+            "url": "http://8.8.8.8/state",
             "expect_json": {},
         },
     })
 
-    with pytest.raises(ValueError, match="Remote"):
+    with pytest.raises(ValueError, match="Remote IP"):
         asyncio.run(run_scenario(data, base))
 
     assert state["requests"] == []
