@@ -40,7 +40,7 @@ def test_initialize_project_creates_valid_scenario_and_workflow(tmp_path) -> Non
     preflight = next(step for step in steps if step.get("name") == "Preflight staging endpoint")
     assert "hookstorm doctor" in preflight["run"]
     assert "--connect" in preflight["run"]
-    assert "4aa0e8e2eba7189f6ccc6aa3e8e46d1b0c91efae" in workflow_text
+    assert "8755dc158c732a420e09b83d8bae0e29a10e9206" in workflow_text
     assert "https://example" not in workflow_text
 
 
