@@ -11,6 +11,7 @@ from pathlib import Path
 
 from hookstorm import __version__
 from hookstorm.config import load_scenario
+from hookstorm.history import HistoryError, compare_history_runs, get_run, list_runs, result_metrics, save_run
 from hookstorm.pytest_export import write_pytest
 from hookstorm.report import render_json, write_report
 from hookstorm.runner import run_scenario
@@ -32,6 +33,23 @@ def _parser() -> argparse.ArgumentParser:
     run.add_argument("--secret-env", default="HOOKSTORM_SECRET", help="environment variable for HMAC secret")
     run.add_argument("--format", choices=("html", "json", "junit"), default="html", help="report format")
     run.add_argument("--output", help="write a report to this path")
+    run.add_argument("--history-db", help="history database path")
+    run.add_argument("--no-history", action="store_true", help="do not persist this run")
+
+    history = subparsers.add_parser("history", help="inspect and compare local run history")
+    history_sub = history.add_subparsers(dest="history_command", required=True)
+    history_list = history_sub.add_parser("list", help="list recent runs")
+    history_list.add_argument("--limit", type=int, default=20)
+    history_list.add_argument("--scenario", help="filter by exact scenario name")
+    history_list.add_argument("--db", help="history database path")
+    history_show = history_sub.add_parser("show", help="show one stored run")
+    history_show.add_argument("run_id")
+    history_show.add_argument("--db", help="history database path")
+    history_compare = history_sub.add_parser("compare", help="compare a run against a baseline")
+    history_compare.add_argument("baseline_run_id")
+    history_compare.add_argument("--current", default="latest")
+    history_compare.add_argument("--latency-threshold-pct", type=float, default=20.0)
+    history_compare.add_argument("--db", help="history database path")
 
     validate = subparsers.add_parser("validate", help="validate a scenario without sending requests")
     validate.add_argument("scenario", help="path to a scenario YAML file")
