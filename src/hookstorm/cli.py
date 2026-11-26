@@ -274,7 +274,7 @@ def _init_command(args: argparse.Namespace) -> int:
     print("HookStorm project files created:")
     for path in written:
         print(f"  + {path.relative_to(Path.cwd())}")
-    print("\\nNext steps:")
+    print("\nNext steps:")
     print(f"  1. Edit {args.scenario_path}: replace the sample payload and expected response.")
     print("  2. Configure GitHub Environment 'staging':")
     print("     Variable: HOOKSTORM_TARGET_URL")
