@@ -8,6 +8,7 @@ import hmac
 import json
 import os
 import sqlite3
+import socket
 import threading
 import time
 from collections import defaultdict
@@ -17,6 +18,11 @@ from urllib.parse import urlsplit
 SEEN: set[tuple[str, str]] = set()
 ATTEMPTS: defaultdict[tuple[str, str], int] = defaultdict(int)
 SECRET = os.getenv("HOOKSTORM_SECRET", "")
+# Public demo-only key. Never reuse this sample key in a real integration.
+STANDARD_WEBHOOKS_DEMO_KEY = b"hookstorm-standard-webhooks-demo-key-32"
+STANDARD_WEBHOOKS_DEMO_SECRET = (
+    "whsec_" + base64.b64encode(STANDARD_WEBHOOKS_DEMO_KEY).decode("ascii")
+)
 BUSINESS_DB = sqlite3.connect(":memory:", check_same_thread=False)
 BUSINESS_LOCK = threading.Lock()
 with BUSINESS_LOCK:
@@ -74,7 +80,33 @@ class Handler(BaseHTTPRequestHandler):
             time.sleep(1.0)
 
         if SECRET and self.path.startswith("/webhook/signature"):
-            if self.path.startswith("/webhook/signature/stripe"):
+            if self.path.startswith("/webhook/signature/standard"):
+                message_id = self.headers.get("webhook-id", "")
+                timestamp_header = self.headers.get("webhook-timestamp", "")
+                try:
+                    timestamp = int(timestamp_header)
+                except ValueError:
+                    timestamp = 0
+                signed = f"{message_id}.{timestamp_header}.".encode("utf-8") + raw
+                expected = hmac.new(
+                    STANDARD_WEBHOOKS_DEMO_KEY, signed, hashlib.sha256
+                ).digest()
+                supplied_signatures = self.headers.get("webhook-signature", "").split()
+                valid = (
+                    message_id == event_id
+                    and timestamp > 0
+                    and abs(time.time() - timestamp) <= 300
+                    and any(
+                        version == "v1"
+                        and hmac.compare_digest(
+                            base64.b64decode(signature, validate=True), expected
+                        )
+                        for item in supplied_signatures
+                        for version, separator, signature in [item.partition(",")]
+                        if separator
+                    )
+                )
+            elif self.path.startswith("/webhook/signature/stripe"):
                 supplied = self.headers.get("Stripe-Signature", "")
                 parts: dict[str, list[str]] = defaultdict(list)
                 for item in supplied.split(","):
@@ -126,6 +158,23 @@ class Handler(BaseHTTPRequestHandler):
                 (run_id, event_id, self.headers.get("X-Event-Type", "unknown")),
             )
             BUSINESS_DB.commit()
+
+        if (
+            self.path.startswith("/webhook/commit-then-drop")
+            and ATTEMPTS[delivery_key] == 1
+        ):
+            # The business write is durable, but the acknowledgement never reaches the sender.
+            print(
+                f"[receiver] committed {event_id} for run {run_id}, then dropped the response"
+            )
+            self.close_connection = True
+            try:
+                self.connection.shutdown(socket.SHUT_RDWR)
+            except OSError:
+                pass
+            self.connection.close()
+            return
+
         self._reply(
             200,
             {
@@ -140,9 +189,13 @@ class Handler(BaseHTTPRequestHandler):
 def main() -> None:
     address = ("127.0.0.1", 8000)
     print(f"HookStorm demo receiver listening on http://{address[0]}:{address[1]}")
-    print("Endpoints: /webhook, /webhook/flaky, /webhook/slow, /webhook/signature")
+    print(
+        "Endpoints: /webhook, /webhook/flaky, /webhook/slow, "
+        "/webhook/commit-then-drop, /webhook/signature"
+    )
+    print(f"Standard Webhooks demo secret: {STANDARD_WEBHOOKS_DEMO_SECRET}")
     print("State probe: GET /__hookstorm/state (scoped by X-HookStorm-Run)")
-    print("Provider signatures: /webhook/signature/stripe, /github, /shopify")
+    print("Provider signatures: /webhook/signature/stripe, /github, /shopify, /standard")
     if SECRET:
         print("HMAC validation enabled for generic, Stripe, GitHub, and Shopify endpoints")
     with ThreadingHTTPServer(address, Handler) as server:
