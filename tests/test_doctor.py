@@ -1,11 +1,13 @@
 from __future__ import annotations
 
+import socket
 from pathlib import Path
+from urllib.parse import urlsplit
 
 import pytest
 
 from hookstorm.cli import main
-from hookstorm.doctor import run_preflight
+from hookstorm.doctor import ConnectivityResult, _check_connectivity_detailed, run_preflight
 
 
 def _scenario_file(tmp_path: Path, *, signature: str = "valid") -> Path:
@@ -210,3 +212,140 @@ def test_doctor_cli_rejects_out_of_range_timeout(tmp_path, capsys) -> None:
 
     assert main(["doctor", str(scenario), "--timeout", "60"]) == 2
     assert "--timeout must be between 0.1 and 30 seconds" in capsys.readouterr().err
+
+
+def test_verbose_connectivity_reports_ipv4_ipv6_and_partial_failures(monkeypatch) -> None:
+    resolved = [
+        (socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", ("192.0.2.10", 8080)),
+        (socket.AF_INET6, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", ("2001:db8::10", 8080, 0, 0)),
+    ]
+    monkeypatch.setattr("hookstorm.doctor.socket.getaddrinfo", lambda *_args, **_kwargs: resolved)
+
+    class FakeSocket:
+        def __init__(self, family, _socktype, _proto):
+            self.family = family
+
+        def settimeout(self, _timeout):
+            pass
+
+        def connect(self, sockaddr):
+            if self.family == socket.AF_INET6:
+                raise OSError("network unreachable")
+
+        def close(self):
+            pass
+
+    monkeypatch.setattr("hookstorm.doctor.socket.socket", FakeSocket)
+
+    result = _check_connectivity_detailed(
+        urlsplit("http://staging.example.test:8080/webhook"),
+        timeout=1.0,
+    )
+
+    assert result.status == "WARN"
+    assert result.message == "1/2 address(es) reachable; 1 address(es) failed"
+    joined = "\\n".join(result.details)
+    assert "DNS IPv4: 192.0.2.10" in joined
+    assert "DNS IPv6: 2001:db8::10" in joined
+    assert "IPv4 192.0.2.10: TCP connected in" in joined
+    assert "IPv6 2001:db8::10: connection failed" in joined
+    assert "DNS lookup completed in" in joined
+
+
+def test_verbose_https_reports_tls_and_certificate_metadata(monkeypatch) -> None:
+    resolved = [
+        (socket.AF_INET, socket.SOCK_STREAM, socket.IPPROTO_TCP, "", ("192.0.2.20", 443)),
+    ]
+    monkeypatch.setattr("hookstorm.doctor.socket.getaddrinfo", lambda *_args, **_kwargs: resolved)
+
+    class FakeSocket:
+        def __init__(self, *_args):
+            pass
+
+        def settimeout(self, _timeout):
+            pass
+
+        def connect(self, _sockaddr):
+            pass
+
+        def close(self):
+            pass
+
+    class FakeTlsSocket:
+        def version(self):
+            return "TLSv1.3"
+
+        def cipher(self):
+            return ("TLS_AES_128_GCM_SHA256", "TLSv1.3", 128)
+
+        def getpeercert(self):
+            return {
+                "subject": ((("commonName", "staging.example.test"),),),
+                "issuer": ((("organizationName", "Example Test CA"),),),
+                "notAfter": "Dec 01 00:00:00 2030 GMT",
+            }
+
+        def close(self):
+            pass
+
+    class FakeContext:
+        def wrap_socket(self, _connection, *, server_hostname):
+            assert server_hostname == "staging.example.test"
+            return FakeTlsSocket()
+
+    monkeypatch.setattr("hookstorm.doctor.socket.socket", FakeSocket)
+    monkeypatch.setattr("hookstorm.doctor.ssl.create_default_context", FakeContext)
+
+    result = _check_connectivity_detailed(
+        urlsplit("https://staging.example.test/webhook"),
+        timeout=1.0,
+    )
+
+    assert result.status == "PASS"
+    assert result.message == "all 1 resolved address(es) reachable with verified TLS"
+    joined = "\\n".join(result.details)
+    assert "TLSv1.3" in joined
+    assert "cipher: TLS_AES_128_GCM_SHA256" in joined
+    assert "Certificate subject: commonName=staging.example.test" in joined
+    assert "Certificate issuer: organizationName=Example Test CA" in joined
+    assert "Certificate expires: 2030-12-01T00:00:00+00:00" in joined
+
+
+def test_verbose_dns_resolution_failure_is_a_failed_network_check(monkeypatch) -> None:
+    def fail_dns(*_args, **_kwargs):
+        raise socket.gaierror("name or service not known")
+
+    monkeypatch.setattr("hookstorm.doctor.socket.getaddrinfo", fail_dns)
+
+    result = _check_connectivity_detailed(
+        urlsplit("https://staging.example.test/webhook"),
+        timeout=1.0,
+    )
+
+    assert result.status == "FAIL"
+    assert "DNS lookup failed" in result.message
+    assert "DNS lookup time:" in result.details[0]
+
+
+def test_doctor_verbose_implies_connect_and_prints_details(
+    tmp_path, monkeypatch, capsys
+) -> None:
+    scenario = _scenario_file(tmp_path)
+    monkeypatch.setenv("HOOKSTORM_TARGET_URL", "https://staging.example.test/webhook")
+    monkeypatch.setenv("HOOKSTORM_SECRET", "private-secret")
+    monkeypatch.setattr(
+        "hookstorm.doctor._check_connectivity_detailed",
+        lambda *_args: ConnectivityResult(
+            "PASS",
+            "all 1 resolved address(es) reachable with verified TLS",
+            ("DNS lookup completed in 0.50 ms (1 unique address(es))", "  TLS: TLSv1.3"),
+        ),
+    )
+
+    assert main(["doctor", str(scenario), "--verbose"]) == 0
+
+    output = capsys.readouterr().out
+    assert "Preflight: READY" in output
+    assert "DNS lookup completed in 0.50 ms" in output
+    assert "TLS: TLSv1.3" in output
+    assert "private-secret" not in output
