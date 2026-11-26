@@ -63,10 +63,32 @@ The optional top-level verify mapping runs once after all event deliveries have 
 | expect_status | [200] | Accepted HTTP status code or non-empty list of codes from 100 to 599. |
 | expect_json | required | JSON object checked with the same recursive subset-matching rules as event response assertions. |
 | timeout_ms | 5000 | GET timeout, 1–300,000 ms. |
+| auth | none | Optional environment-backed Bearer or API-key header authentication. |
 
 HookStorm sends the generated X-HookStorm-Run header with the GET so a receiver can isolate state for that run. The probe sends no webhook payload and does not mutate the receiver. A status, transport, or JSON assertion failure marks the overall run as failed. JSON and HTML reports include the probe result; JUnit adds a separate business-state probe testcase. Run history stores the sanitized outcome and compares it for regressions.
 
-The probe is not a universal exactly-once guarantee: it verifies only the state your endpoint exposes at the time of the GET. Use isolated test data and an endpoint designed for testing. The current probe supports unauthenticated GET endpoints; it does not configure custom authorization headers.
+Authentication is optional and configured with an environment variable reference, not a literal secret:
+
+~~~yaml
+auth:
+  type: bearer
+  token_env: HOOKSTORM_VERIFY_TOKEN
+~~~
+
+For API-key authentication, use:
+
+~~~yaml
+auth:
+  type: api_key
+  key_env: HOOKSTORM_VERIFY_API_KEY
+  header: X-API-Key
+~~~
+
+The `header` field is optional and defaults to `X-API-Key`. A custom API-key header must be a valid HTTP header name and may not replace Authorization, HookStorm-managed headers, or hop-by-hop headers. Bearer tokens are sent as `Authorization: Bearer <token>`.
+
+The named environment variable is resolved before any webhook delivery starts. Missing, empty, oversized, non-ASCII, or whitespace-containing credentials fail preflight without sending webhook traffic. Credential values are sent only on the verification GET and are never copied to terminal output, reports, or run history. Store the variable in your CI secret manager or local shell environment; do not put the value in YAML.
+
+The probe is not a universal exactly-once guarantee: it verifies only the state your endpoint exposes at the time of the GET. Use isolated test data and an endpoint designed for testing.
 
 ## Event fields
 
