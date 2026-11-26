@@ -52,6 +52,7 @@ CLI exit code (0 passed, 1 assertions failed, 2 invalid input/configuration)
 - `.github/workflows/ci.yml` publishes the unit-test JUnit report from each OS / Python matrix job.
 - `.github/workflows/webhook-scenarios.yml` runs the local demo receiver and representative YAML scenarios, compares each run with a cached main-branch baseline, and uploads the per-scenario JUnit reports.
 - Baselines are exported as versioned JSON files and carried between ephemeral workflow runs using the GitHub Actions cache. Pull requests read the main-branch baseline but never update it; successful pushes to main refresh the cache.
+- `examples/ci/webhook-regression.yml` is a consumer-facing staging template. It uses a caller-managed test endpoint and HMAC secret, skips fork-originated PRs, restores baselines read-only, and refreshes them only from trusted main-branch runs.
 
 
 ## Run history and regression model
