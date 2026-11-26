@@ -421,3 +421,117 @@ def compare_history_runs(
         baseline,
         latency_threshold_pct=latency_threshold_pct,
     )
+
+
+_EXPORT_FORMAT = "hookstorm-history"
+_EXPORT_FORMAT_VERSION = 1
+
+
+def _resolve_history_run_id(run_id: str, path: str | Path | None = None) -> str:
+    if run_id != "latest":
+        return run_id
+    recent = list_runs(path, limit=1)
+    if not recent:
+        raise HistoryError("No runs are stored in local history yet")
+    return str(recent[0]["run_id"])
+
+
+def export_history_run(
+    run_id: str,
+    output: str | Path,
+    path: str | Path | None = None,
+) -> str:
+    """Write one sanitized run as a portable JSON baseline and return its resolved path."""
+    resolved_id = _resolve_history_run_id(run_id, path)
+    result = get_run(resolved_id, path)
+    safe_result = _sanitize_result(result)
+    destination = Path(output).expanduser()
+    try:
+        destination.parent.mkdir(parents=True, exist_ok=True)
+        document = {
+            "format": _EXPORT_FORMAT,
+            "format_version": _EXPORT_FORMAT_VERSION,
+            "run": safe_result,
+        }
+        encoded = json.dumps(
+            document, ensure_ascii=False, indent=2, allow_nan=False
+        )
+        destination.write_text(encoded, encoding="utf-8")
+    except (OSError, TypeError, ValueError) as exc:
+        raise HistoryError(f"Cannot export run '{resolved_id}': {exc}") from exc
+    return str(destination.resolve())
+
+
+def load_history_export(source: str | Path) -> dict[str, Any]:
+    """Read a portable baseline and re-apply the history field whitelist."""
+    location = Path(source).expanduser()
+    try:
+        document = json.loads(location.read_text(encoding="utf-8"))
+    except OSError as exc:
+        raise HistoryError(f"Cannot read baseline file '{location}': {exc}") from exc
+    except json.JSONDecodeError as exc:
+        raise HistoryError(f"Baseline file '{location}' is not valid JSON: {exc}") from exc
+
+    if not isinstance(document, dict):
+        raise HistoryError("Baseline file must contain a JSON object")
+    if (
+        document.get("format") != _EXPORT_FORMAT
+        or document.get("format_version") != _EXPORT_FORMAT_VERSION
+    ):
+        raise HistoryError(
+            "Unsupported baseline file format; expected hookstorm-history version 1"
+        )
+    result = document.get("run")
+    if not isinstance(result, dict):
+        raise HistoryError("Baseline file is missing its run object")
+
+    required = ("run_id", "scenario", "started_at", "target", "summary", "deliveries")
+    missing = [key for key in required if key not in result]
+    if missing:
+        raise HistoryError(
+            f"Baseline run is incomplete; missing: {', '.join(missing)}"
+        )
+    if not all(isinstance(result.get(key), str) and result[key] for key in required[:4]):
+        raise HistoryError("Baseline run metadata fields must be non-empty strings")
+    if not isinstance(result.get("summary"), dict):
+        raise HistoryError("Baseline run summary must be a JSON object")
+    if not isinstance(result.get("deliveries"), list):
+        raise HistoryError("Baseline run deliveries must be a JSON array")
+    for index, delivery in enumerate(result["deliveries"]):
+        if not isinstance(delivery, dict) or not isinstance(delivery.get("attempts", []), list):
+            raise HistoryError(f"Baseline delivery {index} has an invalid structure")
+        for attempt_index, attempt in enumerate(delivery.get("attempts", [])):
+            if not isinstance(attempt, dict):
+                raise HistoryError(
+                    f"Baseline delivery {index} attempt {attempt_index} has an invalid structure"
+                )
+
+    try:
+        safe_result = _sanitize_result(result)
+        result_metrics(safe_result)
+    except (KeyError, TypeError, ValueError) as exc:
+        raise HistoryError(f"Baseline run contains invalid metrics: {exc}") from exc
+    return safe_result
+
+
+def compare_history_file(
+    baseline_file: str | Path,
+    *,
+    current_run_id: str = "latest",
+    path: str | Path | None = None,
+    latency_threshold_pct: float = 20.0,
+) -> dict[str, Any]:
+    """Compare the latest local run against a sanitized JSON baseline file."""
+    baseline = load_history_export(baseline_file)
+    resolved_current_id = _resolve_history_run_id(current_run_id, path)
+    if resolved_current_id == baseline.get("run_id"):
+        raise HistoryError(
+            "The current run is the selected baseline. Run the scenario again "
+            "or export a different baseline."
+        )
+    current = get_run(resolved_current_id, path)
+    return compare_results(
+        current,
+        baseline,
+        latency_threshold_pct=latency_threshold_pct,
+    )

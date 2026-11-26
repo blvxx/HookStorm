@@ -226,6 +226,25 @@ The current run defaults to the latest recorded run. You can select it explicitl
 hookstorm history compare BASELINE_RUN_ID --current CURRENT_RUN_ID --latency-threshold-pct 20
 ~~~
 
+### Portable baselines for CI
+
+SQLite history is local to a runner. Export a sanitized JSON baseline to carry it between isolated CI jobs, then compare a new run with that file:
+
+~~~bash
+# Export the latest saved run
+hookstorm history export latest --output .hookstorm-baselines/payment.json
+
+# Run the same scenario in a later job after restoring that file
+hookstorm run scenarios/payment.yaml --target http://127.0.0.1:8000/webhook \
+  --history-db .hookstorm/history.sqlite3
+hookstorm history compare-file .hookstorm-baselines/payment.json \
+  --db .hookstorm/history.sqlite3 --latency-threshold-pct 20
+~~~
+
+`history export` writes a versioned JSON file using the same explicit field whitelist as SQLite. `history compare-file` compares that baseline with the latest run in the selected local database; use `--current RUN_ID` to select a different current run. The file excludes payloads, request / response headers, response bodies, and secrets, but retains event identifiers and the target URL path.
+
+The repository's `.github/workflows/webhook-scenarios.yml` demonstrates the full GitHub Actions flow. It restores baseline files from the main-branch Actions cache, compares each PR scenario, and saves refreshed baselines only after a successful run on `main`. A new scenario is seeded on its first successful main-branch run. The built-in workflow sets a very high latency threshold to avoid flaky timing gates on shared runners; for a controlled application test environment, choose a stricter threshold such as 20%.
+
 The comparison checks pass rate, failed deliveries, per-delivery latency, p95 delivery latency, and delivery coverage. Latency is calculated as the sum of HTTP attempt times for each delivery (retry backoff is excluded). A regression exits with code `1`, so the command can fail a CI step. Use `--no-history` on `hookstorm run` to skip persistence, `--history-db PATH` to choose a database for a run, or set `HOOKSTORM_HISTORY_DB` for a shared local default.
 
 ## Safety and privacy

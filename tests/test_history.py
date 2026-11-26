@@ -4,10 +4,13 @@ import pytest
 
 from hookstorm.history import (
     HistoryError,
+    compare_history_file,
     compare_history_runs,
     compare_results,
+    export_history_run,
     get_run,
     list_runs,
+    load_history_export,
     result_metrics,
     save_run,
 )
@@ -257,3 +260,72 @@ def test_compare_latest_rejects_baseline_against_itself(tmp_path) -> None:
     save_run(make_result("run_001"), database)
     with pytest.raises(HistoryError, match="selected baseline"):
         compare_history_runs("run_001", path=database)
+
+
+
+def test_history_export_is_portable_and_sanitized(tmp_path) -> None:
+    database = tmp_path / "history.sqlite3"
+    output = tmp_path / "baselines" / "baseline.json"
+    result = make_result("run_export1")
+    result["payload"] = {"private": "BASELINE_PRIVATE_PAYLOAD"}
+    result["secret"] = "BASELINE_PRIVATE_SECRET"
+    save_run(result, database)
+
+    exported_path = export_history_run("latest", output, database)
+    assert output.is_file()
+    assert exported_path == str(output.resolve())
+    raw = output.read_text(encoding="utf-8")
+    assert "BASELINE_PRIVATE_PAYLOAD" not in raw
+    assert "BASELINE_PRIVATE_SECRET" not in raw
+
+    loaded = load_history_export(output)
+    assert loaded["run_id"] == "run_export1"
+    assert loaded["scenario"] == "payment webhook"
+    assert "payload" not in loaded
+    assert "secret" not in loaded
+
+
+def test_compare_history_file_detects_regression_from_another_database(tmp_path) -> None:
+    baseline_db = tmp_path / "baseline.sqlite3"
+    current_db = tmp_path / "current.sqlite3"
+    baseline_file = tmp_path / "baseline.json"
+    save_run(make_result("run_baseline"), baseline_db)
+    export_history_run("latest", baseline_file, baseline_db)
+
+    current = make_result(
+        "run_current2",
+        deliveries=[delivery("evt_payment_001", passed=False, latency_ms=20.0, status_code=500)],
+    )
+    save_run(current, current_db)
+
+    comparison = compare_history_file(baseline_file, path=current_db)
+    assert comparison["baseline_run_id"] == "run_baseline"
+    assert comparison["current_run_id"] == "run_current2"
+    assert comparison["has_regressions"] is True
+
+
+def test_load_history_export_rejects_unknown_format(tmp_path) -> None:
+    baseline_file = tmp_path / "bad-baseline.json"
+    baseline_file.write_text(
+        '{"format":"other-tool","format_version":1,"run":{}}',
+        encoding="utf-8",
+    )
+    with pytest.raises(HistoryError, match="Unsupported baseline file format"):
+        load_history_export(baseline_file)
+
+
+def test_load_history_export_rejects_private_fields_by_whitelisting(tmp_path) -> None:
+    database = tmp_path / "history.sqlite3"
+    baseline_file = tmp_path / "baseline.json"
+    result = make_result("run_safe")
+    save_run(result, database)
+    export_history_run("latest", baseline_file, database)
+
+    import json
+
+    document = json.loads(baseline_file.read_text(encoding="utf-8"))
+    document["run"]["payload"] = {"secret": "SHOULD_NOT_SURVIVE"}
+    baseline_file.write_text(json.dumps(document), encoding="utf-8")
+
+    loaded = load_history_export(baseline_file)
+    assert "payload" not in loaded

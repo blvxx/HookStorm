@@ -27,3 +27,5 @@
 - Add opt-out local SQLite run history with sanitized per-delivery outcomes.
 - Add `history list`, `history show`, and `history compare` CLI commands.
 - Detect pass-rate, failed-delivery, delivery-coverage, per-delivery latency, and p95 latency regressions; return a CI-friendly nonzero exit code when regressions are found.
+- Add versioned, sanitized JSON baseline export and `history compare-file` for comparing runs across ephemeral CI runners.
+- Gate the built-in GitHub Actions webhook scenarios against cached main-branch baselines; refresh baselines only after successful main runs.
