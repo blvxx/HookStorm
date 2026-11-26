@@ -27,6 +27,7 @@ CLI exit code (0 passed, 1 assertions failed, 2 invalid input/configuration)
 - runner.py: sends requests asynchronously with HTTPX, preserves event IDs, supports bounded concurrency across independent events, computes optional HMAC signatures, and checks nested JSON responses.
 - report.py: generates JSON or self-contained HTML. Payloads, request headers, response bodies, and secrets are not stored.
 - examples/receiver.py: standard-library local demo server; never use it as a public endpoint.
+- pytest_export.py: generates pytest integration modules with an embedded, normalized scenario and runtime-only target / secret environment variables.
 
 ## Deliberate trade-offs
 
