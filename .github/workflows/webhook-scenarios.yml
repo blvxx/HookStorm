@@ -67,7 +67,7 @@ jobs:
             scenario="$1"
             target="$2"
             name="$(basename "$scenario" .yaml)"
-            echo "::group::\${name}"
+            echo "::group::${name}"
             if hookstorm run "$scenario" --target "$target" --format junit --output "test-results/${name}.xml"; then
               echo "Scenario ${name}: PASS"
             else
