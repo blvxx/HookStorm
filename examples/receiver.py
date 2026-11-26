@@ -90,7 +90,7 @@ class Handler(BaseHTTPRequestHandler):
                     timestamp = int(timestamp_header)
                 except ValueError:
                     timestamp = 0
-                signed = f"{message_id}.{timestamp_header}.".encode("utf-8") + raw
+                signed = f"{message_id}.{timestamp_header}.".encode() + raw
                 expected = hmac.new(
                     STANDARD_WEBHOOKS_DEMO_KEY, signed, hashlib.sha256
                 ).digest()
