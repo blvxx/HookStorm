@@ -118,7 +118,7 @@ def _validate_verify(value: Any) -> dict[str, Any] | None:
     if parsed.username or parsed.password or parsed.fragment:
         raise ScenarioError("verify.url must not contain embedded credentials or a fragment")
     try:
-        parsed.port
+        _ = parsed.port
     except ValueError as exc:
         raise ScenarioError("verify.url contains an invalid port") from exc
 
