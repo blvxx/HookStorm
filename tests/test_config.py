@@ -96,3 +96,25 @@ def test_rejects_non_string_order_and_signature_modes() -> None:
     data["delivery"] = {"order": ["reverse"]}
     with pytest.raises(ScenarioError, match="order"):
         validate_scenario(data)
+
+
+
+def test_accepts_bounded_global_concurrency() -> None:
+    data = valid_scenario()
+    data["delivery"] = {"concurrency": 4}
+    assert validate_scenario(data)["delivery"]["concurrency"] == 4
+
+
+@pytest.mark.parametrize("value", [0, 51, True, 1.5, "2"])
+def test_rejects_invalid_concurrency(value: object) -> None:
+    data = valid_scenario()
+    data["delivery"] = {"concurrency": value}
+    with pytest.raises(ScenarioError, match="concurrency"):
+        validate_scenario(data)
+
+
+def test_concurrency_is_global_not_per_event() -> None:
+    data = valid_scenario()
+    data["events"][0]["delivery"] = {"concurrency": 2}
+    with pytest.raises(ScenarioError, match="Unknown key"):
+        validate_scenario(data)
