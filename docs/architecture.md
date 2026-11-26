@@ -40,5 +40,5 @@ CLI exit code (0 passed, 1 assertions failed, 2 invalid input/configuration)
 - Concurrency applies across independent events; retries and duplicate deliveries within one event remain sequential. With concurrency above 1, request completion order is intentionally nondeterministic.
 - A timeout does not prove the receiver rolled back work. The handler may finish after the sender stops waiting.
 - HMAC mode is a generic raw-body SHA-256 convention, not a drop-in for every provider.
-- Response assertions inspect expected top-level JSON fields only.
+- JSON object assertions support recursive subset matching; arrays are compared exactly and in order.
 - A passing status or JSON assertion does not prove the business side effect happened exactly once; verify it independently in your test environment.
