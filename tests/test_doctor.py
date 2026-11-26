@@ -330,6 +330,24 @@ def test_doctor_cli_does_not_print_target_tokens_or_secret(tmp_path, monkeypatch
     assert "full URL hidden" in output
 
 
+def test_doctor_json_redacts_verification_credentials(tmp_path, monkeypatch, capsys) -> None:
+    scenario = _verification_scenario_file(tmp_path)
+    secret = "json-output-must-not-contain-this"
+    monkeypatch.setenv("HOOKSTORM_TARGET_URL", "https://staging.example.test/webhook")
+    monkeypatch.setenv("HOOKSTORM_VERIFY_TOKEN", secret)
+
+    assert main(["doctor", str(scenario), "--format", "json"]) == 0
+
+    output = capsys.readouterr().out
+    document = json.loads(output)
+    auth_check = next(
+        item for item in document["checks"] if item["label"] == "Verification auth"
+    )
+    assert auth_check["status"] == "PASS"
+    assert "HOOKSTORM_VERIFY_TOKEN" in auth_check["message"]
+    assert secret not in output
+
+
 def test_doctor_cli_returns_one_for_missing_staging_settings(tmp_path, monkeypatch, capsys) -> None:
     scenario = _scenario_file(tmp_path)
     monkeypatch.delenv("HOOKSTORM_TARGET_URL", raising=False)
