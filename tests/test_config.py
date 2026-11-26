@@ -170,7 +170,7 @@ def test_rejects_timestamp_offset_for_non_stripe_provider() -> None:
         "signature_provider": "github",
         "signature_timestamp_offset_seconds": 30,
     }
-    with pytest.raises(ScenarioError, match="only supported for Stripe"):
+    with pytest.raises(ScenarioError, match="only be used with signature_provider: stripe"):
         validate_scenario(data)
 
 
