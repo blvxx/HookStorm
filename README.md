@@ -251,7 +251,7 @@ export HOOKSTORM_VERIFY_TOKEN='your-staging-token'
 $env:HOOKSTORM_VERIFY_TOKEN = 'your-staging-token'
 ~~~
 
-HookStorm resolves and validates the credential before sending any webhook events. A missing, empty, or malformed value stops the run before traffic is sent. Credentials are sent only on the read-only verification GET; they are not included in terminal output, JSON / HTML / JUnit reports, or run history. Bearer credentials use the `Authorization: Bearer` header. API-key header names cannot override HookStorm-managed or hop-by-hop headers.
+HookStorm resolves and validates the credential before sending any webhook events. A missing, empty, or malformed value stops the run before traffic is sent. Credentials are sent only on the read-only verification GET; they are not included in terminal output, JSON / HTML / JUnit reports, or run history. Bearer credentials use the `Authorization: Bearer` header. API-key header names cannot override HookStorm-managed or hop-by-hop headers. Authenticated remote verification URLs must use HTTPS; HTTP is allowed only for localhost / loopback development endpoints.
 
 ## Write your own scenario
 
