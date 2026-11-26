@@ -41,6 +41,48 @@ def test_rejects_invalid_headers() -> None:
         validate_scenario(data)
 
 
+@pytest.mark.parametrize("value", ["snowman \u2603", "bad\\x00value", "bad\\x1fvalue", "bad\\x7fvalue"])
+def test_rejects_non_ascii_or_control_header_values(value: str) -> None:
+    data = valid_scenario()
+    data["events"][0]["headers"] = {"X-Custom": value}
+    with pytest.raises(ScenarioError, match="invalid HTTP header"):
+        validate_scenario(data)
+
+
+def test_accepts_horizontal_tab_in_http_header_value() -> None:
+    data = valid_scenario()
+    data["events"][0]["headers"] = {"X-Custom": "first\\tsecond"}
+    assert validate_scenario(data)["events"][0]["headers"]["X-Custom"] == "first\\tsecond"
+
+
+@pytest.mark.parametrize("field", ["event_id", "id"])
+@pytest.mark.parametrize("value", ["event-\\u2603", "event-\\x00", "event-\\x7f", "event-\\tvalue"])
+def test_rejects_unsafe_event_header_values(field: str, value: str) -> None:
+    data = valid_scenario()
+    data["events"][0][field] = value
+    with pytest.raises(ScenarioError, match="ASCII header-safe"):
+        validate_scenario(data)
+
+
+def test_rejects_duplicate_event_ids_within_scenario() -> None:
+    data = valid_scenario()
+    data["events"].append({
+        "id": "invoice.created",
+        "event_id": "evt_1",
+        "payload": {"invoice": 1},
+    })
+    with pytest.raises(ScenarioError, match="event_id must be unique"):
+        validate_scenario(data)
+
+
+def test_duplicate_delivery_uses_one_unique_event_id() -> None:
+    data = valid_scenario()
+    data["delivery"] = {"duplicate_count": 2}
+    scenario = validate_scenario(data)
+    assert scenario["events"][0]["event_id"] == "evt_1"
+    assert scenario["delivery"]["duplicate_count"] == 2
+
+
 def test_rejects_excessive_duplicate_count() -> None:
     data = valid_scenario()
     data["delivery"] = {"duplicate_count": 1000}
