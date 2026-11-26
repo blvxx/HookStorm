@@ -218,3 +218,42 @@ def test_percentile_metrics_use_per_delivery_total_latency() -> None:
     metrics = result_metrics(result)
     assert metrics["p50_latency_ms"] == 30.0
     assert metrics["p95_latency_ms"] == 40.0
+
+
+
+def test_history_whitelists_metadata_and_never_persists_payload_headers_or_secrets(tmp_path) -> None:
+    database = tmp_path / "history.sqlite3"
+    result = make_result("run_private")
+    result["payload"] = {"card_number": "PRIVATE_PAYLOAD_MARKER"}
+    result["secret"] = "PRIVATE_SECRET_MARKER"
+    result["request_headers"] = {"Authorization": "PRIVATE_HEADER_MARKER"}
+    result["response_body"] = "PRIVATE_RESPONSE_MARKER"
+    result["deliveries"][0]["payload"] = {"private": "DELIVERY_PAYLOAD_MARKER"}
+    result["deliveries"][0]["attempts"][0]["response_body"] = "ATTEMPT_BODY_MARKER"
+
+    save_run(result, database)
+    stored = get_run("run_private", database)
+    raw_database = database.read_bytes()
+
+    assert "payload" not in stored
+    assert "secret" not in stored
+    assert "request_headers" not in stored
+    assert "response_body" not in stored
+    assert "payload" not in stored["deliveries"][0]
+    assert "response_body" not in stored["deliveries"][0]["attempts"][0]
+    for marker in (
+        b"PRIVATE_PAYLOAD_MARKER",
+        b"PRIVATE_SECRET_MARKER",
+        b"PRIVATE_HEADER_MARKER",
+        b"PRIVATE_RESPONSE_MARKER",
+        b"DELIVERY_PAYLOAD_MARKER",
+        b"ATTEMPT_BODY_MARKER",
+    ):
+        assert marker not in raw_database
+
+
+def test_compare_latest_rejects_baseline_against_itself(tmp_path) -> None:
+    database = tmp_path / "history.sqlite3"
+    save_run(make_result("run_001"), database)
+    with pytest.raises(HistoryError, match="selected baseline"):
+        compare_history_runs("run_001", path=database)
