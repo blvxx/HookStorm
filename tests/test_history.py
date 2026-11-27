@@ -24,8 +24,6 @@ from hookstorm.history import (
 )
 
 
-
-
 def _save_concurrent_process_run(database_path: str, index: int) -> str:
     """Write one independent run from a spawned test process."""
     return save_run(make_result(f"parallel_run_{index:04d}"), database_path)
