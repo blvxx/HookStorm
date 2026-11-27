@@ -77,9 +77,18 @@ def test_release_workflow_smoke_tests_wheel_and_source_distribution() -> None:
         if step.get("name") == "Smoke-test wheel and source distribution"
     )
     script = smoke_test["run"]
-    assert "dist/*.whl" in script
-    assert "dist/*.tar.gz" in script
-    assert script.count("hookstorm validate examples/standard-webhooks.yaml") == 2
+    assert script == "python scripts/smoke_wheel.py --all"
+    assert "examples/" not in script
+
+    package_smoke = (
+        Path(__file__).resolve().parents[1] / "scripts" / "smoke_wheel.py"
+    ).read_text(encoding="utf-8")
+    assert '"init"' in package_smoke
+    assert '"--no-workflow"' in package_smoke
+    assert '"validate"' in package_smoke
+    assert '"--all"' in package_smoke
+    assert "smoke-scenario.yaml" in package_smoke
+    assert "examples/" not in package_smoke
 
     smoke_test_index = steps.index(smoke_test)
     upload_index = next(
@@ -87,3 +96,23 @@ def test_release_workflow_smoke_tests_wheel_and_source_distribution() -> None:
         if step.get("name") == "Upload release distributions"
     )
     assert smoke_test_index < upload_index
+
+
+
+def test_ci_builds_and_smoke_tests_wheel_and_source_distribution() -> None:
+    workflow_path = (
+        Path(__file__).resolve().parents[1] / ".github" / "workflows" / "ci.yml"
+    )
+    workflow = yaml.load(workflow_path.read_text(encoding="utf-8"), Loader=yaml.BaseLoader)
+    steps = workflow["jobs"]["test"]["steps"]
+
+    build = next(step for step in steps if step.get("name") == "Build wheel and source distribution")
+    smoke = next(
+        step
+        for step in steps
+        if step.get("name") == "Smoke-test installed wheel and source distribution"
+    )
+
+    assert build["run"] == "python -m build --sdist --wheel --outdir dist"
+    assert smoke["run"] == "python scripts/smoke_wheel.py --all"
+    assert steps.index(build) < steps.index(smoke)
