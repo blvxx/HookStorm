@@ -131,13 +131,35 @@ def _validate_fault_injection(value: Any, where: str) -> dict[str, list[int]]:
         "connect_error_attempts",
         "response_loss_attempts",
         "response_body_error_attempts",
+        "malformed_json_attempts",
+        "wrong_content_type_attempts",
+        "gzip_body_attempts",
+        "deflate_body_attempts",
+        "invalid_gzip_attempts",
+        "invalid_deflate_attempts",
+        "chunked_transfer_attempts",
+        "malformed_chunked_attempts",
+        "partial_upload_attempts",
+        "content_length_mismatch_attempts",
     }
     _unknown_keys(value, allowed, where)
 
     normalized: dict[str, list[int]] = {}
     fields = ["connect_error_attempts", "response_loss_attempts"]
-    if "response_body_error_attempts" in value:
-        fields.append("response_body_error_attempts")
+    optional_fields = (
+        "response_body_error_attempts",
+        "malformed_json_attempts",
+        "wrong_content_type_attempts",
+        "gzip_body_attempts",
+        "deflate_body_attempts",
+        "invalid_gzip_attempts",
+        "invalid_deflate_attempts",
+        "chunked_transfer_attempts",
+        "malformed_chunked_attempts",
+        "partial_upload_attempts",
+        "content_length_mismatch_attempts",
+    )
+    fields.extend(field for field in optional_fields if field in value)
     for field in fields:
         attempts = value.get(field, [])
         if not isinstance(attempts, list):
