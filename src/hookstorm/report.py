@@ -8,7 +8,6 @@ import xml.etree.ElementTree as ET
 from pathlib import Path
 from typing import Any
 
-
 _FAULT_LABELS = {
     "connect_error": "Connect fault",
     "response_loss": "ACK loss",
