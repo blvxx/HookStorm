@@ -6,7 +6,7 @@
 
 ## Decision
 
-<badge color="warning">NO-GO — do not publish yet</badge>
+**Decision: NO-GO — do not publish yet.**
 
 The project is an **alpha candidate** from an engineering perspective, but this review does not authorize a GitHub Release, PyPI upload, or public container push. The changes are on a draft pull request, not on `main`. The release workflow deliberately requires a published release tag to point to a commit reachable from `main`.
 
