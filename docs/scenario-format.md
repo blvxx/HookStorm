@@ -104,7 +104,7 @@ The probe is not a universal exactly-once guarantee: it verifies only the state 
 
 ## Response body safety limit
 
-Webhook delivery responses and the business-state verification response are streamed and capped at 2 MiB after HTTP content decoding. If a response exceeds this limit, HookStorm closes the response stream and marks the JSON assertion as failed with a clear size-limit error. The limit applies even when no JSON expectation is configured; HookStorm does not buffer arbitrarily large response bodies or persist response content.
+Webhook delivery responses and the business-state verification response are requested with `Accept-Encoding: identity` and streamed from raw response chunks under a 2 MiB limit. If a response exceeds this limit, HookStorm closes the response stream and marks the JSON assertion as failed with a clear size-limit error. Unexpected compressed responses are rejected before HTTP content decompression; this prevents a small compressed payload from expanding into an unbounded allocation. The limit applies even when no JSON expectation is configured; HookStorm does not buffer arbitrarily large response bodies or persist response content.
 
 ## Event fields
 
