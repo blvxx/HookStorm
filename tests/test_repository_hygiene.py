@@ -75,3 +75,56 @@ def test_ci_uploads_pytest_artifact_only_when_report_exists() -> None:
 
     assert upload["if"] == "always() && hashFiles('test-results/pytest.xml') != ''"
     assert upload["with"]["if-no-files-found"] == "error"
+
+
+def test_optional_framework_and_docs_extras_remain_separate_from_core() -> None:
+    data = tomllib.loads((ROOT / "pyproject.toml").read_text(encoding="utf-8"))
+    extras = data["project"]["optional-dependencies"]
+
+    assert extras["fastapi"] == ["fastapi>=0.115,<1"]
+    assert extras["flask"] == ["Flask>=3.0,<4"]
+    assert extras["docs"] == ["zensical>=0.1,<1"]
+    core_dependencies = data["project"]["dependencies"]
+    assert all("fastapi" not in item.lower() for item in core_dependencies)
+    assert all("flask" not in item.lower() for item in core_dependencies)
+    assert (ROOT / "src/hookstorm/integrations/_recorder.py").is_file()
+    assert (ROOT / "src/hookstorm/integrations/fastapi.py").is_file()
+    assert (ROOT / "src/hookstorm/integrations/flask.py").is_file()
+
+
+def test_container_is_minimal_non_root_and_has_read_only_ci_smoke() -> None:
+    dockerfile = (ROOT / "Dockerfile").read_text(encoding="utf-8")
+    dockerignore = (ROOT / ".dockerignore").read_text(encoding="utf-8")
+    workflow = yaml.safe_load(
+        (ROOT / ".github/workflows/ci.yml").read_text(encoding="utf-8")
+    )
+
+    assert "FROM python:3.12-slim AS builder" in dockerfile
+    assert "FROM python:3.12-slim AS runtime" in dockerfile
+    assert "USER 10001:10001" in dockerfile
+    assert "ENTRYPOINT [\"hookstorm\"]" in dockerfile
+    assert "USER root" not in dockerfile
+    assert "tests" in dockerignore
+    assert ".env" in dockerignore
+    container_steps = workflow["jobs"]["container"]["steps"]
+    assert any(step.get("name") == "Build minimal runtime image" for step in container_steps)
+    assert any("os.getuid() != 0" in step.get("run", "") for step in container_steps)
+    assert any("--read-only" in step.get("run", "") for step in container_steps)
+
+
+def test_zensical_documentation_config_and_build_workflow_exist() -> None:
+    config = (ROOT / "mkdocs.yml").read_text(encoding="utf-8")
+    workflow = yaml.safe_load(
+        (ROOT / ".github/workflows/docs.yml").read_text(encoding="utf-8")
+    )
+    docs_extra = tomllib.loads(
+        (ROOT / "pyproject.toml").read_text(encoding="utf-8")
+    )["project"]["optional-dependencies"]["docs"]
+
+    assert docs_extra == ["zensical>=0.1,<1"]
+    assert "site_name: HookStorm" in config
+    assert "framework-integrations.md" in config
+    assert "alpha-release-review.md" in config
+    steps = workflow["jobs"]["build"]["steps"]
+    assert any("zensical build" == step.get("run") for step in steps)
+    assert any(".[docs]" in step.get("run", "") for step in steps)
