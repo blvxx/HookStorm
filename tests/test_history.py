@@ -1,9 +1,12 @@
 from __future__ import annotations
 
 import json
+import os
+import stat
 
 import pytest
 
+from hookstorm import history as history_module
 from hookstorm.history import (
     HistoryError,
     compare_history_file,
@@ -448,3 +451,32 @@ def test_business_state_verification_removal_is_a_history_regression() -> None:
     comparison = compare_results(current, baseline)
 
     assert any(item["reason"] == "business-state verification was removed" for item in comparison["regressions"])
+
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX file modes are not portable to Windows")
+def test_default_history_and_exported_baseline_use_owner_only_permissions(
+    monkeypatch, tmp_path
+) -> None:
+    monkeypatch.delenv("HOOKSTORM_HISTORY_DB", raising=False)
+    database = tmp_path / ".hookstorm" / "history.sqlite3"
+    monkeypatch.setattr(history_module, "_DEFAULT_DB", database)
+
+    save_run(make_result("run_private_permissions"))
+
+    assert stat.S_IMODE(database.parent.stat().st_mode) == 0o700
+    assert stat.S_IMODE(database.stat().st_mode) == 0o600
+
+    baseline = tmp_path / "shared" / "baseline.json"
+    export_history_run("latest", baseline)
+
+    assert stat.S_IMODE(baseline.stat().st_mode) == 0o600
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX file modes are not portable to Windows")
+def test_explicit_history_database_file_is_owner_only(tmp_path) -> None:
+    database = tmp_path / "custom" / "history.sqlite3"
+
+    save_run(make_result("run_custom_permissions"), database)
+
+    assert stat.S_IMODE(database.stat().st_mode) == 0o600
