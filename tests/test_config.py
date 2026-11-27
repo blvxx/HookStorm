@@ -74,6 +74,17 @@ def test_rejects_non_ascii_or_control_header_values(value: str) -> None:
         validate_scenario(data)
 
 
+def test_rejects_case_insensitive_duplicate_custom_header_names() -> None:
+    data = valid_scenario()
+    data["events"][0]["headers"] = {
+        "X-Delivery-Mode": "first",
+        "x-delivery-mode": "second",
+    }
+
+    with pytest.raises(ScenarioError, match="case-insensitive duplicate"):
+        validate_scenario(data)
+
+
 def test_accepts_horizontal_tab_in_http_header_value() -> None:
     data = valid_scenario()
     data["events"][0]["headers"] = {"X-Custom": "first\tsecond"}
