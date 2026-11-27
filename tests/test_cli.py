@@ -44,6 +44,72 @@ def test_cli_labels_all_supported_injected_faults() -> None:
     assert {fault: _injected_fault_label(fault) for fault in expected} == expected
 
 
+def _signed_scenario_file(tmp_path) -> str:
+    path = tmp_path / "signed-scenario.yaml"
+    path.write_text(
+        """version: 1
+name: CLI explicit secret environment
+delivery:
+  signature: valid
+  signature_provider: generic
+events:
+  - id: ping
+    event_id: evt_cli_secret
+    payload:
+      ok: true
+""",
+        encoding="utf-8",
+    )
+    return str(path)
+
+
+def test_run_command_does_not_fall_back_to_default_secret_when_custom_env_is_missing(
+    receiver, tmp_path, monkeypatch, capsys
+) -> None:
+    base, state = receiver
+    scenario = _signed_scenario_file(tmp_path)
+    monkeypatch.setenv("HOOKSTORM_SECRET", "must-not-be-used")
+    monkeypatch.delenv("CUSTOM_HOOKSTORM_SECRET", raising=False)
+
+    assert main([
+        "run",
+        scenario,
+        "--target",
+        base,
+        "--secret-env",
+        "CUSTOM_HOOKSTORM_SECRET",
+        "--no-history",
+        "--format",
+        "json",
+    ]) == 2
+
+    assert state["requests"] == []
+    assert "requires HOOKSTORM_SECRET" in capsys.readouterr().err
+
+
+def test_fuzz_command_does_not_fall_back_to_default_secret_when_custom_env_is_missing(
+    receiver, tmp_path, monkeypatch, capsys
+) -> None:
+    base, state = receiver
+    scenario = _signed_scenario_file(tmp_path)
+    monkeypatch.setenv("HOOKSTORM_SECRET", "must-not-be-used")
+    monkeypatch.delenv("CUSTOM_HOOKSTORM_SECRET", raising=False)
+
+    assert main([
+        "fuzz",
+        scenario,
+        "--target",
+        base,
+        "--secret-env",
+        "CUSTOM_HOOKSTORM_SECRET",
+        "--iterations",
+        "1",
+    ]) == 2
+
+    assert state["requests"] == []
+    assert "requires HOOKSTORM_SECRET" in capsys.readouterr().err
+
+
 def test_run_command_persists_history_and_history_commands_read_it(
     receiver, tmp_path, capsys
 ) -> None:
