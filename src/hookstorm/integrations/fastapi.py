@@ -46,9 +46,16 @@ def create_router(
     router = APIRouter()
 
     async def receive_webhook(request: Any) -> dict[str, Any]:
-        raw_body = await request.body()
         try:
-            event = active_recorder.record(request.headers, raw_body)
+            raw_body = bytearray()
+            async for chunk in request.stream():
+                if len(raw_body) + len(chunk) > active_recorder.max_body_bytes:
+                    raise WebhookRequestError(
+                        f"request body exceeds the {active_recorder.max_body_bytes}-byte limit",
+                        status_code=413,
+                    )
+                raw_body.extend(chunk)
+            event = active_recorder.record(request.headers, bytes(raw_body))
         except WebhookRequestError as exc:
             raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
         return event.response()
