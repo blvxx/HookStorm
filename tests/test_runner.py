@@ -32,6 +32,70 @@ def scenario(*, delivery=None, retry=None, event=None):
     })
 
 
+def test_html_report_labels_every_supported_injected_fault() -> None:
+    fault_labels = {
+        "connect_error": ("Connect fault", "connection failure"),
+        "response_loss": ("ACK loss", "acknowledgement loss"),
+        "response_body_error": ("Body read error", "partial response-body read error"),
+        "malformed_json": ("Malformed JSON", "malformed JSON request body"),
+        "wrong_content_type": ("Wrong Content-Type", "wrong Content-Type request header"),
+        "gzip_body": ("Gzip body", "gzip-compressed request body"),
+        "deflate_body": ("Deflate body", "deflate-compressed request body"),
+        "invalid_gzip": ("Invalid gzip", "invalid gzip request body"),
+        "invalid_deflate": ("Invalid deflate", "invalid deflate request body"),
+        "chunked_transfer": ("Chunked transfer", "HTTP/1.1 chunked transfer"),
+        "malformed_chunked": (
+            "Malformed chunked framing",
+            "malformed HTTP/1.1 chunked framing",
+        ),
+        "partial_upload": ("Partial upload", "partial request upload"),
+        "content_length_mismatch": (
+            "Content-Length mismatch",
+            "Content-Length mismatch",
+        ),
+    }
+    deliveries = [
+        {
+            "event_type": "test.fault",
+            "event_id": f"evt_fault_{index}",
+            "duplicate_index": 0,
+            "passed": False,
+            "attempts": [
+                {
+                    "attempt": 1,
+                    "status_code": 400,
+                    "latency_ms": 1.0,
+                    "elapsed_ms": float(index),
+                    "error": "synthetic fault",
+                    "passed": False,
+                    "injected_fault": fault,
+                }
+            ],
+        }
+        for index, fault in enumerate(fault_labels)
+    ]
+    report = render_html(
+        {
+            "summary": {
+                "success": False,
+                "total_deliveries": len(deliveries),
+                "passed": 0,
+                "attempts": len(deliveries),
+            },
+            "deliveries": deliveries,
+            "duration_ms": 20.0,
+            "started_at": "2026-11-27T00:00:00Z",
+            "scenario": "fault report",
+            "target": "http://127.0.0.1:8000/webhook",
+            "version": "0.1.0a1",
+        }
+    )
+
+    for label, description in fault_labels.values():
+        assert f">{label}</span>" in report
+        assert f"injected {description}" in report
+
+
 def test_retries_transient_server_error(receiver) -> None:
     base, state = receiver
     result = asyncio.run(run_scenario(
