@@ -84,13 +84,11 @@ Read [SECURITY.md](SECURITY.md) and the [architecture notes](docs/architecture.m
 Planned work, in priority order:
 
 1. Extend seeded payload fuzzing to vary event order, duplicate deliveries, delays, and controlled transport failures.
-3. Expand request fault injection for malformed JSON, content types, compression, chunking, partial uploads, content-length mismatches, slow bodies, secret rotation, and large payloads.
-4. A reusable composite GitHub Action with SHA-pinned dependencies.
-5. Small FastAPI / Flask helpers that keep framework adapters optional.
-6. JSON Schema output for editor completion.
-7. A minimal non-root Docker image and uvx / pipx installation guides.
-8. A published MkDocs documentation site.
-9. Provider retry schedule presets after explicit per-attempt schedule support and longer safe run-time budgets are designed.
+2. Expand request fault injection for malformed JSON, content types, compression, chunking, partial uploads, content-length mismatches, slow bodies, secret rotation, and large payloads.
+3. Small FastAPI / Flask helpers that keep framework adapters optional.
+4. A minimal non-root Docker image and uvx / pipx installation guides.
+5. A published MkDocs documentation site.
+6. Provider retry schedule presets after explicit per-attempt schedule support and longer safe run-time budgets are designed.
 
 ## Development
 
