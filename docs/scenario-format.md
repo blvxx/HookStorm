@@ -21,7 +21,7 @@ Unknown keys and duplicate YAML mapping keys are rejected to catch typos and amb
 
 `run_timeout_ms` is a top-level limit covering event scheduling, delivery attempts, retry backoff, response reading, and the optional business-state verification request. Before sending traffic, HookStorm estimates a conservative worst-case request-time budget from event timeouts, delays, retries, duplicates, scheduling offsets, concurrency, and verification timeout. A scenario whose estimate exceeds `run_timeout_ms` is rejected before any request is sent.
 
-The same deadline is enforced while the run is active. If it expires, HookStorm cancels in-flight tasks and reports a CLI error. Cancellation cannot undo a business side effect that the receiver has already committed, so use idempotent test data and isolated endpoints. Increase `run_timeout_ms` deliberately for longer stress scenarios, up to 24 hours.
+The same deadline is enforced while the run is active. If it expires, HookStorm cancels in-flight tasks and reports a CLI error. Cancellation cannot undo a business side effect that the receiver has already committed, so use idempotent test data and isolated endpoints. Increase `run_timeout_ms` deliberately for longer stress scenarios, up to 24 hours. The default budget preserves legacy scenario fingerprints; explicitly choosing a non-default budget changes the fingerprint and is detected by baseline comparisons.
 
 ## Delivery settings
 
