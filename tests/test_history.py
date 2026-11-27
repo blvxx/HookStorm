@@ -688,9 +688,12 @@ def test_history_preserves_validated_injected_fault_markers(tmp_path) -> None:
     assert stored["deliveries"][0]["attempts"][0]["injected_fault"] == "response_loss"
 
 
-def test_history_rejects_unknown_injected_fault_markers(tmp_path) -> None:
+@pytest.mark.parametrize("fault", ["random_packet_loss", [], None])
+def test_history_rejects_unknown_injected_fault_markers(
+    tmp_path, fault: object
+) -> None:
     result = make_result("run_invalid_fault")
-    result["deliveries"][0]["attempts"][0]["injected_fault"] = "random_packet_loss"
+    result["deliveries"][0]["attempts"][0]["injected_fault"] = fault
 
     with pytest.raises(HistoryError, match="injected_fault"):
         save_run(result, tmp_path / "history.sqlite3")
