@@ -436,6 +436,8 @@ def test_validates_api_key_verification_auth_defaults() -> None:
         {"type": "api_key", "key_env": "HOOKSTORM_KEY", "header": "bad header"},
         {"type": "api_key", "key_env": "HOOKSTORM_KEY", "header": "X" * 257},
         {"type": "api_key", "key_env": "HOOKSTORM_KEY", "header": "Authorization"},
+        {"type": "api_key", "key_env": "HOOKSTORM_KEY", "header": "Proxy-Authorization"},
+        {"type": "api_key", "key_env": "HOOKSTORM_KEY", "header": "Proxy-Authenticate"},
         {"type": "api_key", "key_env": "HOOKSTORM_KEY", "header": "X-HookStorm-Run"},
         {"type": "api_key", "key_env": "HOOKSTORM_KEY", "unexpected": "value"},
     ],
