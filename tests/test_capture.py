@@ -172,6 +172,35 @@ def test_capture_rejects_non_json_body_and_enforces_body_limit(tmp_path) -> None
     assert not store.output.exists()
 
 
+def test_capture_converts_unsupported_json_and_scenario_data_to_client_errors(
+    tmp_path,
+) -> None:
+    store = CaptureStore(tmp_path / "bounded-errors.yaml")
+    headers = {"Content-Type": "application/json"}
+
+    too_deep = ("[" * 1_100 + "null" + "]" * 1_100).encode("ascii")
+    with pytest.raises(CaptureError, match="parser limits"):
+        store.record(headers, too_deep)
+
+    oversized_integer = b'{"value":' + (b"9" * 5_000) + b"}"
+    with pytest.raises(CaptureError, match="UTF-8 JSON"):
+        store.record(headers, oversized_integer)
+
+    with pytest.raises(CaptureError, match="HookStorm scenario"):
+        store.record(headers, b'{"value": NaN}')
+
+    with pytest.raises(CaptureError, match="HookStorm scenario"):
+        store.record(
+            {**headers, "X-Event-Type": "x" * 257},
+            b'{"ok":true}',
+        )
+
+    assert store.events == []
+    assert store.capture_events == []
+    assert store.total_body_bytes == 0
+    assert not store.output.exists()
+
+
 def test_capture_enforces_event_limit_and_validates_port(tmp_path) -> None:
     store = CaptureStore(tmp_path / "capture.yaml", max_events=1)
     store.record({}, b'{"first": true}')
