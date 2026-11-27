@@ -237,7 +237,7 @@ def test_capture_converts_unsupported_json_and_scenario_data_to_client_errors(
     headers = {"Content-Type": "application/json"}
 
     too_deep = ("[" * 1_100 + "null" + "]" * 1_100).encode("ascii")
-    with pytest.raises(CaptureError, match="parser limits"):
+    with pytest.raises(CaptureError, match="nesting limits"):
         store.record(headers, too_deep)
 
     oversized_integer = b'{"value":' + (b"9" * 5_000) + b"}"
