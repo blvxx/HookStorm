@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Pin all repository GitHub Actions workflows to reviewed full commit SHAs and refresh generated and copy-ready integration templates to the latest reviewed HookStorm revision.
+
 - Add a shared-clock waterfall view to the interactive HTML report, reusing search, result/fault filters, and sort controls across both timeline layouts.
 - Show deterministic transport fault markers in terminal run summaries and `history show`, including the affected attempt and event.
 - Expand `hookstorm init` into an interactive scenario wizard for event identity, signature provider, retries, and duplicate deliveries; expose the same options as non-interactive flags.
