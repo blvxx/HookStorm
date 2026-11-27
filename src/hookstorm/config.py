@@ -10,6 +10,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 import yaml
+from yaml.events import AliasEvent
 
 from hookstorm.provider_profiles import PROVIDER_NAMES, provider_event, provider_headers
 from hookstorm.safety import validate_target
@@ -31,8 +32,8 @@ class _UniqueKeySafeLoader(yaml.SafeLoader):
         self._alias_count = 0
         super().__init__(stream)
 
-    def compose_node(self, parent: Any, index: Any) -> yaml.Node:
-        if self.check_event(yaml.AliasEvent):
+    def compose_node(self, parent: Any, index: Any) -> Any:
+        if self.check_event(AliasEvent):
             self._alias_count += 1
             if self._alias_count > _MAX_YAML_ALIASES:
                 raise ScenarioError(
