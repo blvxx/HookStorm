@@ -54,6 +54,12 @@ def render_html(result: dict[str, Any]) -> str:
     summary = result["summary"]
     status = "PASSED" if summary["success"] else "FAILED"
     deliveries = list(result["deliveries"])
+    injected_fault_count = sum(
+        1
+        for delivery in deliveries
+        for attempt in delivery.get("attempts", [])
+        if attempt.get("injected_fault") is not None
+    )
     deliveries.sort(
         key=lambda item: (
             float(item.get("attempts", [{}])[0].get("elapsed_ms", 0.0))
@@ -75,6 +81,9 @@ def render_html(result: dict[str, Any]) -> str:
         signature_provider = html.escape(str(delivery.get("signature_provider", "generic")))
         duplicate_index = int(delivery.get("duplicate_index", 0))
         error_text = " ".join(str(item.get("error") or "") for item in attempts)
+        first_elapsed_ms = float(attempts[0].get("elapsed_ms", 0.0))
+        total_latency_ms = sum(float(item.get("latency_ms", 0.0)) for item in attempts)
+        has_injected_fault = any(item.get("injected_fault") is not None for item in attempts)
         searchable = html.escape(
             f"{delivery['event_type']} {delivery['event_id']} {signature_provider} {error_text}".lower(),
             quote=True,
@@ -97,7 +106,11 @@ def render_html(result: dict[str, Any]) -> str:
         note = html.escape(str(final_attempt.get("error") or ""))
         note_markup = f"<p>{note}</p>" if note else "<p>No error details recorded.</p>"
         cards.append(
-            f"<article class='delivery-card {state}' data-state='{state}' data-search='{searchable}'>"
+            f"<article class='delivery-card {state}' data-state='{state}' "
+            f"data-search='{searchable}' data-start-ms='{first_elapsed_ms:.2f}' "
+            f"data-total-latency-ms='{total_latency_ms:.2f}' "
+            f"data-attempts='{len(attempts)}' "
+            f"data-has-fault='{'true' if has_injected_fault else 'false'}'>"
             "<div class='delivery-top'>"
             "<div class='delivery-identity'>"
             f"<span class='event-type'>{event_type}</span>"
@@ -155,7 +168,7 @@ main{{max-width:1180px;margin:40px auto;padding:0 24px 48px}}
 h1{{font-size:clamp(1.7rem,4vw,2.25rem);margin:5px 0 8px;letter-spacing:-.03em}}
 h2{{font-size:1.15rem;margin:32px 0 14px}}.muted{{color:GrayText}}.eyebrow{{font-size:.76rem;letter-spacing:.14em;font-weight:750}}
 .target{{overflow-wrap:anywhere;font-size:.9rem}}
-.grid{{display:grid;grid-template-columns:repeat(4,minmax(0,1fr));gap:12px;margin:26px 0}}
+.grid{{display:grid;grid-template-columns:repeat(auto-fit,minmax(145px,1fr));gap:12px;margin:26px 0}}
 .card{{border:1px solid color-mix(in srgb,CanvasText 18%,transparent);border-radius:14px;padding:16px 18px;min-width:0}}
 .card strong{{display:block;font-size:1.45rem;margin-bottom:3px}}.card span{{font-size:.82rem;color:GrayText}}
 .toolbar{{display:flex;flex-wrap:wrap;align-items:end;gap:12px;padding:14px;border:1px solid color-mix(in srgb,CanvasText 18%,transparent);border-radius:14px;margin-bottom:12px}}
@@ -193,6 +206,7 @@ footer{{margin-top:32px;color:GrayText;font-size:.8rem}}
 <div class="card"><strong>{summary['passed']}/{summary['total_deliveries']}</strong><span>Deliveries passed</span></div>
 <div class="card"><strong>{summary['attempts']}</strong><span>HTTP attempts</span></div>
 <div class="card"><strong>{result['duration_ms']:.0f} ms</strong><span>Total duration</span></div>
+<div class="card"><strong>{injected_fault_count}</strong><span>Injected faults</span></div>
 </div>
 {verification_markup}
 <h2>Delivery timeline</h2>
@@ -206,6 +220,18 @@ footer{{margin-top:32px;color:GrayText;font-size:.8rem}}
 <label class="field">Find event or ID
 <input id="event-search" type="search" placeholder="Type to filter events" autocomplete="off">
 </label>
+<label class="field">Faults
+<select id="fault-filter">
+<option value="all">All attempts</option>
+<option value="injected">Injected faults only</option>
+<option value="none">Without injected faults</option>
+</select></label>
+<label class="field">Sort by
+<select id="sort-filter">
+<option value="time">First observed</option>
+<option value="latency">Highest total latency</option>
+<option value="attempts">Most attempts</option>
+</select></label>
 <button id="expand-all" type="button">Expand all attempts</button>
 <span id="result-count" aria-live="polite"></span>
 </div>
@@ -219,21 +245,50 @@ footer{{margin-top:32px;color:GrayText;font-size:.8rem}}
   const cards = Array.from(document.querySelectorAll(".delivery-card"));
   const statusFilter = document.getElementById("status-filter");
   const searchInput = document.getElementById("event-search");
+  const faultFilter = document.getElementById("fault-filter");
+  const sortFilter = document.getElementById("sort-filter");
   const count = document.getElementById("result-count");
   const expandButton = document.getElementById("expand-all");
+  const originalOrder = new Map(cards.map((card, index) => [card, index]));
+  const sortCards = () => {{
+    const mode = sortFilter.value;
+    const valueFor = (card) => {{
+      if (mode === "latency") return Number(card.dataset.totalLatencyMs);
+      if (mode === "attempts") return Number(card.dataset.attempts);
+      return Number(card.dataset.startMs);
+    }};
+    const direction = mode === "time" ? 1 : -1;
+    const ordered = [...cards].sort((left, right) => {{
+      const difference = valueFor(left) - valueFor(right);
+      return difference === 0
+        ? originalOrder.get(left) - originalOrder.get(right)
+        : difference * direction;
+    }});
+    const timeline = document.getElementById("timeline");
+    ordered.forEach(card => timeline.appendChild(card));
+  }};
   const applyFilters = () => {{
     const state = statusFilter.value;
+    const faultMode = faultFilter.value;
     const query = searchInput.value.trim().toLowerCase();
     let visible = 0;
     for (const card of cards) {{
       const stateMatches = state === "all" || card.dataset.state === state;
       const queryMatches = !query || card.dataset.search.includes(query);
-      card.hidden = !(stateMatches && queryMatches);
+      const faultMatches = faultMode === "all"
+        || (faultMode === "injected" && card.dataset.hasFault === "true")
+        || (faultMode === "none" && card.dataset.hasFault === "false");
+      card.hidden = !(stateMatches && queryMatches && faultMatches);
       if (!card.hidden) visible += 1;
     }}
     count.textContent = visible + " of " + cards.length + " deliveries";
   }};
   statusFilter.addEventListener("change", applyFilters);
+  faultFilter.addEventListener("change", applyFilters);
+  sortFilter.addEventListener("change", () => {{
+    sortCards();
+    applyFilters();
+  }});
   searchInput.addEventListener("input", applyFilters);
   expandButton.addEventListener("click", () => {{
     const details = cards.filter(card => !card.hidden).map(card => card.querySelector("details"));
