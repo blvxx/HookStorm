@@ -11,6 +11,23 @@ from typing import Any
 
 _DEFAULT_DB = Path.home() / ".hookstorm" / "history.sqlite3"
 _SCHEMA_VERSION = 1
+_INJECTED_FAULTS = frozenset(
+    {
+        "connect_error",
+        "response_loss",
+        "response_body_error",
+        "malformed_json",
+        "wrong_content_type",
+        "gzip_body",
+        "deflate_body",
+        "invalid_gzip",
+        "invalid_deflate",
+        "chunked_transfer",
+        "malformed_chunked",
+        "partial_upload",
+        "content_length_mismatch",
+    }
+)
 
 
 class HistoryError(RuntimeError):
@@ -364,12 +381,11 @@ def _validate_run_result(result: dict[str, Any], label: str) -> None:
                 raise HistoryError(f"{attempt_label}.error must be a string or null")
             if "injected_fault" in attempt and (
                 not isinstance(attempt["injected_fault"], str)
-                or attempt["injected_fault"]
-                not in {"connect_error", "response_loss", "response_body_error"}
+                or attempt["injected_fault"] not in _INJECTED_FAULTS
             ):
                 raise HistoryError(
-                    f"{attempt_label}.injected_fault must be connect_error, response_loss, "
-                    "or response_body_error"
+                    f"{attempt_label}.injected_fault must be one of the supported "
+                    "HookStorm fault-injection markers"
                 )
 
         if "schedule_after_ms" in item:
