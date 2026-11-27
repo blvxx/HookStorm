@@ -19,7 +19,7 @@ MAX_CAPTURE_BODY_BYTES = 1_048_576
 MAX_CAPTURE_SCENARIO_BYTES = 8 * 1_048_576
 _SENSITIVE_HEADER_TOKENS = (
     "authorization", "signature", "api-key", "api_key", "token",
-    "secret", "cookie", "password",
+    "secret", "hmac", "cookie", "password",
 )
 _NEVER_CAPTURE_HEADERS = {
     "host", "content-length", "transfer-encoding", "connection", "accept-encoding",
@@ -28,6 +28,7 @@ _NEVER_CAPTURE_HEADERS = {
     "x-event-id", "x-event-type", "x-github-event", "x-github-delivery",
     "x-shopify-topic", "x-shopify-shop-domain", "x-shopify-api-version",
     "x-shopify-triggered-at", "x-shopify-webhook-id", "x-shopify-event-id",
+    "webhook-id", "webhook-timestamp",
 }
 
 
@@ -85,11 +86,15 @@ class CaptureStore:
 
     @staticmethod
     def _original_event_id(headers: Mapping[str, str]) -> str | None:
-        for key, value in headers.items():
-            if key.lower() in {
-                "x-event-id", "webhook-id", "x-github-delivery", "x-shopify-webhook-id",
-            }:
-                return value
+        lowered = {key.lower(): value for key, value in headers.items()}
+        for name in (
+            "x-event-id",
+            "webhook-id",
+            "x-github-delivery",
+            "x-shopify-webhook-id",
+        ):
+            if name in lowered:
+                return lowered[name]
         return None
 
     def record(
@@ -159,7 +164,7 @@ class CaptureStore:
             "description": (
                 "Captured locally by HookStorm. Review payloads and headers before sharing."
             ),
-            "delivery": {"signature": "none"},
+            "delivery": {},
             "events": self.events,
             "capture": {
                 "source": "hookstorm.capture",
@@ -167,8 +172,8 @@ class CaptureStore:
             },
         }
         try:
-            validated = validate_scenario(candidate)
-            self._write(validated)
+            validate_scenario(candidate)
+            self._write(candidate)
         except Exception:
             self.events.pop()
             self.capture_events.pop()

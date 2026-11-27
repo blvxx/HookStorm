@@ -59,6 +59,10 @@ def test_capture_server_is_loopback_only_and_redacts_sensitive_headers(tmp_path)
             {
                 "Authorization": "Bearer do-not-save",
                 "Stripe-Signature": "t=123,v1=signature",
+                "X-Shopify-Hmac-Sha256": "shopify-hmac-secret",
+                "webhook-id": "message_123",
+                "webhook-timestamp": "1700000000",
+                "webhook-signature": "v1,standard-signature",
                 "X-API-Key": "private-key",
                 "X-Trace-ID": "trace-123",
                 "X-Event-ID": "provider-event-1",
@@ -86,6 +90,8 @@ def test_capture_server_is_loopback_only_and_redacts_sensitive_headers(tmp_path)
     saved = output.read_text(encoding="utf-8")
     assert "do-not-save" not in saved
     assert "t=123,v1=signature" not in saved
+    assert "shopify-hmac-secret" not in saved
+    assert "standard-signature" not in saved
     assert "private-key" not in saved
     assert "redact-me" not in saved
     if os.name == "posix":
@@ -103,6 +109,7 @@ def test_sensitive_headers_are_saved_only_as_non_replayed_capture_metadata(tmp_p
             {
                 "Authorization": "Bearer forensic-token",
                 "Stripe-Signature": "t=123,v1=forensic-signature",
+                "X-Shopify-Hmac-Sha256": "forensic-hmac",
                 "Content-Type": "application/json",
             },
         )
@@ -119,6 +126,7 @@ def test_sensitive_headers_are_saved_only_as_non_replayed_capture_metadata(tmp_p
     assert sensitive == {
         "Authorization": "Bearer forensic-token",
         "Stripe-Signature": "t=123,v1=forensic-signature",
+        "X-Shopify-Hmac-Sha256": "forensic-hmac",
     }
     assert scenario_fingerprint(scenario) == scenario_fingerprint(
         validate_scenario(
@@ -195,6 +203,7 @@ def test_capture_metadata_must_match_scenario_events() -> None:
         validate_scenario(
             {
                 "version": 1,
+                "name": "capture metadata validation",
                 "capture": {"source": "hookstorm.capture", "events": []},
                 "events": [
                     {"id": "ping", "event_id": "evt_1", "payload": {}},
@@ -230,3 +239,48 @@ def test_concurrent_capture_requests_receive_unique_ordered_event_ids(tmp_path) 
     assert [
         item["event_id"] for item in scenario["capture"]["events"]
     ] == [event["event_id"] for event in scenario["events"]]
+
+
+
+def test_standard_webhooks_headers_are_metadata_not_replayed_headers(tmp_path) -> None:
+    store = CaptureStore(
+        tmp_path / "standard-capture.yaml",
+        include_sensitive_headers=True,
+    )
+    event = store.record(
+        {
+            "webhook-id": "msg_123",
+            "webhook-timestamp": "1700000000",
+            "webhook-signature": "v1,signature-value",
+            "Content-Type": "application/json",
+        },
+        b'{"type": "order.created", "data": {"id": "ord_1"}}',
+    )
+
+    scenario = load_scenario(tmp_path / "standard-capture.yaml")
+    assert event["headers"] == {"Content-Type": "application/json"}
+    metadata = scenario["capture"]["events"][0]
+    assert metadata["original_event_id"] == "msg_123"
+    assert metadata["sensitive_headers"] == {
+        "webhook-signature": "v1,signature-value",
+    }
+
+
+def test_captured_scenario_can_later_select_provider_profile(tmp_path) -> None:
+    store = CaptureStore(tmp_path / "provider-capture.yaml")
+    store.record(
+        {"Content-Type": "application/json"},
+        b'{"id": "evt_source", "type": "payment_intent.succeeded"}',
+    )
+
+    raw_scenario = yaml.safe_load(
+        (tmp_path / "provider-capture.yaml").read_text(encoding="utf-8")
+    )
+    assert raw_scenario["delivery"] == {}
+    raw_scenario["provider"] = "stripe"
+
+    profiled = validate_scenario(raw_scenario)
+
+    assert profiled["provider"] == "stripe"
+    assert profiled["delivery"]["signature"] == "valid"
+    assert profiled["delivery"]["signature_provider"] == "stripe"
