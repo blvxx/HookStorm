@@ -130,6 +130,21 @@ def test_sync_runner_explains_active_event_loop(monkeypatch) -> None:
     asyncio.run(invoke())
 
 
+def test_hookstorm_fixture_uses_explicit_environment_flags(monkeypatch) -> None:
+    from hookstorm.pytest_plugin import hookstorm
+
+    monkeypatch.setenv("HOOKSTORM_ALLOW_REMOTE", "1")
+    monkeypatch.setenv("HOOKSTORM_ALLOW_INSECURE_HTTP", "0")
+    monkeypatch.setenv("HOOKSTORM_SECRET_ENV", "STAGING_WEBHOOK_SECRET")
+
+    runner = hookstorm.__wrapped__("https://staging.example.test/webhook")
+
+    assert runner.target == "https://staging.example.test/webhook"
+    assert runner.allow_remote is True
+    assert runner.allow_insecure_http is False
+    assert runner.secret_env == "STAGING_WEBHOOK_SECRET"
+
+
 def test_plugin_fixture_skips_when_target_is_missing(monkeypatch) -> None:
     from hookstorm.pytest_plugin import hookstorm_target
 
