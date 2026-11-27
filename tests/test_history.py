@@ -452,8 +452,6 @@ def test_business_state_verification_removal_is_a_history_regression() -> None:
 
     assert any(item["reason"] == "business-state verification was removed" for item in comparison["regressions"])
 
-
-
 @pytest.mark.skipif(os.name != "posix", reason="POSIX file modes are not portable to Windows")
 def test_default_history_and_exported_baseline_use_owner_only_permissions(
     monkeypatch, tmp_path
