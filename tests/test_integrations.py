@@ -63,6 +63,8 @@ def test_recorder_redacts_sensitive_headers_by_default() -> None:
 
     assert event.headers["Authorization"] == "[REDACTED]"
     assert event.headers["Stripe-Signature"] == "[REDACTED]"
+    assert event.headers["X-API-Key"] == "[REDACTED]"
+    assert event.headers["X-Auth-Token"] == "[REDACTED]"
     assert event.headers["Content-Type"] == "application/json"
 
 
@@ -291,3 +293,59 @@ def test_recorder_rejects_invalid_capacity_configuration() -> None:
         WebhookRecorder(max_body_bytes=0)
     with pytest.raises(ValueError, match="max_events"):
         WebhookRecorder(max_events=0)
+
+
+def test_recorder_bounds_total_body_memory_and_clear_resets_budget() -> None:
+    recorder = WebhookRecorder(
+        max_body_bytes=16,
+        max_events=10,
+        max_total_body_bytes=20,
+    )
+    recorder.record(_headers(), b'{"x":"123"}')
+    with pytest.raises(WebhookRequestError) as full:
+        recorder.record(
+            _headers(**{"X-Event-ID": "evt_002"}),
+            b'{"x":"123456789"}',
+        )
+    assert full.value.status_code == 429
+    assert recorder.snapshot()["total_events"] == 1
+
+    recorder.clear()
+    accepted = recorder.record(
+        _headers(**{"X-Event-ID": "evt_002"}),
+        b'{"x":"123456789"}',
+    )
+    assert accepted.event_id == "evt_002"
+
+
+def test_recorder_redacts_custom_secret_like_headers() -> None:
+    recorder = WebhookRecorder()
+    event = recorder.record(
+        _headers(
+            **{
+                "X-Client-Secret": "private-client-secret",
+                "X-Access-Token": "private-access-token",
+                "X-Webhook-Secret": "private-webhook-secret",
+                "X-Custom-Trace": "safe-value",
+            }
+        ),
+        b'{"ok":true}',
+    )
+
+    assert event.headers["X-Client-Secret"] == "[REDACTED]"
+    assert event.headers["X-Access-Token"] == "[REDACTED]"
+    assert event.headers["X-Webhook-Secret"] == "[REDACTED]"
+    assert event.headers["X-Custom-Trace"] == "safe-value"
+
+
+def test_recorder_rejects_excessive_header_count_and_size() -> None:
+    recorder = WebhookRecorder()
+    too_many = {f"X-Test-{index}": "v" for index in range(65)}
+    with pytest.raises(WebhookRequestError) as count_error:
+        recorder.record({**_headers(), **too_many}, b'{"ok":true}')
+    assert count_error.value.status_code == 431
+
+    too_large = _headers(**{"X-Large": "x" * 16_500})
+    with pytest.raises(WebhookRequestError) as size_error:
+        recorder.record(too_large, b'{"ok":true}')
+    assert size_error.value.status_code == 431
