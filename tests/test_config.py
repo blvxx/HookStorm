@@ -536,7 +536,6 @@ def test_fault_injection_can_be_overridden_per_event() -> None:
     assert normalized["events"][0]["delivery"]["fault_injection"] == {
         "connect_error_attempts": [],
         "response_loss_attempts": [2],
-        "response_body_error_attempts": [],
     }
 
 
