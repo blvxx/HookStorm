@@ -183,7 +183,11 @@ def test_invalid_request_variants_are_rejected_then_retry_cleanly(
 
     attempts = result["deliveries"][0]["attempts"]
     assert result["summary"]["success"] is True
-    assert [item["status_code"] for item in attempts] == [status, 200]
+    assert [item["status_code"] for item in attempts] == [status, 200], {
+        "attempts": attempts,
+        "receiver_requests": state["requests"],
+        "receiver_invalid": state["invalid"],
+    }
     assert attempts[0]["injected_fault"] == fault
     assert attempts[0]["passed"] is False
     assert attempts[1]["passed"] is True
