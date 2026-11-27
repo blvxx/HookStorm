@@ -105,6 +105,36 @@ def test_report_escapes_event_data_in_attributes_and_attempt_notes() -> None:
 
 
 
+def test_html_report_escapes_single_quotes_in_aria_attributes() -> None:
+    result = {
+        "scenario": "attribute escaping",
+        "target": "http://127.0.0.1/hook",
+        "version": "0.1.0a1",
+        "duration_ms": 1.0,
+        "summary": {"success": True, "passed": 1, "total_deliveries": 1, "attempts": 1},
+        "deliveries": [{
+            "event_type": "invoice.paid",
+            "event_id": "' onmouseover='alert(1)",
+            "duplicate_index": 0,
+            "passed": True,
+            "attempts": [{
+                "status_code": 200,
+                "latency_ms": 1.0,
+                "elapsed_ms": 0.0,
+                "error": None,
+            }],
+        }],
+    }
+
+    html_report = render_html(result)
+
+    assert "aria-label='Attempt timeline for &#x27; onmouseover=&#x27;alert(1)'" in html_report
+    assert "aria-label='Attempt timing for &#x27; onmouseover=&#x27;alert(1)'" in html_report
+    assert "aria-label='Attempt timeline for ' onmouseover=" not in html_report
+    assert "aria-label='Attempt timing for ' onmouseover=" not in html_report
+
+
+
 def test_junit_report_contains_one_testcase_per_delivery_and_counts_failures() -> None:
     result = {
         "scenario": "junit smoke",
