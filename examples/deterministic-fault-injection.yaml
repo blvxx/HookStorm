@@ -1,17 +1,15 @@
 version: 1
 name: Deterministic transport fault injection
 description: >
-  Fail before the first send, lose the acknowledgement after the second attempt,
-  then truncate the third response body after processing. The fourth attempt
-  verifies idempotency.
+  Fail before the first send, then lose the acknowledgement after the receiver
+  processes the second attempt. The third attempt verifies idempotency.
 retry:
-  max_attempts: 4
+  max_attempts: 3
   backoff_ms: 50
 delivery:
   fault_injection:
     connect_error_attempts: [1]
     response_loss_attempts: [2]
-    response_body_error_attempts: [3]
 events:
   - id: order.created
     event_id: evt_fault_injection_001
