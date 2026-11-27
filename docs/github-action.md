@@ -4,7 +4,7 @@ HookStorm provides a reusable composite action at .github/actions/run. It instal
 
 ## Quick start
 
-Copy the workflow template from examples/ci/hookstorm-action.yml into your application repository and review the action reference. The template currently pins the HookStorm action to commit 19e90aa400a06e6bf625108ce5ae6fb1a8d74e5d; use a full reviewed commit SHA when upgrading it.
+Copy the workflow template from examples/ci/hookstorm-action.yml into your application repository and review the action reference. The template currently pins the HookStorm action to commit 7a1006aa943afdb4afb8eb67b10393a51f2319cb; use a full reviewed commit SHA when upgrading it.
 
 Create a GitHub Environment named staging. Add:
 
@@ -37,7 +37,7 @@ The action output report-path contains the report path. Pass the signing secret 
 ~~~yaml
 - name: Run HookStorm
   id: hookstorm
-  uses: blvxx/HookStorm/.github/actions/run@19e90aa400a06e6bf625108ce5ae6fb1a8d74e5d
+  uses: blvxx/HookStorm/.github/actions/run@7a1006aa943afdb4afb8eb67b10393a51f2319cb
   with:
     scenario: scenarios/webhook.yaml
     target-url: ${{ vars.HOOKSTORM_TARGET_URL }}
