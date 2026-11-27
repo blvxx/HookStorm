@@ -358,12 +358,19 @@ def _estimated_http_attempts_per_run(
 ) -> int:
     retry_attempts = scenario["retry"]["max_attempts"]
     attempts = 0
+    largest_single_event_increase = 0
     for event in scenario["events"]:
         delivery = {**scenario["delivery"], **event["delivery"]}
         duplicate_count = delivery.get("duplicate_count", 0)
-        if max_duplicates is not None:
-            duplicate_count = max(duplicate_count, max_duplicates)
         attempts += (duplicate_count + 1) * retry_attempts
+        if max_duplicates is not None:
+            largest_single_event_increase = max(
+                largest_single_event_increase,
+                max(0, max_duplicates - duplicate_count) * retry_attempts,
+            )
+    # One event's duplicate count is mutated per trial, so add only the largest
+    # possible increase for one event rather than multiplying the cap by all events.
+    attempts += largest_single_event_increase
     if scenario.get("verify") is not None:
         attempts += 1
     return attempts
