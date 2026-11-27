@@ -720,3 +720,40 @@ def test_scheduled_event_and_delivery_timeout_must_fit_run_timeout() -> None:
 
     with pytest.raises(ScenarioError, match="worst-case request-time budget"):
         validate_scenario(data)
+
+def test_request_fault_plans_are_validated_and_cannot_overlap() -> None:
+    data = valid_scenario()
+    data["retry"] = {"max_attempts": 10}
+    field_names = [
+        "malformed_json_attempts",
+        "wrong_content_type_attempts",
+        "gzip_body_attempts",
+        "deflate_body_attempts",
+        "invalid_gzip_attempts",
+        "invalid_deflate_attempts",
+        "chunked_transfer_attempts",
+        "malformed_chunked_attempts",
+        "partial_upload_attempts",
+        "content_length_mismatch_attempts",
+    ]
+    data["events"][0]["delivery"] = {
+        "fault_injection": {
+            field: [index + 1] for index, field in enumerate(field_names)
+        }
+    }
+
+    normalized = validate_scenario(data)
+    assert all(
+        normalized["events"][0]["delivery"]["fault_injection"][field] == [index + 1]
+        for index, field in enumerate(field_names)
+    )
+
+    conflict = valid_scenario()
+    conflict["events"][0]["delivery"] = {
+        "fault_injection": {
+            "malformed_json_attempts": [1],
+            "partial_upload_attempts": [1],
+        }
+    }
+    with pytest.raises(ScenarioError, match="cannot inject more than one fault"):
+        validate_scenario(conflict)
