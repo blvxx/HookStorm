@@ -607,6 +607,7 @@
                     },
                     "header": {
                       "type": "string",
+                      "maxLength": 256,
                       "pattern": "^[!#$%&'*+.^_`|~0-9A-Za-z-]+$"
                     }
                   }
