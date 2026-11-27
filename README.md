@@ -344,7 +344,7 @@ Every `hookstorm run` is saved to a local SQLite database by default:
 - Windows: `%USERPROFILE%\\.hookstorm\\history.sqlite3`
 - Linux / macOS: `~/.hookstorm/history.sqlite3`
 
-The history stores run metadata and assertion outcomes only. Payloads, request headers, response bodies, and secrets are not persisted. Event IDs, the target URL path, and an opaque scenario configuration fingerprint are retained for comparison; query strings are stripped by the runner. Keep the database local and review identifiers / URL paths before sharing it.
+The history stores run metadata and assertion outcomes only. Payloads, request headers, response bodies, and secrets are not persisted. Event IDs, the target URL path, and an opaque scenario configuration fingerprint are retained for comparison; query strings are stripped by the runner. Keep the database local and review identifiers / URL paths before sharing it. On POSIX systems, the default `.hookstorm` directory is restricted to its owner (`0700`), and history databases plus exported baseline files are restricted to owner read/write (`0600`).
 
 List recent runs:
 
