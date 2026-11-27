@@ -89,6 +89,35 @@ def test_injected_response_loss_retries_after_receiver_applies_effect(receiver) 
     assert len(state["effects"]) == 1
 
 
+def test_injected_partial_response_body_error_retries_after_receiver_commit(receiver) -> None:
+    base, state = receiver
+    result = asyncio.run(run_scenario(
+        scenario(
+            delivery={
+                "fault_injection": {"response_body_error_attempts": [1]}
+            },
+            retry={"max_attempts": 2, "backoff_ms": 1},
+            event={
+                "expect_json": {"duplicate": True, "effect_applied": False},
+            },
+        ),
+        base,
+    ))
+
+    attempts = result["deliveries"][0]["attempts"]
+    assert result["summary"]["success"] is True
+    assert len(attempts) == 2
+    assert attempts[0]["injected_fault"] == "response_body_error"
+    assert attempts[0]["status_code"] == 200
+    assert attempts[0]["passed"] is False
+    assert "partial response body" in attempts[0]["error"]
+    assert attempts[1]["status_code"] == 200
+    assert attempts[1]["passed"] is True
+    assert len(state["requests"]) == 2
+    assert state["requests"][0]["event_id"] == state["requests"][1]["event_id"]
+    assert len(state["effects"]) == 1
+
+
 def test_detects_duplicate_idempotency_response(receiver) -> None:
     base, state = receiver
     result = asyncio.run(run_scenario(
