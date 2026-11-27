@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Show deterministic transport fault markers in terminal run summaries and `history show`, including the affected attempt and event.
 - Expand `hookstorm init` into an interactive scenario wizard for event identity, signature provider, retries, and duplicate deliveries; expose the same options as non-interactive flags.
 - Refresh generated and copy-ready staging workflow installer pins to the current CI-validated main commit.
 - Add deterministic per-attempt client-side fault injection for pre-send connection errors and post-processing acknowledgement loss; preserve markers in history and add fault-aware filtering and sorting to the interactive HTML timeline.
