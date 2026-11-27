@@ -53,6 +53,9 @@ def test_release_commit_must_be_reachable_from_main() -> None:
 
     checkout = steps[0]
     assert checkout["with"]["fetch-depth"] == "0"
+    assert checkout["with"]["ref"] == (
+        "${{ github.event_name == 'release' && github.event.release.tag_name || github.ref }}"
+    )
 
     ancestry_check = next(
         step for step in steps
@@ -61,3 +64,26 @@ def test_release_commit_must_be_reachable_from_main() -> None:
     assert ancestry_check["if"] == "github.event_name == 'release'"
     assert "git merge-base --is-ancestor" in ancestry_check["run"]
     assert "FETCH_HEAD" in ancestry_check["run"]
+
+
+
+def test_release_workflow_smoke_tests_wheel_and_source_distribution() -> None:
+    workflow_path = Path(__file__).resolve().parents[1] / ".github" / "workflows" / "release.yml"
+    workflow = yaml.load(workflow_path.read_text(encoding="utf-8"), Loader=yaml.BaseLoader)
+    steps = workflow["jobs"]["build"]["steps"]
+
+    smoke_test = next(
+        step for step in steps
+        if step.get("name") == "Smoke-test wheel and source distribution"
+    )
+    script = smoke_test["run"]
+    assert "dist/*.whl" in script
+    assert "dist/*.tar.gz" in script
+    assert script.count("hookstorm validate examples/standard-webhooks.yaml") == 2
+
+    smoke_test_index = steps.index(smoke_test)
+    upload_index = next(
+        index for index, step in enumerate(steps)
+        if step.get("name") == "Upload release distributions"
+    )
+    assert smoke_test_index < upload_index

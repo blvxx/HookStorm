@@ -34,6 +34,7 @@ HookStorm sends controlled webhook traffic to **your own endpoint** and checks r
 | Expected HTTP status | expect_status |
 | Nested JSON response assertions | expect_json, expect_duplicate_json |
 | Business-state / idempotency verification after delivery | verify.url, verify.expect_json |
+| Total run-time budget | run_timeout_ms (60 minutes by default; configurable up to 24 hours) |
 
 The same event_id is preserved across retries and duplicate deliveries, so the receiver can recognize repeated deliveries. HookStorm also includes a commit-then-drop example: the receiver commits the business effect, closes the connection before acknowledging it, and then receives the same event again. The retry response and run-scoped verify probe prove whether the effect was applied only once. Set delivery.concurrency from 1 to 50 to run independent events concurrently; retries and duplicate deliveries for each event remain ordered. JSON and JUnit reports preserve scenario order; the HTML timeline is sorted by elapsed time to show observed delivery timing. Use events[].schedule_after_ms to start individual events at offsets from run start without holding a worker slot while waiting.
 
