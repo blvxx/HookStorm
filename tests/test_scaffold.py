@@ -40,6 +40,12 @@ def test_initialize_project_creates_valid_scenario_and_workflow(tmp_path) -> Non
     )
     workflow_text = workflow_path.read_text(encoding="utf-8")
     steps = workflow["jobs"]["webhook-regression"]["steps"]
+    for step in steps:
+        action = step.get("uses")
+        if action is not None and not action.startswith("./"):
+            reference = action.rsplit("@", 1)[-1].split()[0]
+            assert len(reference) == 40
+            assert all(character in "0123456789abcdef" for character in reference)
     preflight = next(step for step in steps if step.get("name") == "Preflight staging endpoint")
     assert "hookstorm doctor" in preflight["run"]
     assert "--connect" in preflight["run"]
