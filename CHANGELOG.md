@@ -45,3 +45,9 @@
 - Add a deterministic commit-then-drop receiver failure and a scenario that verifies idempotent processing after an ambiguous acknowledgement.
 - Extend `hookstorm init` and CI scenarios with Standard Webhooks support.
 - Add per-event run-relative scheduling offsets without blocking available concurrency slots.
+- Reject non-ASCII and control characters in webhook header values before any network request.
+- Require unique event IDs within a scenario to protect idempotency and history comparisons.
+- Use full UUID run identifiers to reduce the risk of history key collisions.
+- Refresh the generated GitHub Actions installer pin and add a regression assertion for the pinned revision.
+- Build and install-test the wheel in an isolated environment on every CI matrix job.
+- Add a public release checklist covering artifact validation, GitHub Releases, and optional PyPI trusted publishing.

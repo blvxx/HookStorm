@@ -52,3 +52,5 @@ jobs:
           retention-days: 14
       - name: Build package
         run: python -m pip wheel --no-deps . --wheel-dir dist
+      - name: Smoke-test installed wheel
+        run: python scripts/smoke_wheel.py
