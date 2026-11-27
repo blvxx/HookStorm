@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Keep the `:memory:` SQLite history database alive across save/list/show operations within one process.
+
 - Cancel and await sibling delivery workers if one concurrent worker exits with an unexpected exception, preventing requests from outliving the run's HTTP client.
 
 - Enforce absolute per-attempt and verification request deadlines so slow-drip responses cannot evade `timeout_ms`.
