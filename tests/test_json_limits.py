@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from hookstorm.json_limits import (
@@ -10,9 +12,9 @@ from hookstorm.json_limits import (
 
 
 def test_json_text_depth_ignores_brackets_inside_strings() -> None:
-    ensure_json_text_depth(
-        '{"message":"[{{}}] \\"quoted\\": \\ [ still text"}'
-    )
+    source = r'{"message":"[{{}}] \"quoted\": \\ still text"}'
+    ensure_json_text_depth(source)
+    assert json.loads(source)["message"].startswith("[{{}}]")
 
 
 def test_json_text_depth_rejects_excessive_object_and_array_nesting() -> None:
