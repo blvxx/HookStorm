@@ -91,6 +91,8 @@ Both adapters use the same framework-independent `WebhookRecorder`.
 | Body too large | HTTP 413 |
 | Recorder capacity reached | HTTP 429; call `clear()` between test runs |
 
+Both adapters enforce the wire-body limit while reading the incoming request: FastAPI consumes the ASGI request stream incrementally, and Flask reads no more than `max_body_bytes + 1` bytes. An oversized request is rejected before the full body is accumulated or retained by the recorder. The recorder applies the same cap again and separately limits the decoded gzip/deflate body.
+
 The recorder preserves the original request bytes in `record.raw_body`, including compressed bytes, while `record.payload` contains decoded JSON. Sensitive headers are redacted in `record.headers` unless you explicitly set `include_sensitive_headers=True`.
 
 A record includes `event_id`, `run_id`, `duplicate`, `payload`, `raw_body`, `headers`, and `received_at`. The aggregate `snapshot()` exposes counters and event IDs without payloads or headers.
