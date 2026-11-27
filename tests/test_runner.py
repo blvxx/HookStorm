@@ -96,6 +96,32 @@ def test_html_report_labels_every_supported_injected_fault() -> None:
         assert f"injected {description}" in report
 
 
+def test_custom_header_overrides_default_case_insensitively(receiver) -> None:
+    base, state = receiver
+    result = asyncio.run(
+        run_scenario(
+            scenario(
+                event={
+                    "headers": {
+                        "content-type": "application/problem+json",
+                    }
+                }
+            ),
+            base,
+        )
+    )
+
+    assert result["summary"]["success"] is True
+    content_type_headers = [
+        (name, value)
+        for name, value in state["requests"][0]["headers"].items()
+        if name.lower() == "content-type"
+    ]
+    assert content_type_headers == [
+        ("content-type", "application/problem+json")
+    ]
+
+
 def test_retries_transient_server_error(receiver) -> None:
     base, state = receiver
     result = asyncio.run(run_scenario(
