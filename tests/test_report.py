@@ -287,3 +287,49 @@ def test_html_report_marks_injected_transport_faults() -> None:
     assert "Highest total latency" in html_report
     assert "sortCards" in html_report
     assert "injected" in html_report
+    assert 'id="timeline-view"' in html_report
+    assert 'id="waterfall-view"' in html_report
+    assert 'aria-label="Cross-event attempt waterfall"' in html_report
+    assert "waterfall-attempt retry injected" in html_report
+    assert "left:10.000%" in html_report
+    assert "First observed" in html_report
+
+
+def test_waterfall_view_aligns_attempts_on_a_shared_run_clock() -> None:
+    result = {
+        "scenario": "parallel timing",
+        "target": "http://127.0.0.1:8000/webhook",
+        "version": "0.1.0",
+        "duration_ms": 100.0,
+        "summary": {"success": True, "passed": 2, "total_deliveries": 2, "attempts": 3},
+        "deliveries": [
+            {
+                "event_type": "order.created",
+                "event_id": "evt_first",
+                "duplicate_index": 0,
+                "passed": True,
+                "attempts": [
+                    {"attempt": 1, "elapsed_ms": 10.0, "latency_ms": 20.0, "status_code": 200}
+                ],
+            },
+            {
+                "event_type": "invoice.paid",
+                "event_id": "evt_second",
+                "duplicate_index": 0,
+                "passed": True,
+                "attempts": [
+                    {"attempt": 1, "elapsed_ms": 40.0, "latency_ms": 5.0, "status_code": 503},
+                    {"attempt": 2, "elapsed_ms": 70.0, "latency_ms": 10.0, "status_code": 200},
+                ],
+            },
+        ],
+    }
+
+    html_report = render_html(result)
+
+    assert html_report.count("class='waterfall-row ") == 2
+    assert "left:10.000%;width:20.000%" in html_report
+    assert "left:40.000%;width:5.000%" in html_report
+    assert "left:70.000%;width:10.000%" in html_report
+    assert "10 ms" in html_report
+    assert "100 ms" in html_report
