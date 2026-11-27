@@ -209,6 +209,45 @@ def test_oversized_business_verification_response_fails(receiver) -> None:
     )
 
 
+def test_rejects_compressed_webhook_response_before_decompression(receiver) -> None:
+    base, _state = receiver
+    result = asyncio.run(
+        run_scenario(
+            scenario(event={"expect_json": {"ok": True}}),
+            f"{base}/compressed",
+        )
+    )
+
+    attempt = result["deliveries"][0]["attempts"][0]
+    assert result["summary"]["success"] is False
+    assert attempt["status_code"] == 200
+    assert attempt["error"] == (
+        "compressed response bodies are not supported; received Content-Encoding: gzip"
+    )
+
+
+def test_rejects_compressed_verification_response_before_decompression(receiver) -> None:
+    base, _state = receiver
+    data = validate_scenario({
+        "version": 1,
+        "name": "compressed verification response",
+        "events": [{"id": "ping", "event_id": "evt_compressed_verify", "payload": {}}],
+        "verify": {
+            "url": f"{base}/state-compressed",
+            "expect_json": {"processed_events": 1},
+        },
+    })
+
+    result = asyncio.run(run_scenario(data, base))
+
+    assert result["summary"]["success"] is False
+    assert result["verification"]["status_code"] == 200
+    assert result["verification"]["error"] == (
+        "verification compressed response bodies are not supported; "
+        "received Content-Encoding: gzip"
+    )
+
+
 def test_query_parameters_are_not_written_to_report_target(receiver) -> None:
     base, _ = receiver
     result = asyncio.run(run_scenario(
