@@ -523,6 +523,8 @@ def _validate_scenario(data: Any) -> dict[str, Any]:
                 )
             if key.lower() in {
                 "host", "content-length", "transfer-encoding",
+                "connection", "keep-alive", "proxy-connection",
+                "proxy-authenticate", "proxy-authorization", "te", "trailer", "upgrade",
                 "x-hookstorm-run", "x-event-id", "x-event-type",
                 "x-hookstorm-attempt", "x-hookstorm-duplicate-index",
                 "x-hookstorm-signature", "stripe-signature",
