@@ -318,6 +318,22 @@ def test_rejects_invalid_verification_urls(url: str) -> None:
         validate_scenario(data)
 
 
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://[::1/state",
+        "http://bad host/state",
+        "http://localhost:0/state",
+        "http://localhost:not-a-port/state",
+    ],
+)
+def test_rejects_malformed_verification_host_and_port(url: str) -> None:
+    data = valid_scenario()
+    data["verify"] = {"url": url, "expect_json": {}}
+    with pytest.raises(ScenarioError, match="verify.url"):
+        validate_scenario(data)
+
+
 def test_rejects_unknown_verification_keys() -> None:
     data = valid_scenario()
     data["verify"] = {
@@ -564,12 +580,28 @@ def test_rejects_invalid_fault_injection_plans(fault_plan: object) -> None:
         validate_scenario(data)
 
 
-def test_fault_injection_attempts_cannot_exceed_retry_budget() -> None:
+@pytest.mark.parametrize(
+    "fault_field",
+    [
+        "connect_error_attempts",
+        "response_loss_attempts",
+        "response_body_error_attempts",
+        "malformed_json_attempts",
+        "wrong_content_type_attempts",
+        "gzip_body_attempts",
+        "deflate_body_attempts",
+        "invalid_gzip_attempts",
+        "invalid_deflate_attempts",
+        "chunked_transfer_attempts",
+        "malformed_chunked_attempts",
+        "partial_upload_attempts",
+        "content_length_mismatch_attempts",
+    ],
+)
+def test_fault_injection_attempts_cannot_exceed_retry_budget(fault_field: str) -> None:
     data = valid_scenario()
     data["retry"] = {"max_attempts": 2}
-    data["delivery"] = {
-        "fault_injection": {"response_body_error_attempts": [3]}
-    }
+    data["delivery"] = {"fault_injection": {fault_field: [3]}}
 
     with pytest.raises(ScenarioError, match="must not exceed retry.max_attempts=2"):
         validate_scenario(data)
