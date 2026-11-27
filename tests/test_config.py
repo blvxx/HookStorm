@@ -66,6 +66,17 @@ def test_rejects_invalid_headers() -> None:
         validate_scenario(data)
 
 
+def test_rejects_case_insensitive_duplicate_event_headers() -> None:
+    data = valid_scenario()
+    data["events"][0]["headers"] = {
+        "X-Request-Source": "hookstorm",
+        "x-request-source": "test",
+    }
+    with pytest.raises(ScenarioError, match="duplicate header names"):
+        validate_scenario(data)
+
+
+
 def test_accept_encoding_is_a_managed_header() -> None:
     data = valid_scenario()
     data["events"][0]["headers"] = {"Accept-Encoding": "gzip"}
