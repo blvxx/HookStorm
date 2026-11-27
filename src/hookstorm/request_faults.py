@@ -2,11 +2,11 @@
 
 from __future__ import annotations
 
+import contextlib
 import contextvars
 import gzip
 import zlib
 from collections.abc import Iterator
-from contextlib import contextmanager
 from typing import Any
 
 import httpcore
@@ -47,7 +47,7 @@ def prepare_request_body(body: bytes, fault: str | None) -> tuple[bytes, dict[st
     return body, {}
 
 
-@contextmanager
+@contextlib.contextmanager
 def request_fault_context(fault: str, body_length: int) -> Iterator[None]:
     """Bind a wire-level fault to the connection opened by the current request task."""
     token = _REQUEST_FAULT_CONTEXT.set((fault, body_length))
