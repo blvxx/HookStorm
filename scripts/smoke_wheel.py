@@ -1,4 +1,4 @@
-"""Install a built HookStorm distribution and exercise its installed CLI in isolation."""
+"""Install HookStorm distributions and exercise each installed CLI in isolation."""
 
 from __future__ import annotations
 
@@ -10,15 +10,36 @@ import venv
 from pathlib import Path
 
 
-def _distribution_path(value: str | None, project_root: Path) -> Path:
+def _distribution_paths(
+    value: str | None,
+    project_root: Path,
+    *,
+    include_all: bool = False,
+) -> list[Path]:
+    if include_all:
+        if value is not None:
+            raise SystemExit("Do not pass a distribution path together with --all.")
+        distributions: list[Path] = []
+        for pattern, label in (
+            ("hookstorm-*.whl", "wheel"),
+            ("hookstorm-*.tar.gz", "source distribution"),
+        ):
+            matches = sorted((project_root / "dist").glob(pattern))
+            if len(matches) != 1:
+                raise SystemExit(
+                    f"Expected exactly one HookStorm {label} in dist/, found {len(matches)}."
+                )
+            distributions.append(matches[0].resolve())
+        return distributions
+
     if value is None:
-        distributions = sorted((project_root / "dist").glob("hookstorm-*.whl"))
-        if len(distributions) != 1:
+        matches = sorted((project_root / "dist").glob("hookstorm-*.whl"))
+        if len(matches) != 1:
             raise SystemExit(
                 "Expected exactly one HookStorm wheel in dist/, "
-                f"found {len(distributions)}. Pass a wheel or source archive explicitly."
+                f"found {len(matches)}. Pass a wheel or source archive explicitly."
             )
-        distribution = distributions[0]
+        distribution = matches[0]
     else:
         distribution = Path(value).expanduser()
 
@@ -30,23 +51,10 @@ def _distribution_path(value: str | None, project_root: Path) -> Path:
             "Expected a HookStorm wheel (.whl) or source distribution (.tar.gz), "
             f"got: {distribution.name}"
         )
-    return distribution
+    return [distribution]
 
 
-def main(argv: list[str] | None = None) -> int:
-    parser = argparse.ArgumentParser(
-        description="Install a HookStorm wheel or source archive and smoke-test its CLI."
-    )
-    parser.add_argument(
-        "distribution",
-        nargs="?",
-        help="wheel or source distribution to install (defaults to the sole wheel in dist/)",
-    )
-    args = parser.parse_args(argv)
-
-    project_root = Path(__file__).resolve().parents[1]
-    distribution = _distribution_path(args.distribution, project_root)
-
+def _smoke_distribution(distribution: Path) -> None:
     with tempfile.TemporaryDirectory(prefix="hookstorm-package-smoke-") as temporary:
         environment = Path(temporary) / "venv"
         venv.EnvBuilder(with_pip=True).create(environment)
@@ -76,13 +84,42 @@ def main(argv: list[str] | None = None) -> int:
 
         scenario = Path(temporary) / "smoke-scenario.yaml"
         if not scenario.is_file():
-            raise SystemExit("Installed HookStorm CLI did not create its starter scenario")
+            raise SystemExit(
+                f"Installed HookStorm CLI did not create its starter scenario for {distribution.name}"
+            )
 
         subprocess.run(
             [str(cli), "validate", scenario.name],
             check=True,
             cwd=temporary,
         )
+
+
+def main(argv: list[str] | None = None) -> int:
+    parser = argparse.ArgumentParser(
+        description="Install HookStorm distributions and smoke-test the installed CLI."
+    )
+    parser.add_argument(
+        "distribution",
+        nargs="?",
+        help="wheel or source archive to install (defaults to the sole wheel in dist/)",
+    )
+    parser.add_argument(
+        "--all",
+        action="store_true",
+        help="smoke-test exactly one wheel and one source distribution from dist/",
+    )
+    args = parser.parse_args(argv)
+
+    project_root = Path(__file__).resolve().parents[1]
+    distributions = _distribution_paths(
+        args.distribution,
+        project_root,
+        include_all=args.all,
+    )
+    for distribution in distributions:
+        print(f"Smoke-testing {distribution.name}")
+        _smoke_distribution(distribution)
 
     return 0
 
