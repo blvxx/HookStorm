@@ -355,8 +355,15 @@ def _init_command(args: argparse.Namespace) -> int:
         force=args.force,
     )
     print("HookStorm project files created:")
+    current_directory = Path.cwd().resolve()
     for path in written:
-        print(f"  + {path.relative_to(Path.cwd())}")
+        try:
+            display_path = path.relative_to(current_directory)
+        except ValueError:
+            # Windows may report the current directory through an 8.3 short path
+            # while resolved output paths use the long path spelling.
+            display_path = path
+        print(f"  + {display_path}")
     print("\nNext steps:")
     print(f"  1. Edit {args.scenario_path}: replace the sample payload and expected response.")
     print("  2. Configure GitHub Environment 'staging':")
