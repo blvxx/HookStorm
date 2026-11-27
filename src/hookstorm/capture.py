@@ -279,6 +279,7 @@ class CaptureStore:
             # before replacement so a permission error cannot occur after the
             # destination has already been atomically replaced.
             with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as stream:
+                descriptor = -1  # The stream now owns and closes the descriptor.
                 stream.write(serialized)
                 stream.flush()
                 os.fsync(stream.fileno())
