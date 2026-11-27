@@ -135,13 +135,13 @@ def _candidate_reductions(value: Any) -> Iterable[Any]:
     elif isinstance(value, list):
         yield []
         for index in range(len(value)):
-            reduced = list(value)
-            del reduced[index]
-            yield reduced
+            reduced_items = list(value)
+            del reduced_items[index]
+            yield reduced_items
             for child in _candidate_reductions(value[index]):
-                reduced_child = list(value)
-                reduced_child[index] = child
-                yield reduced_child
+                reduced_child_items = list(value)
+                reduced_child_items[index] = child
+                yield reduced_child_items
     elif isinstance(value, str):
         if len(value) > 1:
             yield value[: len(value) // 2]
