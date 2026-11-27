@@ -13,7 +13,7 @@ Create a GitHub Environment named staging. Add:
 | HOOKSTORM_TARGET_URL | Variable | Dedicated test or staging webhook URL |
 | HOOKSTORM_SECRET | Secret | Signing secret, only when the scenario requires one |
 
-Configure required reviewers and branch restrictions on the environment. The sample skips fork-originated pull requests because those runs do not have staging secrets. Never use a production endpoint or production signing secret.
+Configure required reviewers and restrict deployment branches to `main` where practical. The example's pull-request job only validates the scenario YAML; it has no `staging` environment and no secrets. The action itself runs against staging only on pushes to `main` and manual dispatches on `main`. Same-repository PRs and fork PRs both stay outside the staging job. Preserve this separation when editing the workflow. Never use a production endpoint or production signing secret.
 
 ## Inputs
 
