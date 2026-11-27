@@ -18,6 +18,10 @@ A scenario is a YAML document. It describes events, delivery behavior, and expec
 
 Unknown keys and duplicate YAML mapping keys are rejected to catch typos and ambiguous configuration early. Scenarios can be exported with `hookstorm export-pytest`; the generated test embeds the normalized scenario and reads its endpoint from `HOOKSTORM_TARGET` at runtime.
 
+## Input and expansion limits
+
+The YAML source file is limited to 16 MiB and may contain at most 16 YAML aliases. Payloads are limited to 1 MiB per event and 16 MiB in aggregate across the complete scenario. These limits apply before delivery starts and are intended to keep local runs and CI safe when scenarios come from reviewed pull requests. If a scenario exceeds a limit, split it into smaller focused scenarios rather than increasing limits in the source.
+
 ## Run timeout budget
 
 `run_timeout_ms` is a top-level limit covering event scheduling, delivery attempts, retry backoff, response reading, and the optional business-state verification request. Before sending traffic, HookStorm estimates a conservative worst-case request-time budget from event timeouts, delays, retries, duplicates, scheduling offsets, concurrency, and verification timeout. A scenario whose estimate exceeds `run_timeout_ms` is rejected before any request is sent.
@@ -114,7 +118,7 @@ The probe is not a universal exactly-once guarantee: it verifies only the state 
 
 ## Response body safety limit
 
-Webhook delivery responses and the business-state verification response are streamed and capped at 2 MiB after HTTP content decoding. If a response exceeds this limit, HookStorm closes the response stream and marks the JSON assertion as failed with a clear size-limit error. The limit applies even when no JSON expectation is configured; HookStorm does not buffer arbitrarily large response bodies or persist response content.
+Webhook delivery responses and the business-state verification response are requested with `Accept-Encoding: identity` and read as raw streams with a 2 MiB cap before JSON parsing. HookStorm deliberately does not automatically decompress response bodies: a compressed response is rejected, even when smaller than the limit, to avoid allocating an unbounded decompressed chunk before the size check. If a target always compresses responses, disable response compression for its test route. The limit applies even when no JSON expectation is configured; HookStorm does not buffer arbitrarily large response bodies or persist response content.
 
 ## Event fields
 
