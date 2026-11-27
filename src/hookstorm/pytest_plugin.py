@@ -60,7 +60,9 @@ class HookStormRunner:
     async def run(self, scenario: ScenarioInput) -> dict[str, Any]:
         """Execute a scenario asynchronously and return the standard result document."""
         normalized = load_hookstorm_scenario(scenario)
-        secret = self.environ.get(self.secret_env) if self.secret_env else None
+        # Pass an explicit empty value when the selected variable is absent
+        # so run_scenario cannot silently fall back to the process default.
+        secret = self.environ.get(self.secret_env, "") if self.secret_env else ""
         return await run_scenario(
             normalized,
             self.target,
