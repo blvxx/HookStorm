@@ -13,6 +13,7 @@ from hookstorm.report import render_html, render_json, render_junit
 from hookstorm.runner import (
     MAX_RESPONSE_BODY_BYTES,
     _PinnedNetworkBackend,
+    _parse_response_json,
     run_scenario,
 )
 
@@ -94,6 +95,23 @@ def test_html_report_labels_every_supported_injected_fault() -> None:
     for label, description in fault_labels.values():
         assert f">{label}</span>" in report
         assert f"injected {description}" in report
+
+
+def test_response_json_parser_enforces_nesting_and_strict_json_numbers() -> None:
+    assert _parse_response_json(b'{"message":"[{{}}] \\"quoted\\""}') == {
+        "message": '[{{}}] "quoted"'
+    }
+
+    too_deep = ("[" * 101 + "null" + "]" * 101).encode("ascii")
+    with pytest.raises(ValueError, match="bounded UTF-8 JSON"):
+        _parse_response_json(too_deep)
+
+    for body in (b'{"value":NaN}', b'{"value":Infinity}', b'{"value":1e999}'):
+        with pytest.raises(ValueError, match="bounded UTF-8 JSON"):
+            _parse_response_json(body)
+
+    with pytest.raises(ValueError, match="bounded UTF-8 JSON"):
+        _parse_response_json(b'{"value":"\\xff"}')
 
 
 def test_custom_header_overrides_default_case_insensitively(receiver) -> None:
