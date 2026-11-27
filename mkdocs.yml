@@ -42,5 +42,6 @@ nav:
       - Release review: alpha-release-review.md
       - Release checklist: release-checklist.md
       - User validation: user-validation.md
+      - Security audit: security-audit.md
       - PyPI publishing: pypi-publishing.md
       - Changelog: https://github.com/blvxx/HookStorm/blob/main/CHANGELOG.md
