@@ -6,11 +6,13 @@ import json
 import math
 import os
 import sqlite3
+import tempfile
 from pathlib import Path
 from typing import Any
 
 _DEFAULT_DB = Path.home() / ".hookstorm" / "history.sqlite3"
 _SCHEMA_VERSION = 1
+_MAX_HISTORY_EXPORT_BYTES = 16 * 1024 * 1024
 _INJECTED_FAULTS = frozenset(
     {
         "connect_error",
@@ -87,24 +89,31 @@ def _connect(path: str | Path | None = None) -> sqlite3.Connection:
 
 
 def _write_private_text(path: Path, content: str) -> None:
-    """Write an owner-only text file on POSIX and a normal text file elsewhere."""
-    if os.name != "posix":
-        path.write_text(content, encoding="utf-8")
-        return
-
-    descriptor = os.open(
-        path,
-        os.O_WRONLY | os.O_CREAT | os.O_TRUNC,
-        0o600,
+    """Atomically write a portable text file with private POSIX permissions."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{path.name}.",
+        suffix=".tmp",
+        dir=path.parent,
     )
     try:
-        _fchmod_private(descriptor, 0o600)
-        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
-            descriptor = -1
+        with os.fdopen(descriptor, "w", encoding="utf-8", newline="\\n") as stream:
             stream.write(content)
-    finally:
-        if descriptor >= 0:
+            stream.flush()
+            os.fsync(stream.fileno())
+        if os.name == "posix":
+            os.chmod(temporary_name, 0o600)
+        os.replace(temporary_name, path)
+    except Exception:
+        try:
             os.close(descriptor)
+        except OSError:
+            pass
+        try:
+            os.unlink(temporary_name)
+        except OSError:
+            pass
+        raise
 
 
 def _initialize(connection: sqlite3.Connection) -> None:
@@ -842,8 +851,9 @@ def export_history_run(
 
 
 def load_history_export(source: str | Path) -> dict[str, Any]:
-    """Read a portable baseline and re-apply the history field whitelist."""
+    """Read a bounded portable baseline and re-apply the history field whitelist."""
     location = Path(source).expanduser()
+
     def reject_non_standard_number(value: str) -> None:
         raise HistoryError(
             f"Baseline file '{location}' contains non-standard JSON number {value}"
@@ -860,15 +870,30 @@ def load_history_export(source: str | Path) -> dict[str, Any]:
         return parsed
 
     try:
+        with location.open("rb") as stream:
+            serialized = stream.read(_MAX_HISTORY_EXPORT_BYTES + 1)
+    except OSError as exc:
+        raise HistoryError(f"Cannot read baseline file '{location}': {exc}") from exc
+
+    if len(serialized) > _MAX_HISTORY_EXPORT_BYTES:
+        raise HistoryError(
+            f"Baseline file '{location}' exceeds the "
+            f"{_MAX_HISTORY_EXPORT_BYTES}-byte size limit"
+        )
+
+    try:
+        source_text = serialized.decode("utf-8")
         document = json.loads(
-            location.read_text(encoding="utf-8"),
+            source_text,
             parse_constant=reject_non_standard_number,
             object_pairs_hook=reject_duplicate_keys,
         )
-    except OSError as exc:
-        raise HistoryError(f"Cannot read baseline file '{location}': {exc}") from exc
-    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
-        raise HistoryError(f"Baseline file '{location}' is not valid JSON: {exc}") from exc
+    except UnicodeDecodeError as exc:
+        raise HistoryError(f"Baseline file '{location}' is not valid UTF-8") from exc
+    except (ValueError, RecursionError) as exc:
+        raise HistoryError(
+            f"Baseline file '{location}' is not valid JSON within parser limits: {exc}"
+        ) from exc
 
     if not isinstance(document, dict):
         raise HistoryError("Baseline file must contain a JSON object")
@@ -892,11 +917,11 @@ def load_history_export(source: str | Path) -> dict[str, Any]:
         raise HistoryError(
             f"Baseline run is incomplete; missing: {', '.join(missing)}"
         )
-    _validate_run_result(result, "Baseline")
     try:
+        _validate_run_result(result, "Baseline")
         safe_result = _sanitize_result(result)
         result_metrics(safe_result)
-    except (KeyError, TypeError, ValueError) as exc:
+    except (KeyError, TypeError, ValueError, RecursionError) as exc:
         raise HistoryError(f"Baseline run contains invalid metrics: {exc}") from exc
     return safe_result
 
