@@ -1,0 +1,101 @@
+name: Release
+
+on:
+  release:
+    types: [published]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Test and build distributions
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - name: Check out the released tag
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+        with:
+          ref: ${{ github.event.release.tag_name }}
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Install test and build dependencies
+        run: python -m pip install -e '.[dev]' "twine>=6,<7"
+
+      - name: Verify release tag matches package metadata
+        if: github.event_name == 'release'
+        env:
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+          RELEASE_PRERELEASE: ${{ github.event.release.prerelease }}
+        run: |
+          python - <<'PY'
+          import os
+          import tomllib
+          from pathlib import Path
+          from packaging.version import Version
+
+          project = tomllib.loads(Path("pyproject.toml").read_text(encoding="utf-8"))["project"]
+          version = Version(project["version"])
+          expected_tag = f"v{version}"
+          actual_tag = os.environ["RELEASE_TAG"]
+          is_github_prerelease = os.environ["RELEASE_PRERELEASE"].lower() == "true"
+
+          if actual_tag != expected_tag:
+              raise SystemExit(
+                  f"Release tag {actual_tag!r} does not match project version {expected_tag!r}"
+              )
+          if version.is_prerelease != is_github_prerelease:
+              raise SystemExit(
+                  "GitHub prerelease flag must match the PEP 440 package version "
+                  f"({version}; prerelease={version.is_prerelease})"
+              )
+          print(f"Validated release {actual_tag}")
+          PY
+
+      - name: Lint
+        run: ruff check .
+
+      - name: Run tests
+        run: pytest
+
+      - name: Build wheel and source distribution
+        run: python -m build --sdist --wheel --outdir dist
+
+      - name: Validate distribution metadata
+        run: python -m twine check dist/*
+
+      - name: Upload release distributions
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: python-distributions
+          path: dist/
+          if-no-files-found: error
+          retention-days: 7
+
+  publish:
+    name: Publish to PyPI
+    if: github.event_name == 'release' && github.event.action == 'published'
+    needs: build
+    runs-on: ubuntu-latest
+    environment:
+      name: pypi
+      url: https://pypi.org/project/hookstorm/
+    permissions:
+      id-token: write
+    steps:
+      - name: Download validated distributions
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: python-distributions
+          path: dist/
+
+      - name: Publish using PyPI Trusted Publishing
+        uses: pypa/gh-action-pypi-publish@7245906fb61fa33a13554f9d5fb856fe61758086 # v1.14.3
