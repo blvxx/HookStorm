@@ -264,9 +264,12 @@ def _write_case(directory: Path, name: str, scenario: dict[str, Any]) -> str:
         with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
             descriptor = -1
             stream.write(scenario_to_yaml(scenario))
-    except OSError:
+    except Exception:
         if descriptor >= 0:
-            os.close(descriptor)
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
         try:
             path.unlink()
         except OSError:
