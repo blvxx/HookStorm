@@ -44,6 +44,7 @@ def test_retries_transient_server_error(receiver) -> None:
     assert [x["status_code"] for x in result["deliveries"][0]["attempts"]] == [503, 200]
     run_id = state["requests"][0]["run_id"]
     assert state["attempts"][(run_id, "evt_test_1")] == 2
+    assert state["requests"][0]["headers"]["Accept-Encoding"] == "identity"
 
 
 def test_injected_connect_error_fails_before_request_reaches_receiver(receiver) -> None:
@@ -234,7 +235,7 @@ def test_oversized_webhook_response_fails_without_buffering_unbounded_body(recei
     assert attempt["status_code"] == 200
     assert attempt["expected_json"] is False
     assert attempt["error"] == (
-        f"response body exceeds the {MAX_RESPONSE_BODY_BYTES // (1024 * 1024)} MiB safety limit"
+        f"response body is compressed or exceeds the {MAX_RESPONSE_BODY_BYTES // (1024 * 1024)} MiB safety limit"
     )
 
 
@@ -255,7 +256,7 @@ def test_oversized_business_verification_response_fails(receiver) -> None:
     assert result["verification"]["status_code"] == 200
     assert result["verification"]["expected_json"] is False
     assert result["verification"]["error"] == (
-        f"verification response body exceeds the "
+        f"verification response body is compressed or exceeds the "
         f"{MAX_RESPONSE_BODY_BYTES // (1024 * 1024)} MiB safety limit"
     )
 
