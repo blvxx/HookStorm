@@ -522,12 +522,15 @@ def _delivery_key(delivery: dict[str, Any]) -> tuple[str, str, int]:
     event_type = delivery.get("event_type")
     event_id = delivery.get("event_id")
     duplicate_index = delivery.get("duplicate_index", 0)
-    for field, value in (("event_type", event_type), ("event_id", event_id)):
-        if not isinstance(value, str) or not value.strip() or len(value) > 256:
-            raise HistoryError(
-                f"Delivery {field} must be a non-empty string of at most 256 characters"
-            )
-    _require_non_negative_integer(
+    if not isinstance(event_type, str) or not event_type.strip() or len(event_type) > 256:
+        raise HistoryError(
+            "Delivery event_type must be a non-empty string of at most 256 characters"
+        )
+    if not isinstance(event_id, str) or not event_id.strip() or len(event_id) > 256:
+        raise HistoryError(
+            "Delivery event_id must be a non-empty string of at most 256 characters"
+        )
+    duplicate_index = _require_non_negative_integer(
         duplicate_index, "Delivery duplicate_index", maximum=100
     )
     return (event_type, event_id, duplicate_index)
@@ -592,15 +595,15 @@ def compare_results(
         new = latest.get(key)
         label = f"{key[0]} / {key[1]} / duplicate {key[2]}"
         if old is None and new is not None:
-            change = {"delivery": label, "change": "added", "passed": bool(new.get("passed"))}
-            changes.append(change)
+            coverage_change = {"delivery": label, "change": "added", "passed": bool(new.get("passed"))}
+            changes.append(coverage_change)
             if not new.get("passed"):
-                regressions.append({**change, "reason": "new delivery failed"})
+                regressions.append({**coverage_change, "reason": "new delivery failed"})
             continue
         if new is None and old is not None:
-            change = {"delivery": label, "change": "removed"}
-            changes.append(change)
-            regressions.append({**change, "reason": "delivery coverage decreased"})
+            coverage_change = {"delivery": label, "change": "removed"}
+            changes.append(coverage_change)
+            regressions.append({**coverage_change, "reason": "delivery coverage decreased"})
             continue
 
         assert old is not None and new is not None

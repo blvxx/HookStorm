@@ -73,7 +73,7 @@ def validate_target(
         resolved = socket.getaddrinfo(hostname, parsed.port or (443 if parsed.scheme == "https" else 80))
     except OSError as exc:
         raise UnsafeTargetError(f"Could not resolve local target host: {exc}") from exc
-    addresses = {item[4][0].split("%", 1)[0] for item in resolved}
+    addresses = {str(item[4][0]).split("%", 1)[0] for item in resolved}
     if not addresses or any(not ipaddress.ip_address(address).is_loopback for address in addresses):
         raise UnsafeTargetError("localhost resolved to a non-loopback address; refusing the request")
     return target.strip()
@@ -121,7 +121,7 @@ def resolve_target(
             f"Could not resolve target host before connecting: {type(exc).__name__}"
         ) from exc
 
-    addresses = tuple(dict.fromkeys(item[4][0] for item in resolved))
+    addresses = tuple(dict.fromkeys(str(item[4][0]) for item in resolved))
     if not addresses:
         raise UnsafeTargetError("Target host resolved to no usable IP addresses")
 

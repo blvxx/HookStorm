@@ -10,6 +10,7 @@ from collections.abc import Mapping, Sequence
 from dataclasses import dataclass
 from datetime import UTC, datetime
 from pathlib import Path
+from typing import Any, cast
 from urllib.parse import SplitResult, urlsplit
 
 from hookstorm import __version__
@@ -278,8 +279,8 @@ def _check_connectivity_detailed(
         )
     dns_ms = (time.perf_counter() - dns_started) * 1000
 
-    addresses: list[tuple[int, int, int, tuple]] = []
-    seen: set[tuple[int, tuple]] = set()
+    addresses: list[tuple[socket.AddressFamily, socket.SocketKind, int, tuple[Any, ...]]] = []
+    seen: set[tuple[socket.AddressFamily, tuple[Any, ...]]] = set()
     for family, socktype, proto, _canonical_name, sockaddr in resolved:
         key = (family, sockaddr)
         if key not in seen:
@@ -329,12 +330,21 @@ def _check_connectivity_detailed(
                     f"cipher: {cipher_name}; handshake: {tls_ms:.2f} ms"
                 )
 
-                certificate = tls_connection.getpeercert()
-                subject = _format_certificate_name(certificate.get("subject", ()))
-                issuer = _format_certificate_name(certificate.get("issuer", ()))
+                certificate = cast(
+                    dict[str, Any], tls_connection.getpeercert() or {}
+                )
+                subject_value = certificate.get("subject")
+                issuer_value = certificate.get("issuer")
+                subject = _format_certificate_name(
+                    subject_value if isinstance(subject_value, tuple) else ()
+                )
+                issuer = _format_certificate_name(
+                    issuer_value if isinstance(issuer_value, tuple) else ()
+                )
                 details.append(f"  Certificate subject: {subject}")
                 details.append(f"  Certificate issuer: {issuer}")
-                not_after = certificate.get("notAfter")
+                not_after_value = certificate.get("notAfter")
+                not_after = not_after_value if isinstance(not_after_value, str) else None
                 if not_after:
                     expires_at = datetime.fromtimestamp(
                         ssl.cert_time_to_seconds(not_after), UTC

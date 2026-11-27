@@ -223,6 +223,7 @@ def _signature_headers(
     if mode in {"none", "missing"}:
         return {}
 
+    timestamp: int | None = None
     if provider == "standard_webhooks":
         timestamp = int(time.time()) + timestamp_offset_seconds
         return standard_webhooks_headers(
@@ -234,7 +235,6 @@ def _signature_headers(
         )
 
     signed_payload = body
-    timestamp: int | None = None
     if provider == "stripe":
         timestamp = int(time.time()) + timestamp_offset_seconds
         signed_payload = str(timestamp).encode("ascii") + b"." + body
@@ -417,7 +417,7 @@ async def run_scenario(
                         if attempt in fault_plan.get("response_loss_attempts", [])
                         else None
                     )
-                    outcome = {
+                    outcome: dict[str, Any] = {
                         "attempt": attempt,
                         "elapsed_ms": round((started_attempt - monotonic_started) * 1000, 2),
                         "status_code": None,
@@ -546,7 +546,7 @@ async def run_scenario(
                     for delivery in groups_by_scenario_index[index]
                 ]
 
-                verification = None
+                verification: dict[str, Any] | None = None
                 if verify_config is not None and verification_url is not None:
                     verify_started = time.perf_counter()
                     verification = {
@@ -578,6 +578,8 @@ async def run_scenario(
                             verification["expected_status"] = (
                                 response.status_code in verify_config["expect_status"]
                             )
+                            matched: bool
+                            mismatch: str | None
                             if response_body is None:
                                 matched, mismatch = (
                                     False,
