@@ -81,7 +81,7 @@ class _FaultInjectingTransport(httpx.AsyncBaseTransport):
     """Apply deterministic client-side transport faults to selected request attempts."""
 
     def __init__(self) -> None:
-        self._transport = httpx.AsyncHTTPTransport()
+        self._transport = httpx.AsyncHTTPTransport(trust_env=False)
 
     async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
         fault = request.extensions.get("hookstorm_fault_injection")
