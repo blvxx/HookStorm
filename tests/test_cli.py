@@ -338,3 +338,61 @@ def test_init_command_handles_working_directory_path_alias(
     output = capsys.readouterr().out
     assert scenario.is_file()
     assert str(scenario) in output
+
+
+def test_init_interactive_wizard_builds_retry_and_duplicate_scenario(
+    tmp_path, monkeypatch, capsys
+) -> None:
+    from hookstorm.config import load_scenario
+
+    class InteractiveStdin:
+        @staticmethod
+        def isatty() -> bool:
+            return True
+
+    answers = iter([
+        "stripe",
+        "invoice.paid",
+        "evt_invoice_paid_001",
+        "3",
+        "2",
+    ])
+    monkeypatch.chdir(tmp_path)
+    monkeypatch.setattr("hookstorm.cli.sys.stdin", InteractiveStdin())
+    monkeypatch.setattr("builtins.input", lambda _prompt: next(answers))
+
+    assert main(["init", "--no-workflow"]) == 0
+
+    scenario = load_scenario(tmp_path / "scenarios" / "webhook.yaml")
+    assert scenario["delivery"]["signature_provider"] == "stripe"
+    assert scenario["delivery"]["duplicate_count"] == 2
+    assert scenario["retry"]["max_attempts"] == 3
+    assert scenario["events"][0]["id"] == "invoice.paid"
+    assert scenario["events"][0]["event_id"] == "evt_invoice_paid_001"
+    assert "Next steps:" in capsys.readouterr().out
+
+
+def test_init_flags_support_noninteractive_scenario_configuration(
+    tmp_path, monkeypatch, capsys
+) -> None:
+    from hookstorm.config import load_scenario
+
+    monkeypatch.chdir(tmp_path)
+
+    assert main([
+        "init",
+        "--no-workflow",
+        "--signature-provider", "shopify",
+        "--event-type", "order.updated",
+        "--event-id", "evt_order_updated_001",
+        "--max-attempts", "4",
+        "--duplicate-count", "1",
+    ]) == 0
+
+    scenario = load_scenario(tmp_path / "scenarios" / "webhook.yaml")
+    assert scenario["delivery"]["signature_provider"] == "shopify"
+    assert scenario["delivery"]["duplicate_count"] == 1
+    assert scenario["retry"]["max_attempts"] == 4
+    assert scenario["events"][0]["id"] == "order.updated"
+    assert scenario["events"][0]["event_id"] == "evt_order_updated_001"
+    capsys.readouterr()
