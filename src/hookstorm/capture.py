@@ -14,6 +14,7 @@ from urllib.parse import urlsplit
 import yaml
 
 from hookstorm.config import ScenarioError, validate_scenario
+from hookstorm.json_limits import ensure_json_text_depth
 
 MAX_CAPTURE_BODY_BYTES = 1_048_576
 MAX_CAPTURE_SCENARIO_BYTES = 8 * 1_048_576
@@ -183,8 +184,10 @@ class CaptureStore:
                 status_code=413,
             )
         try:
+            source_text = body.decode("utf-8")
+            ensure_json_text_depth(source_text)
             payload = json.loads(
-                body.decode("utf-8"),
+                source_text,
                 object_pairs_hook=_unique_json_object,
             )
         except CaptureError:
