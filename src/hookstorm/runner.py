@@ -454,13 +454,18 @@ MAX_RESPONSE_BODY_BYTES = 2 * 1024 * 1024
 
 
 async def _read_limited_response_body(response: httpx.Response) -> bytes | None:
-    """Read a decompressed response body up to the fixed memory-safety limit.
+    """Read an identity-encoded response body up to the memory-safety limit.
 
-    Return None when the body exceeds the limit. Streaming is used so an oversized
-    response is closed as soon as the limit is crossed instead of being buffered in full.
+    Do not use HTTPX automatic decompression here: a small compressed chunk can
+    expand into a huge allocation before the caller can enforce this limit. The
+    runner requests identity encoding and rejects servers that ignore that request.
     """
+    content_encoding = response.headers.get("content-encoding", "identity").strip().lower()
+    if content_encoding not in {"", "identity"}:
+        return None
+
     body = bytearray()
-    async for chunk in response.aiter_bytes():
+    async for chunk in response.aiter_raw():
         if len(body) + len(chunk) > MAX_RESPONSE_BODY_BYTES:
             return None
         body.extend(chunk)
@@ -620,6 +625,7 @@ async def run_scenario(
             event_body = _json_bytes(event["payload"])
             base_headers = {
                 "Content-Type": "application/json",
+                "Accept-Encoding": "identity",
                 "User-Agent": f"HookStorm/{__version__} (+https://github.com/blvxx/HookStorm)",
                 "X-HookStorm-Run": run_id,
                 "X-Event-ID": event["event_id"],
@@ -743,7 +749,7 @@ async def run_scenario(
                             if response_body is None:
                                 outcome["expected_json"] = False
                                 outcome["error"] = (
-                                    "response body exceeds the 2 MiB safety limit"
+                                    "response body is compressed or exceeds the 2 MiB safety limit"
                                 )
                             elif expected_json is not None:
                                 try:
@@ -864,6 +870,7 @@ async def run_scenario(
                             "GET",
                             verification_url,
                             headers={
+                                "Accept-Encoding": "identity",
                                 "User-Agent": f"HookStorm/{__version__} (+https://github.com/blvxx/HookStorm)",
                                 "X-HookStorm-Run": run_id,
                                 **verification_auth_headers,
@@ -883,7 +890,7 @@ async def run_scenario(
                             if response_body is None:
                                 matched, mismatch = (
                                     False,
-                                    "verification response body exceeds the 2 MiB safety limit",
+                                    "verification response body is compressed or exceeds the 2 MiB safety limit",
                                 )
                             else:
                                 try:
