@@ -269,6 +269,9 @@ class WebhookRecorder:
                 source_text,
                 object_pairs_hook=self._reject_duplicate_keys,
             )
+            # Python's JSON decoder accepts NaN/Infinity and overflows such as
+            # 1e999 by default. Round-tripping with allow_nan=False rejects them.
+            json.dumps(payload, ensure_ascii=True, allow_nan=False)
         except (UnicodeDecodeError, ValueError, RecursionError) as exc:
             raise WebhookRequestError(
                 "request body must contain valid UTF-8 JSON without duplicate object keys "
