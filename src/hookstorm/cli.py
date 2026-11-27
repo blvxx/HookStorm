@@ -142,6 +142,38 @@ def _parser() -> argparse.ArgumentParser:
         help="maximum extra executions to reduce each failing payload (0 disables minimization)",
     )
     fuzz.add_argument(
+        "--vary-order",
+        action="store_true",
+        help="also mutate the global delivery order between in_order and reverse",
+    )
+    fuzz.add_argument(
+        "--vary-duplicates",
+        action="store_true",
+        help="also mutate one event's duplicate count in each trial",
+    )
+    fuzz.add_argument(
+        "--max-duplicates",
+        type=int,
+        default=3,
+        help="maximum duplicate count used with --vary-duplicates (0–100)",
+    )
+    fuzz.add_argument(
+        "--vary-delay",
+        action="store_true",
+        help="also mutate one event's delay before each HTTP attempt",
+    )
+    fuzz.add_argument(
+        "--max-delay-ms",
+        type=int,
+        default=1_000,
+        help="maximum delay used with --vary-delay (0–60000 ms)",
+    )
+    fuzz.add_argument(
+        "--vary-faults",
+        action="store_true",
+        help="also inject one deterministic transport fault into an event attempt",
+    )
+    fuzz.add_argument(
         "--cases-dir",
         help="optionally save failing and minimized replayable YAML scenarios",
     )
@@ -681,6 +713,12 @@ def main(argv: Sequence[str] | None = None) -> int:
                     secret=os.getenv(args.secret_env),
                     minimize_budget=args.minimize_budget,
                     cases_dir=args.cases_dir,
+                    vary_order=args.vary_order,
+                    vary_duplicates=args.vary_duplicates,
+                    max_duplicates=args.max_duplicates,
+                    vary_delay=args.vary_delay,
+                    max_delay_ms=args.max_delay_ms,
+                    vary_faults=args.vary_faults,
                 )
             )
             serialized = json.dumps(fuzz_result, ensure_ascii=False, indent=2) + "\n"
