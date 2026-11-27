@@ -270,3 +270,23 @@ def test_captured_scenario_can_later_select_provider_profile(tmp_path) -> None:
     assert profiled["provider"] == "stripe"
     assert profiled["delivery"]["signature"] == "valid"
     assert profiled["delivery"]["signature_provider"] == "stripe"
+
+def test_capture_rejects_duplicate_json_keys_at_any_depth(tmp_path) -> None:
+    store = CaptureStore(tmp_path / "duplicate-keys.yaml")
+
+    with pytest.raises(CaptureError, match="duplicate key"):
+        store.record(
+            {"Content-Type": "application/json"},
+            b'{"type":"invoice.paid","type":"invoice.refunded"}',
+        )
+
+    with pytest.raises(CaptureError, match="duplicate key"):
+        store.record(
+            {"Content-Type": "application/json"},
+            b'{"data":{"id":"evt_1","id":"evt_2"}}',
+        )
+
+    assert store.events == []
+    assert store.capture_events == []
+    assert store.total_body_bytes == 0
+    assert not store.output.exists()
