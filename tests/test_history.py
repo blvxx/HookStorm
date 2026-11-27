@@ -106,6 +106,15 @@ def test_save_list_and_get_run_round_trip(tmp_path) -> None:
     assert loaded["deliveries"] == result["deliveries"]
     assert loaded["history"]["database_run_id"] == "run_001"
 
+def test_in_memory_history_persists_across_connections() -> None:
+    result = make_result("run_memory0")
+
+    assert save_run(result, ":memory:") == "run_memory0"
+    assert get_run("run_memory0", ":memory:")["run_id"] == "run_memory0"
+    assert [item["run_id"] for item in list_runs(":memory:")] == ["run_memory0"]
+
+
+
 
 def test_history_list_filters_scenario_and_limit(tmp_path) -> None:
     database = tmp_path / "history.sqlite3"
