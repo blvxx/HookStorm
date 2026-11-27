@@ -64,7 +64,8 @@ def ensure_value_depth(
     if isinstance(max_depth, bool) or not isinstance(max_depth, int) or max_depth < 0:
         raise ValueError("max_depth must be a non-negative integer")
 
-    stack: list[tuple[Any, int]] = [(value, 0)]
+    # Root objects/arrays count as nesting level one, matching the text scanner.
+    stack: list[tuple[Any, int]] = [(value, 1)]
     deepest_seen: dict[int, int] = {}
     while stack:
         current, depth = stack.pop()
