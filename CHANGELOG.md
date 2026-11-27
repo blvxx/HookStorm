@@ -4,7 +4,7 @@
 
 - Reject malformed, zero, and out-of-range target URL ports before opening a connection.
 - Reject duplicate YAML mapping keys instead of silently accepting the last value.
-- Add a configurable scenario-wide runtime budget with worst-case preflight estimation and hard cancellation.
+- Add a configurable scenario-wide runtime budget with worst-case preflight estimation and hard cancellation; preserve existing baseline fingerprints for the default budget.
 - Require published release commits to be reachable from main before building distributions.
 - Enforce Ruff formatting in CI and pin the CI workflow actions to full commit SHAs.
 - Require a separate explicit `--allow-insecure-http` opt-in for non-loopback HTTP targets, including generated pytest and staging workflow integrations.
