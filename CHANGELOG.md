@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Reject case-insensitive duplicate event request headers to avoid ambiguous HTTP field values.
+
 - Keep the `:memory:` SQLite history database alive across save/list/show operations within one process.
 
 - Cancel and await sibling delivery workers if one concurrent worker exits with an unexpected exception, preventing requests from outliving the run's HTTP client.
