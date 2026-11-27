@@ -130,8 +130,9 @@ def test_zensical_documentation_config_and_build_workflow_exist() -> None:
     assert any(".[docs]" in step.get("run", "") for step in steps)
 
 def test_pages_deployment_is_main_only_and_uses_least_privilege_jobs() -> None:
-    workflow = yaml.safe_load(
-        (ROOT / ".github/workflows/pages.yml").read_text(encoding="utf-8")
+    workflow = yaml.load(
+        (ROOT / ".github/workflows/pages.yml").read_text(encoding="utf-8"),
+        Loader=yaml.BaseLoader,
     )
     assert workflow["on"]["push"]["branches"] == ["main"]
     assert "pull_request" not in workflow["on"]
