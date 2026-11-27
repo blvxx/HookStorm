@@ -265,9 +265,10 @@ class WebhookRecorder:
                 decoded.decode("utf-8"),
                 object_pairs_hook=self._reject_duplicate_keys,
             )
-        except (UnicodeDecodeError, ValueError) as exc:
+        except (UnicodeDecodeError, ValueError, RecursionError) as exc:
             raise WebhookRequestError(
-                "request body must contain valid UTF-8 JSON without duplicate object keys",
+                "request body must contain valid UTF-8 JSON without duplicate object keys "
+                "within parser limits",
                 status_code=400,
             ) from exc
 
