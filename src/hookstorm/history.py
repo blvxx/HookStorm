@@ -98,6 +98,7 @@ def _write_private_text(path: Path, content: str) -> None:
     )
     try:
         with os.fdopen(descriptor, "w", encoding="utf-8", newline="") as stream:
+            descriptor = -1  # The stream now owns and closes the descriptor.
             stream.write(content)
             stream.flush()
             os.fsync(stream.fileno())
