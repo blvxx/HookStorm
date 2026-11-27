@@ -92,7 +92,7 @@ Planned work, in priority order:
 
 1. Add slow request-body streaming, controlled secret rotation, and bounded large-payload transport profiles.
 2. Evaluate HTTP/2 fault coverage and reduce reliance on HTTPX private transport internals.
-3. Enable hosted documentation deployment after the Zensical site build and repository Pages settings are reviewed.
+3. Confirm GitHub Pages settings and verify the first main-branch Zensical deployment.
 4. Add provider retry schedule presets only after explicit per-attempt schedule support and longer safe run-time budgets are designed.
 
 ## Development
