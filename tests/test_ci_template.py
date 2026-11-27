@@ -38,7 +38,9 @@ def test_external_workflow_template_has_safe_triggers_and_permissions() -> None:
     run_step = next(step for step in job["steps"] if step.get("name") == "Run webhook scenario and compare with baseline")
     assert "--allow-insecure-http" in run_step["run"]
     workflow_text = WORKFLOW_PATH.read_text(encoding="utf-8")
-    assert HOOKSTORM_INSTALL_REF in workflow_text
+    assert len(HOOKSTORM_INSTALL_REF) == 40
+    assert all(character in "0123456789abcdef" for character in HOOKSTORM_INSTALL_REF)
+    assert f"git+https://github.com/blvxx/HookStorm.git@{HOOKSTORM_INSTALL_REF}" in workflow_text
     assert "7ab9ffb6ab510b4067916a83068bf60f8c010a70" not in workflow_text
 
     step_uses = [step.get("uses", "") for step in job["steps"]]
