@@ -168,4 +168,14 @@ def test_standard_webhooks_fuzz_trial_keeps_event_id_envelope_in_sync() -> None:
     event = scenario["events"][0]
     assert event["event_id"] != old_event_id
     assert event["payload"]["id"] == event["event_id"]
-    assert event["headers"]["webhook-id"] == event["event_id"]
+    from hookstorm.runner import _signature_headers
+
+    signed_headers = _signature_headers(
+        b"{}",
+        "whsec_aG9va3N0b3JtLXRlc3Qtc3RhbmRhcmQtd2ViaG9va3Mtc2VjcmV0",
+        "valid",
+        "standard_webhooks",
+        event["event_id"],
+        0,
+    )
+    assert signed_headers["webhook-id"] == event["event_id"]
