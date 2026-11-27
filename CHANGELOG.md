@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Validate history run metrics and delivery identities before storage or baseline comparison; reject non-finite JSON numbers in imported baselines.
 - Add Python 3.14 to the CI compatibility matrix and package classifiers.
 - Restrict local history databases and exported baseline files to owner-only POSIX permissions.
 - Smoke-test installed wheel and source distributions using only the generated scenario and the installed CLI.
