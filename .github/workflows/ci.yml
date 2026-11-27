@@ -52,7 +52,7 @@ jobs:
           path: test-results/pytest.xml
           if-no-files-found: error
           retention-days: 14
-      - name: Build package
-        run: python -m pip wheel --no-deps . --wheel-dir dist
-      - name: Smoke-test installed wheel
-        run: python scripts/smoke_wheel.py
+      - name: Build wheel and source distribution
+        run: python -m build --sdist --wheel --outdir dist
+      - name: Smoke-test installed wheel and source distribution
+        run: python scripts/smoke_wheel.py --all
