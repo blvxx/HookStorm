@@ -61,7 +61,7 @@ The important distinction is the **verify** probe: a `200` response is not proof
 ## Safety and privacy
 
 - Loopback targets only by default. Remote HTTPS requires `--allow-remote`; non-loopback HTTP additionally requires `--allow-insecure-http`.
-- Redirects are not followed. Embedded URL credentials are rejected. The response body limit is 2 MiB after content decoding.
+- Redirects are not followed. Embedded URL credentials are rejected. HookStorm requests identity-encoded responses and caps raw response bodies at 2 MiB before parsing; compressed responses are rejected to avoid decompression-bomb allocations.
 - Signing secrets and verification credentials are read from environment variables, never scenario literals.
 - Reports and history retain the URL scheme, hostname, explicit port (when present), and path. Query strings and fragments are removed. Event identifiers and endpoint paths can still be sensitive; review artifacts before sharing them.
 - History is local SQLite data. Payloads, headers, response bodies, and secret values are excluded by an explicit field whitelist.
