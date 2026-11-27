@@ -302,6 +302,50 @@ def test_concurrency_limit_runs_events_in_parallel_and_keeps_report_order(receiv
 
 
 
+def test_unexpected_worker_failure_cancels_and_joins_sibling_deliveries(
+    receiver, monkeypatch
+) -> None:
+    base, _state = receiver
+    sibling_started = asyncio.Event()
+    sibling_cancelled = asyncio.Event()
+
+    async def fail_one_worker(response):
+        event_id = response.request.headers["X-Event-ID"]
+        if event_id == "evt_sibling":
+            sibling_started.set()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                sibling_cancelled.set()
+        if event_id == "evt_boom":
+            await sibling_started.wait()
+            raise RuntimeError("unexpected response processing failure")
+        return b'{"ok":true}', None
+
+    monkeypatch.setattr(
+        "hookstorm.runner._read_limited_response_body", fail_one_worker
+    )
+    data = validate_scenario({
+        "version": 1,
+        "name": "cancel sibling on worker error",
+        "delivery": {"concurrency": 2},
+        "events": [
+            {"id": "boom", "event_id": "evt_boom", "payload": {}},
+            {"id": "sibling", "event_id": "evt_sibling", "payload": {}},
+        ],
+    })
+
+    async def exercise() -> None:
+        with pytest.raises(
+            RuntimeError, match="unexpected response processing failure"
+        ):
+            await run_scenario(data, f"{base}/slow")
+        assert sibling_cancelled.is_set()
+
+    asyncio.run(exercise())
+
+
+
 def test_missing_hmac_secret_fails_before_sending_any_requests(receiver, monkeypatch) -> None:
     base, state = receiver
     monkeypatch.delenv("HOOKSTORM_SECRET", raising=False)
