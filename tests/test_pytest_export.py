@@ -23,6 +23,7 @@ def test_rendered_pytest_module_is_valid_python() -> None:
     assert "HOOKSTORM_TARGET" in source
     assert "HOOKSTORM_SECRET" in source
     assert "HOOKSTORM_ALLOW_REMOTE" in source
+    assert "HOOKSTORM_ALLOW_INSECURE_HTTP" in source
     assert "evt_export_1" in source
     assert "pytest.mark.integration" in source
 
