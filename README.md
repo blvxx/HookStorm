@@ -30,6 +30,7 @@ HookStorm sends controlled webhook traffic to **your own endpoint** and checks r
 | Concurrent event delivery | delivery.concurrency: 1–50 (default: 1) |
 | Per-event scheduling | events[].schedule_after_ms: 0–300,000 ms from run start |
 | Slow receiver / timeout | delivery.timeout_ms |
+| Deterministic client-side transport faults | delivery.fault_injection.connect_error_attempts / response_loss_attempts |
 | Provider-compatible signatures | delivery.signature + signature_provider: generic / stripe / github / shopify / standard_webhooks |
 | Expected HTTP status | expect_status |
 | Nested JSON response assertions | expect_json, expect_duplicate_json |
