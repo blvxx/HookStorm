@@ -423,6 +423,28 @@ def _validate_stored_row_metadata(row: sqlite3.Row, result: dict[str, Any]) -> N
             "Stored run database success does not match its result data"
         )
 
+    metrics = result_metrics(result)
+    for field in ("total_deliveries", "passed", "failed", "attempts"):
+        stored_value = row[field]
+        if (
+            isinstance(stored_value, bool)
+            or not isinstance(stored_value, int)
+            or stored_value != metrics[field]
+        ):
+            raise HistoryError(
+                f"Stored run database {field} does not match its result data"
+            )
+    stored_duration = row["duration_ms"]
+    if (
+        isinstance(stored_duration, bool)
+        or not isinstance(stored_duration, (int, float))
+        or not math.isfinite(float(stored_duration))
+        or round(float(stored_duration), 2) != metrics["duration_ms"]
+    ):
+        raise HistoryError(
+            "Stored run database duration_ms does not match its result data"
+        )
+
 
 def save_run(result: dict[str, Any], path: str | Path | None = None) -> str:
     """Persist a sanitized HookStorm result and return its run ID."""
@@ -529,7 +551,11 @@ def get_run(run_id: str, path: str | Path | None = None) -> dict[str, Any]:
     try:
         _initialize(connection)
         row = connection.execute(
-            "SELECT run_id, scenario, started_at, target, success, result_json FROM runs WHERE run_id = ?",
+            """
+            SELECT run_id, scenario, started_at, target, success,
+                   total_deliveries, passed, failed, attempts, duration_ms, result_json
+            FROM runs WHERE run_id = ?
+            """,
             (run_id,),
         ).fetchone()
         if row is None:
