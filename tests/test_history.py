@@ -483,6 +483,22 @@ def test_load_history_export_rejects_private_fields_by_whitelisting(tmp_path) ->
 
 
 
+def test_history_rejects_success_flag_inconsistent_with_delivery_results() -> None:
+    current = make_result("flagcheck1")
+    current["summary"]["success"] = False
+
+    with pytest.raises(HistoryError, match="summary.success does not match"):
+        compare_results(current, make_result("flagcheck2"))
+
+
+def test_history_rejects_success_flag_inconsistent_with_verification_result() -> None:
+    current = make_result("verifybad1")
+    current["verification"] = {"passed": False}
+
+    with pytest.raises(HistoryError, match="summary.success does not match"):
+        compare_results(current, make_result("verifybad2"))
+
+
 def test_business_state_verification_failure_is_a_history_regression() -> None:
     baseline = make_result("baseline1")
     baseline["verification"] = {
@@ -495,6 +511,7 @@ def test_business_state_verification_failure_is_a_history_regression() -> None:
         "passed": True,
     }
     current = make_result("current1")
+    current["summary"]["success"] = False
     current["verification"] = {
         "method": "GET",
         "target": "http://127.0.0.1:8000/state",
