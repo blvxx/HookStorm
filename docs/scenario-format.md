@@ -124,7 +124,7 @@ JSON object expectations are recursive subset matches: additional object keys ar
 
 ## Built-in request headers
 
-HookStorm sends Content-Type, User-Agent, X-HookStorm-Run, X-Event-ID, X-Event-Type, X-HookStorm-Attempt, and X-HookStorm-Duplicate-Index. Custom headers may not override transport-managed headers or Host, Content-Length, and Transfer-Encoding. Header names are case-insensitive; a scenario that defines the same header more than once with different casing is rejected.
+HookStorm sends Content-Type, User-Agent, X-HookStorm-Run, X-Event-ID, X-Event-Type, X-HookStorm-Attempt, and X-HookStorm-Duplicate-Index. Custom headers may not override transport-managed headers or Host, Content-Length, and Transfer-Encoding. Header names are case-insensitive; a scenario that defines the same header more than once with different casing is rejected. Custom `Content-Type` and `User-Agent` values replace the built-in values case-insensitively rather than creating duplicate fields.
 
 
 ## CI reports
