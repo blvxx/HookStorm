@@ -32,6 +32,8 @@ def _render_attempt(attempt: dict[str, Any], index: int, *, final: bool, passed:
         if injected_fault == "connect_error"
         else "ACK loss"
         if injected_fault == "response_loss"
+        else "Body read error"
+        if injected_fault == "response_body_error"
         else ""
     )
     fault_markup = (
@@ -130,6 +132,8 @@ def render_html(result: dict[str, Any]) -> str:
                 description += "; injected connection fault"
             elif injected_fault == "response_loss":
                 description += "; injected acknowledgement loss"
+            elif injected_fault == "response_body_error":
+                description += "; injected partial response-body read error"
             title = html.escape(description, quote=True)
             waterfall_attempts.append(
                 f"<span class='waterfall-attempt {attempt_state}{fault_class}' "
