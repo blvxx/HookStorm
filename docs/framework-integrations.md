@@ -82,12 +82,14 @@ Both adapters use the same framework-independent `WebhookRecorder`.
 | Accepted body | UTF-8 JSON and `application/*+json` |
 | Encodings | identity, gzip, and deflate |
 | Default size limit | 1 MiB for both wire and decoded body |
+| Default event capacity | 1,000 in-memory records; HTTP 429 when full |
 | Duplicate detection | `X-HookStorm-Run` plus event ID when supplied |
 | Default sensitive-header handling | Authorization, cookies, and signature headers are redacted |
 | Storage | In-memory only; cleared when the process exits |
 | Invalid JSON / duplicate JSON keys | HTTP 400 |
 | Unsupported content type / encoding | HTTP 415 |
 | Body too large | HTTP 413 |
+| Recorder capacity reached | HTTP 429; call `clear()` between test runs |
 
 The recorder preserves the original request bytes in `record.raw_body`, including compressed bytes, while `record.payload` contains decoded JSON. Sensitive headers are redacted in `record.headers` unless you explicitly set `include_sensitive_headers=True`.
 
