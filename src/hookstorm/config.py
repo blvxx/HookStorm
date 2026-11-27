@@ -295,10 +295,14 @@ def _validate_verify_auth(value: Any) -> dict[str, str] | None:
         return {"type": "bearer", "token_env": env_name}
 
     header = value.get("header", "X-API-Key")
-    if not isinstance(header, str) or not re.fullmatch(
-        r"[!#$%&'*+.^_`|~0-9A-Za-z-]+", header
+    if (
+        not isinstance(header, str)
+        or len(header) > 256
+        or not re.fullmatch(r"[!#$%&'*+.^_`|~0-9A-Za-z-]+", header)
     ):
-        raise ScenarioError("verify.auth.header must be a valid HTTP header name")
+        raise ScenarioError(
+            "verify.auth.header must be a valid HTTP header name of at most 256 characters"
+        )
     reserved_headers = {
         "authorization",
         "connection",
