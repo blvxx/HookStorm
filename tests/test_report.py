@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import xml.etree.ElementTree as ET
 
+from hookstorm.config import validate_scenario
 from hookstorm.report import render_html, render_json, render_junit, write_report
 
 
@@ -102,6 +103,47 @@ def test_report_escapes_event_data_in_attributes_and_attempt_notes() -> None:
     assert 'data-search="" onmouseover=' not in html_report
     assert "<script>alert(1)</script>" not in html_report
     assert "&lt;script&gt;alert(1)&lt;/script&gt;" in html_report
+
+
+
+def test_html_report_escapes_single_quotes_in_aria_attributes() -> None:
+    result = {
+        "scenario": "attribute escaping",
+        "target": "http://127.0.0.1/hook",
+        "version": "0.1.0a1",
+        "duration_ms": 1.0,
+        "summary": {"success": True, "passed": 1, "total_deliveries": 1, "attempts": 1},
+        "deliveries": [{
+            "event_type": "invoice.paid",
+            "event_id": "' onmouseover='alert(1)",
+            "duplicate_index": 0,
+            "passed": True,
+            "attempts": [{
+                "status_code": 200,
+                "latency_ms": 1.0,
+                "elapsed_ms": 0.0,
+                "error": None,
+            }],
+        }],
+    }
+
+    accepted = validate_scenario({
+        "version": 1,
+        "name": "quote escaping",
+        "events": [{
+            "id": "invoice.paid",
+            "event_id": result["deliveries"][0]["event_id"],
+            "payload": {},
+        }],
+    })
+    assert accepted["events"][0]["event_id"] == result["deliveries"][0]["event_id"]
+
+    html_report = render_html(result)
+
+    assert "aria-label='Attempt timeline for &#x27; onmouseover=&#x27;alert(1)'" in html_report
+    assert "aria-label='Attempt timing for &#x27; onmouseover=&#x27;alert(1)'" in html_report
+    assert "aria-label='Attempt timeline for ' onmouseover=" not in html_report
+    assert "aria-label='Attempt timing for ' onmouseover=" not in html_report
 
 
 
