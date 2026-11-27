@@ -155,6 +155,16 @@ def test_fastapi_router_records_requests_and_rejects_bad_payloads() -> None:
     small_app = FastAPI()
     small_app.include_router(oversized_integration.router)
 
+    streamed_chunks: list[int] = []
+
+    async def oversized_stream():
+        streamed_chunks.append(1)
+        yield b'{"x":'
+        streamed_chunks.append(2)
+        yield b'"' + (b"x" * 32)
+        streamed_chunks.append(3)
+        yield b'"}'
+
     async def exercise() -> tuple[httpx.Response, httpx.Response, httpx.Response, httpx.Response]:
         async with (
             httpx.AsyncClient(
@@ -183,7 +193,7 @@ def test_fastapi_router_records_requests_and_rejects_bad_payloads() -> None:
             )
             oversized = await small_client.post(
                 "/__hookstorm/webhook",
-                content=b'{"long":"payload"}',
+                content=oversized_stream(),
                 headers=_headers(),
             )
         return first, second, bad, oversized
@@ -195,6 +205,7 @@ def test_fastapi_router_records_requests_and_rejects_bad_payloads() -> None:
     assert second.json()["duplicate"] is True
     assert bad.status_code == 400
     assert oversized.status_code == 413
+    assert streamed_chunks == [1, 2]
     stored_headers = {
         name.lower(): value
         for name, value in integration.recorder.events[0].headers.items()
@@ -232,6 +243,16 @@ def test_flask_endpoint_records_requests_and_returns_http_errors() -> None:
     assert second.json["duplicate"] is True
     assert bad.status_code == 400
     assert recorder.snapshot()["total_events"] == 2
+
+    limited_app = Flask("hookstorm-limited")
+    limited_recorder = register_endpoint(limited_app, max_body_bytes=8)
+    oversized = limited_app.test_client().post(
+        "/__hookstorm/webhook",
+        data=b'{"long":"payload"}',
+        headers=_headers(),
+    )
+    assert oversized.status_code == 413
+    assert limited_recorder.snapshot()["total_events"] == 0
 
 
 def test_framework_adapters_validate_configuration() -> None:
