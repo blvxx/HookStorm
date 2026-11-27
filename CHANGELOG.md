@@ -11,6 +11,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Add a YAML scenario format (version 1) and CLI commands for running and validating scenarios.
 - Add retries, exponential backoff, duplicate deliveries, reverse ordering, scheduling, bounded concurrency, request timeouts, and a run-wide deadline.
 - Add generic HMAC plus Stripe, GitHub, Shopify, and Standard Webhooks v1 request signatures.
+- Add provider event profiles with synthetic payloads, event IDs/types, provider-managed headers, and profile-aware `hookstorm run` / `hookstorm init`.
 - Add deterministic pre-send connection errors and post-processing acknowledgement-loss simulation.
 - Add HTTP status and nested JSON assertions, plus an optional read-only business-state verification probe.
 - Add self-contained HTML, JSON, and JUnit reports.

@@ -36,7 +36,7 @@ The demo receiver binds to `127.0.0.1` only. The command writes a self-contained
 | Assertions | HTTP status, nested JSON, and optional read-only business-state verification |
 | Reports and regression checks | HTML, JSON, JUnit, local SQLite history, portable baselines |
 
-Scenarios use the backwards-compatible `version: 1` YAML format. See the [scenario reference](docs/scenario-format.md) for fields, limits, signatures, and examples.
+Scenarios use the backwards-compatible `version: 1` YAML format. Provider profiles for Stripe, GitHub, Shopify, and Standard Webhooks supply realistic synthetic event shapes and provider headers (`hookstorm run --provider github`, or `hookstorm init --provider stripe`). See the [scenario reference](docs/scenario-format.md) for fields, limits, signatures, and examples.
 
 ## How is HookStorm different?
 

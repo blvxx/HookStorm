@@ -167,3 +167,29 @@ def test_initialize_project_rejects_invalid_retry_and_duplicate_options(
             max_attempts=max_attempts,
             duplicate_count=duplicate_count,
         )
+
+
+
+@pytest.mark.parametrize(
+    ("provider", "expected_event_type"),
+    [
+        ("stripe", "payment_intent.succeeded"),
+        ("github", "issues.opened"),
+        ("shopify", "orders/create"),
+        ("standard_webhooks", "order.created"),
+    ],
+)
+def test_initialize_project_generates_provider_specific_scenario(
+    tmp_path, provider: str, expected_event_type: str
+) -> None:
+    written = initialize_project(
+        root=tmp_path,
+        provider=provider,
+        include_workflow=False,
+    )
+    scenario = load_scenario(written[0])
+
+    assert scenario["provider"] == provider
+    assert scenario["events"][0]["id"] == expected_event_type
+    assert scenario["delivery"]["signature_provider"] == provider
+    assert scenario["delivery"]["signature"] == "valid"

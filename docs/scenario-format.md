@@ -14,6 +14,7 @@ A scenario is a YAML document. It describes events, delivery behavior, and expec
 | events | yes | One to 500 event definitions. Payloads are limited to 1 MiB each. |
 | verify | no | Optional read-only GET probe for checking backend state after all deliveries. |
 | run_timeout_ms | no | Hard wall-clock budget for the entire run; defaults to 3,600,000 ms (60 minutes), range 100–86,400,000 ms (24 hours). |
+| provider | no | Optional `stripe`, `github`, `shopify`, or `standard_webhooks` profile. Supplies synthetic event payload, event ID/type, provider-specific headers, and signed-delivery defaults. Explicit event fields override profile event values. |
 
 Unknown keys and duplicate YAML mapping keys are rejected to catch typos and ambiguous configuration early. Scenarios can be exported with `hookstorm export-pytest`; the generated test embeds the normalized scenario and reads its endpoint from `HOOKSTORM_TARGET` at runtime.
 
@@ -22,6 +23,10 @@ Unknown keys and duplicate YAML mapping keys are rejected to catch typos and amb
 `run_timeout_ms` is a top-level limit covering event scheduling, delivery attempts, retry backoff, response reading, and the optional business-state verification request. Before sending traffic, HookStorm estimates a conservative worst-case request-time budget from event timeouts, delays, retries, duplicates, scheduling offsets, concurrency, and verification timeout. A scenario whose estimate exceeds `run_timeout_ms` is rejected before any request is sent.
 
 The same deadline is enforced while the run is active. If it expires, HookStorm cancels in-flight tasks and reports a CLI error. Cancellation cannot undo a business side effect that the receiver has already committed, so use idempotent test data and isolated endpoints. Increase `run_timeout_ms` deliberately for longer stress scenarios, up to 24 hours. The default budget preserves legacy scenario fingerprints; explicitly choosing a non-default budget changes the fingerprint and is detected by baseline comparisons.
+
+## Provider profiles
+
+A profile can be selected in YAML or at the command line. For example, `hookstorm run scenarios/webhook.yaml --target http://127.0.0.1:8000/webhook --provider github` uses a synthetic GitHub `issues.opened` event, `X-GitHub-Event`, a stable synthetic `X-GitHub-Delivery` UUID, and the GitHub HMAC signature format. `hookstorm init --provider stripe` creates a Stripe-shaped `payment_intent.succeeded` scenario. All profile payloads are synthetic examples; replace them with representative test payloads for your application. Profiles never call provider APIs or create real events.
 
 ## Delivery settings
 
@@ -38,7 +43,7 @@ The same deadline is enforced while the run is active. If it expires, HookStorm 
 | fault_injection.connect_error_attempts | [] | Attempt numbers (1–10) where HookStorm injects a connection error before the request reaches the receiver. |
 | fault_injection.response_loss_attempts | [] | Attempt numbers (1–10) where HookStorm suppresses the receiver's response after the receiver has processed the request, simulating an ambiguous acknowledgement. |
 
-Delivery settings may be global or defined per event. Per-event settings override global settings. The `concurrency` setting is global only. Retries and duplicate deliveries belonging to one event stay sequential; independent events may overlap. Each event's `schedule_after_ms` is measured from the beginning of the run, not from the previous event or from the completion of another request. A scheduled event waits before acquiring a concurrency slot, so a later event with an earlier offset is not blocked by it. The separate `delay_ms` setting remains a wait before every HTTP attempt. The report keeps events in scenario order even when requests finish out of order.
+Delivery settings may be global or defined per event. Per-event settings override global settings. A top-level provider profile selects provider-shaped synthetic events and defaults the signature provider to the same provider with `signature: valid`; explicit delivery settings still override those defaults. Existing scenarios without `provider` retain their previous behavior and fingerprint. The `concurrency` setting is global only. Retries and duplicate deliveries belonging to one event stay sequential; independent events may overlap. Each event's `schedule_after_ms` is measured from the beginning of the run, not from the previous event or from the completion of another request. A scheduled event waits before acquiring a concurrency slot, so a later event with an earlier offset is not blocked by it. The separate `delay_ms` setting remains a wait before every HTTP attempt. The report keeps events in scenario order even when requests finish out of order.
 
 For signature valid or invalid, set `HOOKSTORM_SECRET` in the shell. HookStorm signs the exact compact JSON request bytes sent over HTTP. The default `generic` provider preserves the legacy `X-HookStorm-Signature: sha256=<hex>` format.
 

@@ -2,6 +2,8 @@ from __future__ import annotations
 
 from pathlib import Path
 
+import pytest
+
 from hookstorm.cli import main
 from hookstorm.history import list_runs, save_run
 
@@ -452,3 +454,66 @@ def test_history_compare_cli_exposes_minimum_absolute_latency_delta() -> None:
     ])
     assert args.latency_threshold_pct == 30.0
     assert args.latency_min_delta_ms == 40.0
+
+
+@pytest.mark.parametrize(
+    ("provider", "route", "signature_header", "secret"),
+    [
+        ("stripe", "stripe", "Stripe-Signature", "test-secret"),
+        ("github", "github", "X-Hub-Signature-256", "test-secret"),
+        ("shopify", "shopify", "X-Shopify-Hmac-Sha256", "test-secret"),
+        (
+            "standard_webhooks",
+            "standard",
+            "webhook-signature",
+            "whsec_aG9va3N0b3JtLXRlc3Qtc3RhbmRhcmQtd2ViaG9va3Mtc2VjcmV0",
+        ),
+    ],
+)
+def test_run_provider_flag_sends_valid_provider_signature(
+    receiver, tmp_path, monkeypatch, capsys,
+    provider: str, route: str, signature_header: str, secret: str,
+) -> None:
+    base, state = receiver
+    scenario = _scenario_file(tmp_path)
+    monkeypatch.setenv("HOOKSTORM_SECRET", secret)
+
+    assert main([
+        "run",
+        scenario,
+        "--target",
+        f"{base}/signature/{route}",
+        "--provider",
+        provider,
+        "--no-history",
+        "--format",
+        "json",
+    ]) == 0
+
+    output = capsys.readouterr().out
+    assert f'"signature_provider": "{provider}"' in output
+    assert state["requests"][0]["headers"].get(signature_header)
+    if provider == "github":
+        assert state["requests"][0]["headers"]["X-GitHub-Event"] == "ping"
+        assert state["requests"][0]["headers"]["X-GitHub-Delivery"]
+    if provider == "shopify":
+        assert state["requests"][0]["headers"]["X-Shopify-Topic"] == "ping"
+        assert state["requests"][0]["headers"]["X-Shopify-Webhook-Id"]
+    if provider == "standard_webhooks":
+        assert state["requests"][0]["headers"]["webhook-id"] == "evt_cli_history"
+
+
+
+
+def test_init_provider_flag_generates_a_provider_profile(tmp_path, monkeypatch, capsys) -> None:
+    from hookstorm.config import load_scenario
+
+    monkeypatch.chdir(tmp_path)
+    assert main(["init", "--provider", "stripe", "--no-workflow"]) == 0
+    scenario = load_scenario(tmp_path / "scenarios" / "webhook.yaml")
+
+    assert scenario["provider"] == "stripe"
+    assert scenario["delivery"]["signature_provider"] == "stripe"
+    assert scenario["events"][0]["id"] == "payment_intent.succeeded"
+    assert scenario["events"][0]["payload"]["object"] == "event"
+    capsys.readouterr()

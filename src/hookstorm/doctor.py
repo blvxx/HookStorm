@@ -97,8 +97,8 @@ def build_preflight_document(
 
 def _scenario_requires_secret(scenario: dict) -> bool:
     defaults = {
-        "signature": "none",
-        "signature_provider": "generic",
+        "signature": "valid" if scenario.get("provider") else "none",
+        "signature_provider": scenario.get("provider", "generic"),
         "signature_timestamp_offset_seconds": 0,
         "timeout_ms": 5_000,
         "duplicate_count": 0,
@@ -115,8 +115,8 @@ def _scenario_requires_secret(scenario: dict) -> bool:
 
 def _scenario_uses_standard_webhooks(scenario: dict) -> bool:
     defaults = {
-        "signature": "none",
-        "signature_provider": "generic",
+        "signature": "valid" if scenario.get("provider") else "none",
+        "signature_provider": scenario.get("provider", "generic"),
         "signature_timestamp_offset_seconds": 0,
         "timeout_ms": 5_000,
         "duplicate_count": 0,

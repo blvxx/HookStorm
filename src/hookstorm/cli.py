@@ -24,6 +24,7 @@ from hookstorm.history import (
     save_run,
 )
 from hookstorm.pytest_export import write_pytest
+from hookstorm.provider_profiles import provider_event
 from hookstorm.report import render_json, write_report
 from hookstorm.runner import run_scenario
 from hookstorm.scaffold import initialize_project
@@ -49,6 +50,8 @@ def _parser() -> argparse.ArgumentParser:
     init.add_argument("--workflow-path", default=".github/workflows/webhook-regression.yml")
     init.add_argument(
         "--signature-provider",
+        "--provider",
+        dest="signature_provider",
         choices=("generic", "stripe", "github", "shopify", "standard_webhooks"),
         help="webhook signature format (prompted in an interactive terminal; defaults to generic)",
     )
@@ -76,6 +79,11 @@ def _parser() -> argparse.ArgumentParser:
     run = subparsers.add_parser("run", help="execute a YAML scenario against a webhook endpoint")
     run.add_argument("scenario", help="path to a scenario YAML file")
     run.add_argument("--target", required=True, help="webhook URL; localhost only unless opted in")
+    run.add_argument(
+        "--provider",
+        choices=("stripe", "github", "shopify", "standard_webhooks"),
+        help="apply provider-specific event, header, and signature defaults",
+    )
     run.add_argument("--allow-remote", action="store_true", help="allow a remote HTTPS target")
     run.add_argument(
         "--allow-insecure-http",
@@ -435,16 +443,21 @@ def _init_command(args: argparse.Namespace) -> int:
             "generic",
         )
     signature_provider = signature_provider or "generic"
+    profile_defaults = (
+        provider_event(signature_provider)
+        if signature_provider != "generic"
+        else {"id": "test.ping", "event_id": "evt_hookstorm_init_001"}
+    )
 
     event_type = args.event_type
     if event_type is None and interactive:
-        event_type = _prompt_text("Event type", "test.ping")
-    event_type = event_type or "test.ping"
+        event_type = _prompt_text("Event type", profile_defaults["id"])
+    event_type = event_type or profile_defaults["id"]
 
     event_id = args.event_id
     if event_id is None and interactive:
-        event_id = _prompt_text("Event ID", "evt_hookstorm_init_001")
-    event_id = event_id or "evt_hookstorm_init_001"
+        event_id = _prompt_text("Event ID", profile_defaults["event_id"])
+    event_id = event_id or profile_defaults["event_id"]
 
     max_attempts = args.max_attempts
     if max_attempts is None and interactive:
@@ -462,6 +475,7 @@ def _init_command(args: argparse.Namespace) -> int:
 
     written = initialize_project(
         scenario_path=args.scenario_path,
+        provider=signature_provider if signature_provider != "generic" else None,
         workflow_path=args.workflow_path,
         event_type=event_type,
         event_id=event_id,
@@ -551,7 +565,10 @@ def main(argv: Sequence[str] | None = None) -> int:
             if args.history_command == "export":
                 return _history_export_command(args)
 
-        scenario = load_scenario(args.scenario)
+        scenario = load_scenario(
+            args.scenario,
+            provider=getattr(args, "provider", None) if args.command == "run" else None,
+        )
         if args.command == "validate":
             print(f"Scenario valid: {scenario['name']} ({len(scenario['events'])} event(s))")
             return 0

@@ -11,6 +11,8 @@ from urllib.parse import urlsplit
 
 import yaml
 
+from hookstorm.provider_profiles import PROVIDER_NAMES, provider_event, provider_headers
+
 
 class ScenarioError(ValueError):
     """Raised when a scenario file is invalid."""
@@ -44,7 +46,7 @@ _DEFAULT_RUN_TIMEOUT_MS = 3_600_000
 _MAX_RUN_TIMEOUT_MS = 86_400_000
 
 _ALLOWED_TOP_LEVEL = {
-    "version", "name", "description", "delivery", "retry", "events", "verify", "run_timeout_ms"
+    "version", "name", "description", "delivery", "retry", "events", "verify", "run_timeout_ms", "provider"
 }
 _ALLOWED_DELIVERY = {
     "order", "duplicate_count", "delay_ms", "timeout_ms", "signature", "concurrency",
@@ -354,7 +356,23 @@ def validate_scenario(data: Any) -> dict[str, Any]:
     if not isinstance(description, str):
         raise ScenarioError("description must be a string")
 
-    delivery = _validate_delivery(data.get("delivery", {}), "delivery")
+    provider = data.get("provider")
+    if provider is not None and (
+        not isinstance(provider, str) or provider not in PROVIDER_NAMES
+    ):
+        raise ScenarioError(
+            "provider must be stripe, github, shopify, or standard_webhooks"
+        )
+
+    raw_delivery = data.get("delivery", {})
+    if raw_delivery is None:
+        raw_delivery = {}
+    delivery = _validate_delivery(raw_delivery, "delivery")
+    if provider is not None and isinstance(raw_delivery, dict):
+        if "signature_provider" not in raw_delivery:
+            delivery["signature_provider"] = provider
+        if "signature" not in raw_delivery:
+            delivery["signature"] = "valid"
     retry = _validate_retry(data.get("retry"))
     verify = _validate_verify(data.get("verify"))
     events = data.get("events")
@@ -370,8 +388,22 @@ def validate_scenario(data: Any) -> dict[str, Any]:
         if not isinstance(event, dict):
             raise ScenarioError(f"{where} must be a mapping")
         _unknown_keys(event, _ALLOWED_EVENT, where)
-        event_id = event.get("event_id")
-        event_type = event.get("id")
+        profile_event = (
+            provider_event(
+                provider,
+                index,
+                event_type=event.get("id"),
+                event_id=event.get("event_id"),
+            )
+            if provider is not None
+            else None
+        )
+        event_id = event.get(
+            "event_id", profile_event["event_id"] if profile_event is not None else None
+        )
+        event_type = event.get(
+            "id", profile_event["id"] if profile_event is not None else None
+        )
         if (
             not isinstance(event_id, str)
             or not event_id.strip()
@@ -389,7 +421,9 @@ def validate_scenario(data: Any) -> dict[str, Any]:
         if event_id in seen_event_ids:
             raise ScenarioError(f"{where}.event_id must be unique within a scenario")
         seen_event_ids.add(event_id)
-        payload = event.get("payload", {})
+        payload = event.get(
+            "payload", profile_event["payload"] if profile_event is not None else {}
+        )
         try:
             encoded_payload = json.dumps(
                 payload, ensure_ascii=False, separators=(",", ":"), allow_nan=False
@@ -398,13 +432,13 @@ def validate_scenario(data: Any) -> dict[str, Any]:
             raise ScenarioError(f"{where}.payload must be valid JSON-compatible data") from exc
         if len(encoded_payload) > 1_048_576:
             raise ScenarioError(f"{where}.payload exceeds the 1 MiB limit")
-        headers = event.get("headers", {})
-        if not isinstance(headers, dict) or any(
+        custom_headers = event.get("headers", {})
+        if not isinstance(custom_headers, dict) or any(
             not isinstance(key, str) or not isinstance(value, str)
-            for key, value in headers.items()
+            for key, value in custom_headers.items()
         ):
             raise ScenarioError(f"{where}.headers must be a mapping of string keys to string values")
-        for key, value in headers.items():
+        for key, value in custom_headers.items():
             if (
                 not re.fullmatch(r"[!#$%&'*+._^|~0-9A-Za-z-]+", key)
                 or not _is_safe_header_value(value)
@@ -419,12 +453,32 @@ def validate_scenario(data: Any) -> dict[str, Any]:
                 "x-hookstorm-signature", "stripe-signature",
                 "x-hub-signature-256", "x-shopify-hmac-sha256",
                 "webhook-id", "webhook-timestamp", "webhook-signature",
+                "x-github-event", "x-github-delivery", "x-shopify-topic",
+                "x-shopify-shop-domain", "x-shopify-webhook-id",
             }:
                 raise ScenarioError(f"{where}.headers may not override {key}")
+        profile_headers = (
+            provider_headers(provider, event_type, event_id)
+            if provider is not None
+            else {}
+        )
+        headers = {**custom_headers, **profile_headers}
         header_bytes = sum(len(key) + len(value) for key, value in headers.items())
         if len(headers) > 64 or header_bytes > 16_384:
             raise ScenarioError(f"{where}.headers exceed the 64-header / 16 KiB limit")
-        event_delivery = _validate_delivery(event.get("delivery", {}), f"{where}.delivery", allow_order=False)
+        raw_event_delivery = event.get("delivery", {})
+        if raw_event_delivery is None:
+            raw_event_delivery = {}
+        event_delivery = _validate_delivery(
+            raw_event_delivery, f"{where}.delivery", allow_order=False
+        )
+        if provider is not None and isinstance(raw_event_delivery, dict):
+            if "signature_provider" not in raw_event_delivery:
+                event_delivery["signature_provider"] = delivery.get(
+                    "signature_provider", provider
+                )
+            if "signature" not in raw_event_delivery:
+                event_delivery["signature"] = delivery.get("signature", "valid")
         expect_status = event.get("expect_status", [200, 201, 202, 204])
         if isinstance(expect_status, int) and not isinstance(expect_status, bool):
             expect_status = [expect_status]
@@ -482,7 +536,9 @@ def validate_scenario(data: Any) -> dict[str, Any]:
                     f"events[].delivery.fault_injection.{field} entries must not exceed "
                     f"retry.max_attempts={retry['max_attempts']}"
                 )
-        signature_provider = effective_delivery.get("signature_provider", "generic")
+        signature_provider = effective_delivery.get(
+            "signature_provider", provider or "generic"
+        )
         timestamp_offset = effective_delivery.get("signature_timestamp_offset_seconds", 0)
         if timestamp_offset and signature_provider not in {"stripe", "standard_webhooks"}:
             raise ScenarioError(
@@ -514,7 +570,7 @@ def validate_scenario(data: Any) -> dict[str, Any]:
             "increase run_timeout_ms or reduce timeouts, retries, delays, duplicates, or events"
         )
 
-    return {
+    normalized_scenario = {
         "version": 1,
         "run_timeout_ms": run_timeout_ms,
         "name": name.strip(),
@@ -524,6 +580,9 @@ def validate_scenario(data: Any) -> dict[str, Any]:
         "events": normalized_events,
         "verify": verify,
     }
+    if provider is not None:
+        normalized_scenario["provider"] = provider
+    return normalized_scenario
 
 
 def scenario_fingerprint(scenario: dict[str, Any]) -> str:
@@ -538,6 +597,8 @@ def scenario_fingerprint(scenario: dict[str, Any]) -> str:
         key: scenario.get(key)
         for key in ("version", "delivery", "retry", "events", "verify")
     }
+    if "provider" in scenario:
+        behavior["provider"] = scenario["provider"]
     # Preserve fingerprints created before run_timeout_ms was introduced when the
     # effective budget is unchanged; explicit non-default budgets remain behavior-defining.
     run_timeout_ms = scenario.get("run_timeout_ms", _DEFAULT_RUN_TIMEOUT_MS)
@@ -556,8 +617,10 @@ def scenario_fingerprint(scenario: dict[str, Any]) -> str:
     return hashlib.sha256(canonical).hexdigest()
 
 
-def load_scenario(path: str | Path) -> dict[str, Any]:
-    """Load a scenario from a YAML file using the safe loader."""
+def load_scenario(
+    path: str | Path, *, provider: str | None = None
+) -> dict[str, Any]:
+    """Load a scenario from YAML, optionally selecting a provider profile."""
     scenario_path = Path(path)
     try:
         raw = yaml.load(
@@ -570,4 +633,8 @@ def load_scenario(path: str | Path) -> dict[str, Any]:
         raise ScenarioError(f"Invalid YAML in {scenario_path}: {exc}") from exc
     except OSError as exc:
         raise ScenarioError(f"Cannot read scenario file {scenario_path}: {exc}") from exc
+    if provider is not None:
+        if not isinstance(raw, dict):
+            raise ScenarioError("Scenario root must be a YAML mapping")
+        raw = {**raw, "provider": provider}
     return validate_scenario(raw)

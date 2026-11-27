@@ -6,6 +6,10 @@ import json
 import re
 from pathlib import Path, PureWindowsPath
 
+import yaml
+
+from hookstorm.provider_profiles import PROVIDER_NAMES, provider_event
+
 HOOKSTORM_INSTALL_REF = "cb29c9aaeefcfa4e885ef78b511ec28e0c010946"
 _SIGNATURE_PROVIDERS = {"generic", "stripe", "github", "shopify", "standard_webhooks"}
 _SAFE_PATH = re.compile(r"^[A-Za-z0-9._/-]+$")
@@ -37,35 +41,49 @@ def _bounded_integer(value: object, label: str, *, minimum: int, maximum: int) -
 
 def render_scenario(
     *,
-    event_type: str = "test.ping",
-    event_id: str = "evt_hookstorm_init_001",
+    event_type: str | None = None,
+    event_id: str | None = None,
     signature_provider: str = "generic",
+    provider: str | None = None,
     max_attempts: int = 1,
     duplicate_count: int = 0,
 ) -> str:
     if signature_provider not in _SIGNATURE_PROVIDERS:
         choices = ", ".join(sorted(_SIGNATURE_PROVIDERS))
         raise ValueError(f"Unsupported signature provider '{signature_provider}'. Choose: {choices}")
+    if provider is not None and provider not in PROVIDER_NAMES:
+        raise ValueError(f"Unsupported provider profile '{provider}'")
+    if provider is not None:
+        if signature_provider not in {"generic", provider}:
+            raise ValueError("provider and signature_provider must match when a provider profile is selected")
+        signature_provider = provider
+        profile_event = provider_event(provider, 0, event_type=event_type, event_id=event_id)
+        event_type = profile_event["id"]
+        event_id = profile_event["event_id"]
+        payload = profile_event["payload"]
+    else:
+        event_type = event_type or "test.ping"
+        event_id = event_id or "evt_hookstorm_init_001"
+        payload = {"test": True, "source": "hookstorm"}
     if not event_type or len(event_type) > 256 or any(ch in event_type for ch in "\r\n"):
         raise ValueError("event type must contain 1–256 characters and no line breaks")
     if not event_id or len(event_id) > 256 or any(ch in event_id for ch in "\r\n"):
         raise ValueError("event ID must contain 1–256 characters and no line breaks")
-    max_attempts = _bounded_integer(
-        max_attempts, "max_attempts", minimum=1, maximum=10
-    )
-    duplicate_count = _bounded_integer(
-        duplicate_count, "duplicate_count", minimum=0, maximum=100
-    )
+    max_attempts = _bounded_integer(max_attempts, "max_attempts", minimum=1, maximum=10)
+    duplicate_count = _bounded_integer(duplicate_count, "duplicate_count", minimum=0, maximum=100)
 
-    duplicate_setting = (
-        f"  duplicate_count: {duplicate_count}\n" if duplicate_count else ""
-    )
+    duplicate_setting = f"  duplicate_count: {duplicate_count}\n" if duplicate_count else ""
     backoff_setting = "  backoff_ms: 100\n" if max_attempts > 1 else ""
+    provider_setting = f"provider: {provider}\n" if provider is not None else ""
+    payload_yaml = yaml.safe_dump(
+        payload, allow_unicode=True, sort_keys=False, default_flow_style=False
+    ).rstrip()
+    payload_block = "\n".join("      " + line for line in payload_yaml.splitlines())
 
     return f"""version: 1
 name: HookStorm webhook contract
 description: Replace the sample event and assertions with your staging webhook contract.
-delivery:
+{provider_setting}delivery:
   signature: valid
   signature_provider: {signature_provider}
   timeout_ms: 5000
@@ -75,13 +93,11 @@ delivery:
   - id: {json.dumps(event_type, ensure_ascii=False)}
     event_id: {json.dumps(event_id, ensure_ascii=False)}
     payload:
-      test: true
-      source: hookstorm
+{payload_block}
     expect_status: [200, 201, 202]
     expect_json:
       accepted: true
 """
-
 
 def render_workflow(*, scenario_path: str, workflow_path: str) -> str:
     scenario = json.dumps(scenario_path, ensure_ascii=False)
@@ -235,9 +251,10 @@ def initialize_project(
     root: str | Path = ".",
     scenario_path: str = "scenarios/webhook.yaml",
     workflow_path: str = ".github/workflows/webhook-regression.yml",
-    event_type: str = "test.ping",
-    event_id: str = "evt_hookstorm_init_001",
+    event_type: str | None = None,
+    event_id: str | None = None,
     signature_provider: str = "generic",
+    provider: str | None = None,
     max_attempts: int = 1,
     duplicate_count: int = 0,
     include_workflow: bool = True,
@@ -266,6 +283,7 @@ def initialize_project(
         event_type=event_type,
         event_id=event_id,
         signature_provider=signature_provider,
+        provider=provider,
         max_attempts=max_attempts,
         duplicate_count=duplicate_count,
     ))]

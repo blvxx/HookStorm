@@ -568,3 +568,68 @@ def test_fault_injection_attempts_cannot_exceed_retry_budget() -> None:
 
     with pytest.raises(ScenarioError, match="must not exceed retry.max_attempts=2"):
         validate_scenario(data)
+
+
+
+@pytest.mark.parametrize(
+    ("provider", "event_type", "prefix"),
+    [
+        ("stripe", "payment_intent.succeeded", "evt_hookstorm_stripe_"),
+        ("github", "issues.opened", "evt_hookstorm_github_"),
+        ("shopify", "orders/create", "evt_hookstorm_shopify_"),
+        ("standard_webhooks", "order.created", "evt_hookstorm_standard_"),
+    ],
+)
+def test_provider_profile_fills_event_defaults_and_signed_delivery(
+    provider: str, event_type: str, prefix: str
+) -> None:
+    data = valid_scenario()
+    data.pop("events")
+    data["provider"] = provider
+    data["events"] = [{}]
+
+    normalized = validate_scenario(data)
+    event = normalized["events"][0]
+
+    assert normalized["provider"] == provider
+    assert normalized["delivery"]["signature"] == "valid"
+    assert normalized["delivery"]["signature_provider"] == provider
+    assert event["id"] == event_type
+    assert event["event_id"].startswith(prefix)
+    assert event["payload"]
+    assert normalized["events"][0]["delivery"]["signature"] == "valid"
+    assert normalized["events"][0]["delivery"]["signature_provider"] == provider
+
+
+def test_provider_profile_respects_explicit_event_overrides() -> None:
+    data = valid_scenario()
+    data["provider"] = "github"
+    data["events"][0]["id"] = "pull_request.opened"
+    data["events"][0]["event_id"] = "evt_custom_github"
+    data["events"][0]["payload"] = {"action": "opened", "pull_request": {"number": 7}}
+
+    normalized = validate_scenario(data)
+    event = normalized["events"][0]
+
+    assert event["id"] == "pull_request.opened"
+    assert event["event_id"] == "evt_custom_github"
+    assert event["payload"] == {"action": "opened", "pull_request": {"number": 7}}
+    assert event["headers"]["X-GitHub-Event"] == "pull_request"
+    assert "X-GitHub-Delivery" in event["headers"]
+
+
+def test_provider_profile_requires_valid_known_provider() -> None:
+    data = valid_scenario()
+    data["provider"] = "unknown"
+    with pytest.raises(ScenarioError, match="provider must be"):
+        validate_scenario(data)
+
+
+def test_provider_profile_fingerprint_is_behavior_defining_but_legacy_fingerprint_is_stable() -> None:
+    legacy = validate_scenario(valid_scenario())
+    profiled_data = valid_scenario()
+    profiled_data["provider"] = "stripe"
+    profiled = validate_scenario(profiled_data)
+
+    assert scenario_fingerprint(legacy) != scenario_fingerprint(profiled)
+    assert "provider" not in legacy
