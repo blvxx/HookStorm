@@ -290,10 +290,11 @@ class CaptureStore:
                 os.chmod(temporary_name, 0o600)
             os.replace(temporary_name, self.output)
         except Exception:
-            try:
-                os.close(descriptor)
-            except OSError:
-                pass
+            if descriptor >= 0:
+                try:
+                    os.close(descriptor)
+                except OSError:
+                    pass
             try:
                 os.unlink(temporary_name)
             except OSError:
