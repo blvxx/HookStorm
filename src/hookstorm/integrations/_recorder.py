@@ -300,9 +300,9 @@ class WebhookRecorder:
         )
         with self._lock:
             self._ensure_capacity()
-            self._ensure_body_capacity(len(raw_body))
+            self._ensure_body_capacity(len(raw_body) + len(decoded))
             self._events.append(event)
-            self._total_body_bytes += len(raw_body)
+            self._total_body_bytes += len(raw_body) + len(decoded)
         return event
 
     def _ensure_capacity(self) -> None:
