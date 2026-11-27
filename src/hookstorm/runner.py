@@ -289,6 +289,7 @@ async def run_scenario(
                 "X-Event-Type": event["id"],
             }
             reserved = {
+                "accept-encoding",
                 "x-hookstorm-run",
                 "x-event-id",
                 "x-event-type",
