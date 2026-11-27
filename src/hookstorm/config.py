@@ -488,8 +488,13 @@ def scenario_fingerprint(scenario: dict[str, Any]) -> str:
     """
     behavior = {
         key: scenario.get(key)
-        for key in ("version", "run_timeout_ms", "delivery", "retry", "events", "verify")
+        for key in ("version", "delivery", "retry", "events", "verify")
     }
+    # Preserve fingerprints created before run_timeout_ms was introduced when the
+    # effective budget is unchanged; explicit non-default budgets remain behavior-defining.
+    run_timeout_ms = scenario.get("run_timeout_ms", _DEFAULT_RUN_TIMEOUT_MS)
+    if run_timeout_ms != _DEFAULT_RUN_TIMEOUT_MS:
+        behavior["run_timeout_ms"] = run_timeout_ms
     try:
         canonical = json.dumps(
             behavior,
