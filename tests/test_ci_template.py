@@ -4,6 +4,8 @@ import shutil
 import subprocess
 from pathlib import Path
 
+from hookstorm.scaffold import HOOKSTORM_INSTALL_REF
+
 ROOT = Path(__file__).resolve().parents[1]
 WORKFLOW_PATH = ROOT / "examples" / "ci" / "webhook-regression.yml"
 
@@ -35,8 +37,9 @@ def test_external_workflow_template_has_safe_triggers_and_permissions() -> None:
     assert "--allow-insecure-http" in preflight["run"]
     run_step = next(step for step in job["steps"] if step.get("name") == "Run webhook scenario and compare with baseline")
     assert "--allow-insecure-http" in run_step["run"]
-    assert "b163b2a4af28176bae5442eeb4e6c41e7ea326cb" in WORKFLOW_PATH.read_text(encoding="utf-8")
-    assert "7ab9ffb6ab510b4067916a83068bf60f8c010a70" not in WORKFLOW_PATH.read_text(encoding="utf-8")
+    workflow_text = WORKFLOW_PATH.read_text(encoding="utf-8")
+    assert HOOKSTORM_INSTALL_REF in workflow_text
+    assert "7ab9ffb6ab510b4067916a83068bf60f8c010a70" not in workflow_text
 
     step_uses = [step.get("uses", "") for step in job["steps"]]
     assert any("actions/cache/restore@" in value for value in step_uses)
