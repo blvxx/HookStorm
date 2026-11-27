@@ -387,6 +387,27 @@ def _validate_run_result(result: dict[str, Any], label: str) -> None:
         )
 
 
+def _validate_stored_row_metadata(row: sqlite3.Row, result: dict[str, Any]) -> None:
+    """Ensure indexed SQLite columns still agree with the validated JSON result."""
+    for field in ("run_id", "scenario", "started_at", "target"):
+        if row[field] != result[field]:
+            raise HistoryError(
+                f"Stored run database {field} does not match its result data"
+            )
+
+    stored_success = row["success"]
+    if (
+        isinstance(stored_success, bool)
+        or not isinstance(stored_success, int)
+        or stored_success not in (0, 1)
+    ):
+        raise HistoryError("Stored run database success must be 0 or 1")
+    if bool(stored_success) is not result["summary"]["success"]:
+        raise HistoryError(
+            "Stored run database success does not match its result data"
+        )
+
+
 def save_run(result: dict[str, Any], path: str | Path | None = None) -> str:
     """Persist a sanitized HookStorm result and return its run ID."""
     required = ("run_id", "scenario", "started_at", "target", "summary", "deliveries")
@@ -473,6 +494,7 @@ def list_runs(
             item = dict(row)
             result = json.loads(item.pop("result_json"))
             _validate_run_result(result, "Stored run")
+            _validate_stored_row_metadata(row, result)
             item["success"] = bool(item["success"])
             item.update(result_metrics(result))
             output.append(item)
@@ -498,6 +520,7 @@ def get_run(run_id: str, path: str | Path | None = None) -> dict[str, Any]:
             raise HistoryError(f"Run '{run_id}' was not found in local history")
         result = json.loads(row["result_json"])
         _validate_run_result(result, "Stored run")
+        _validate_stored_row_metadata(row, result)
         result["history"] = {
             "success": bool(row["success"]),
             "database_run_id": row["run_id"],
