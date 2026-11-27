@@ -9,7 +9,7 @@
 - Enforce Ruff formatting in CI and pin the CI workflow actions to full commit SHAs.
 - Require a separate explicit `--allow-insecure-http` opt-in for non-loopback HTTP targets, including generated pytest and staging workflow integrations.
 - Stream webhook and verification responses with a 2 MiB decoded-body cap to bound memory use on untrusted endpoints.
-- Refresh generated and copy-ready staging workflow pins to a revision that supports the explicit insecure HTTP opt-in.
+- Refresh generated and copy-ready staging workflow pins to the revision containing the scenario runtime deadline and URL validation hardening.
 
 ## 0.1.0a1 — First public alpha preview
 
