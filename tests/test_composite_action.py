@@ -48,3 +48,13 @@ def test_consumer_example_pins_hookstorm_and_github_actions() -> None:
     assert re.search(r"actions/upload-artifact@[0-9a-f]{40}", workflow)
     assert "HOOKSTORM_SECRET" in workflow
     assert "secrets.HOOKSTORM_SECRET" in workflow
+
+def test_repository_self_test_invokes_local_composite_action() -> None:
+    workflow = (
+        ROOT / ".github" / "workflows" / "composite-action-smoke.yml"
+    ).read_text(encoding="utf-8")
+    assert "uses: ./.github/actions/run" in workflow
+    assert "examples/payment-retry.yaml" in workflow
+    assert "connect-preflight: \"true\"" in workflow
+    assert "actions/setup-python@" in workflow
+    assert "actions/upload-artifact@" in workflow
