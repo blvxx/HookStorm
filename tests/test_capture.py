@@ -142,6 +142,57 @@ def test_sensitive_headers_are_saved_only_as_non_replayed_capture_metadata(tmp_p
     )
 
 
+def test_capture_http_statuses_distinguish_quota_size_and_storage_errors(
+    tmp_path, monkeypatch
+) -> None:
+    server, store, thread, output = _start_server(tmp_path, max_events=1)
+    try:
+        port = server.server_address[1]
+        status, _ = _send_json(port, {"first": True})
+        assert status == 202
+
+        status, body = _send_json(port, {"second": True})
+        assert status == 429
+        assert "event limit" in body["message"]
+        assert len(store.events) == 1
+    finally:
+        _stop_server(server, thread)
+
+    import hookstorm.capture as capture_module
+
+    size_server, size_store, size_thread, size_output = _start_server(
+        tmp_path / "size", max_events=2
+    )
+    monkeypatch.setattr(capture_module, "MAX_CAPTURE_SCENARIO_BYTES", 1)
+    try:
+        status, body = _send_json(size_server.server_address[1], {"payload": "too large"})
+        assert status == 413
+        assert "total body limit" in body["message"]
+        assert size_store.events == []
+        assert not size_output.exists()
+    finally:
+        _stop_server(size_server, size_thread)
+
+    storage_server, storage_store, storage_thread, storage_output = _start_server(
+        tmp_path / "storage"
+    )
+
+    def fail_replace(_source, _destination):
+        raise OSError("simulated disk error")
+
+    monkeypatch.setattr(capture_module.os, "replace", fail_replace)
+    try:
+        status, body = _send_json(storage_server.server_address[1], {"stored": False})
+        assert status == 500
+        assert body["message"] == "capture could not be persisted"
+        assert storage_store.events == []
+        assert storage_store.capture_events == []
+        assert storage_store.total_body_bytes == 0
+        assert not storage_output.exists()
+    finally:
+        _stop_server(storage_server, storage_thread)
+
+
 def test_capture_infers_github_event_action_and_preserves_source_id(tmp_path) -> None:
     server, _, thread, output = _start_server(tmp_path)
     try:
