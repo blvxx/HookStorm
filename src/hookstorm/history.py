@@ -10,6 +10,7 @@ from pathlib import Path
 from typing import Any
 
 _DEFAULT_DB = Path.home() / ".hookstorm" / "history.sqlite3"
+_SCHEMA_VERSION = 1
 
 
 class HistoryError(RuntimeError):
@@ -52,9 +53,9 @@ def _connect(path: str | Path | None = None) -> sqlite3.Connection:
                 finally:
                     os.close(descriptor)
 
-        connection = sqlite3.connect(location, timeout=10)
+        connection = sqlite3.connect(location, timeout=30)
         connection.row_factory = sqlite3.Row
-        connection.execute("PRAGMA busy_timeout = 10000")
+        connection.execute("PRAGMA busy_timeout = 30000")
         return connection
     except (OSError, sqlite3.Error) as exc:
         raise HistoryError(f"Cannot open HookStorm history database: {exc}") from exc
@@ -82,28 +83,56 @@ def _write_private_text(path: Path, content: str) -> None:
 
 
 def _initialize(connection: sqlite3.Connection) -> None:
-    connection.execute(
-        """
-        CREATE TABLE IF NOT EXISTS runs (
-            run_id TEXT PRIMARY KEY,
-            scenario TEXT NOT NULL,
-            started_at TEXT NOT NULL,
-            target TEXT NOT NULL,
-            success INTEGER NOT NULL,
-            total_deliveries INTEGER NOT NULL,
-            passed INTEGER NOT NULL,
-            failed INTEGER NOT NULL,
-            attempts INTEGER NOT NULL,
-            duration_ms REAL NOT NULL,
-            result_json TEXT NOT NULL
-        )
-        """
-    )
-    connection.execute(
-        "CREATE INDEX IF NOT EXISTS idx_runs_scenario_started "
-        "ON runs(scenario, started_at DESC)"
-    )
-    connection.commit()
+    """Create or migrate the local history schema under a write lock.
+
+    Version 0 is the unversioned schema shipped before migrations were added.
+    Its runs table already has the version 1 columns, so migration 1 only
+    records the schema version and preserves every stored run unchanged.
+    """
+    try:
+        connection.execute("BEGIN IMMEDIATE")
+        version = int(connection.execute("PRAGMA user_version").fetchone()[0])
+        if version > _SCHEMA_VERSION:
+            raise HistoryError(
+                f"History database schema version {version} is newer than "
+                f"this HookStorm version supports ({_SCHEMA_VERSION}). Upgrade HookStorm."
+            )
+        if version < 0:
+            raise HistoryError(f"History database has an invalid schema version: {version}")
+
+        if version == 0:
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS runs (
+                    run_id TEXT PRIMARY KEY,
+                    scenario TEXT NOT NULL,
+                    started_at TEXT NOT NULL,
+                    target TEXT NOT NULL,
+                    success INTEGER NOT NULL,
+                    total_deliveries INTEGER NOT NULL,
+                    passed INTEGER NOT NULL,
+                    failed INTEGER NOT NULL,
+                    attempts INTEGER NOT NULL,
+                    duration_ms REAL NOT NULL,
+                    result_json TEXT NOT NULL
+                )
+                """
+            )
+            connection.execute(
+                "CREATE INDEX IF NOT EXISTS idx_runs_scenario_started "
+                "ON runs(scenario, started_at DESC)"
+            )
+            connection.execute("PRAGMA user_version = 1")
+        elif version == 1:
+            connection.execute(
+                "CREATE INDEX IF NOT EXISTS idx_runs_scenario_started "
+                "ON runs(scenario, started_at DESC)"
+            )
+
+        connection.commit()
+    except Exception:
+        connection.rollback()
+        raise
 
 
 def _latencies(result: dict[str, Any]) -> list[float]:

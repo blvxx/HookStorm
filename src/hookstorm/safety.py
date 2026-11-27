@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+from dataclasses import dataclass
 import ipaddress
 import socket
 from urllib.parse import urlsplit
@@ -76,9 +77,6 @@ def validate_target(
     if not addresses or any(not ipaddress.ip_address(address).is_loopback for address in addresses):
         raise UnsafeTargetError("localhost resolved to a non-loopback address; refusing the request")
     return target.strip()
-
-from dataclasses import dataclass
-
 
 @dataclass(frozen=True)
 class TargetResolution:

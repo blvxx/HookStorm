@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import json
 import math
+import multiprocessing
 import os
+import sqlite3
 import stat
 
 import pytest
@@ -20,6 +22,13 @@ from hookstorm.history import (
     result_metrics,
     save_run,
 )
+
+
+
+
+def _save_concurrent_process_run(database_path: str, index: int) -> str:
+    """Write one independent run from a spawned test process."""
+    return save_run(make_result(f"parallel_run_{index:04d}"), database_path)
 
 
 def make_result(
@@ -697,3 +706,88 @@ def test_history_rejects_unknown_injected_fault_markers(
 
     with pytest.raises(HistoryError, match="injected_fault"):
         save_run(result, tmp_path / "history.sqlite3")
+
+
+def test_legacy_history_database_migrates_without_losing_rows(tmp_path) -> None:
+    database = tmp_path / "legacy-history.sqlite3"
+    legacy = make_result("legacy_run_0001")
+    sanitized = history_module._sanitize_result(legacy)
+    metrics = result_metrics(sanitized)
+
+    connection = sqlite3.connect(database)
+    connection.execute(
+        """
+        CREATE TABLE runs (
+            run_id TEXT PRIMARY KEY,
+            scenario TEXT NOT NULL,
+            started_at TEXT NOT NULL,
+            target TEXT NOT NULL,
+            success INTEGER NOT NULL,
+            total_deliveries INTEGER NOT NULL,
+            passed INTEGER NOT NULL,
+            failed INTEGER NOT NULL,
+            attempts INTEGER NOT NULL,
+            duration_ms REAL NOT NULL,
+            result_json TEXT NOT NULL
+        )
+        """
+    )
+    connection.execute(
+        """
+        INSERT INTO runs (
+            run_id, scenario, started_at, target, success,
+            total_deliveries, passed, failed, attempts, duration_ms, result_json
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            legacy["run_id"],
+            legacy["scenario"],
+            legacy["started_at"],
+            legacy["target"],
+            int(legacy["summary"]["success"]),
+            metrics["total_deliveries"],
+            metrics["passed"],
+            metrics["failed"],
+            metrics["attempts"],
+            metrics["duration_ms"],
+            json.dumps(sanitized),
+        ),
+    )
+    connection.commit()
+    assert connection.execute("PRAGMA user_version").fetchone()[0] == 0
+    connection.close()
+
+    loaded = get_run(legacy["run_id"], database)
+    connection = sqlite3.connect(database)
+    version = connection.execute("PRAGMA user_version").fetchone()[0]
+    connection.close()
+
+    assert version == 1
+    assert loaded["run_id"] == legacy["run_id"]
+    assert loaded["deliveries"] == sanitized["deliveries"]
+
+
+def test_history_rejects_a_database_from_a_newer_schema(tmp_path) -> None:
+    database = tmp_path / "future-history.sqlite3"
+    connection = sqlite3.connect(database)
+    connection.execute("PRAGMA user_version = 99")
+    connection.close()
+
+    with pytest.raises(HistoryError, match="newer than this HookStorm version"):
+        save_run(make_result("unsupported_schema"), database)
+
+
+def test_multiple_processes_can_write_to_the_same_history_database(tmp_path) -> None:
+    database = tmp_path / "concurrent-history.sqlite3"
+    process_context = multiprocessing.get_context("spawn")
+
+    with process_context.Pool(processes=4) as pool:
+        run_ids = pool.starmap(
+            _save_concurrent_process_run,
+            [(str(database), index) for index in range(8)],
+        )
+
+    assert len(run_ids) == 8
+    assert len(set(run_ids)) == 8
+    stored = list_runs(database, limit=20)
+    assert {item["run_id"] for item in stored} == set(run_ids)
