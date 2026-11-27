@@ -40,8 +40,11 @@ def _enabled(value: str | None) -> bool:
 
 def _target_from_environment(environ: Mapping[str, str]) -> str | None:
     """Prefer the explicit URL variable while retaining the exporter alias."""
-    value = environ.get("HOOKSTORM_TARGET_URL") or environ.get("HOOKSTORM_TARGET")
-    return value.strip() if value and value.strip() else None
+    for name in ("HOOKSTORM_TARGET_URL", "HOOKSTORM_TARGET"):
+        value = environ.get(name)
+        if value and value.strip():
+            return value.strip()
+    return None
 
 
 @dataclass(frozen=True)
