@@ -242,7 +242,9 @@ async def run_scenario(
     retry = scenario["retry"]
     concurrency = scenario["delivery"].get("concurrency", 1)
     semaphore = asyncio.Semaphore(concurrency)
-    ordered_events = list(scenario["events"])
+    # Keep the source order for reporting; reverse only the execution sequence.
+    scenario_events = list(scenario["events"])
+    ordered_events = list(scenario_events)
     if scenario["delivery"].get("order", "in_order") == "reverse":
         ordered_events.reverse()
 
@@ -446,14 +448,15 @@ async def run_scenario(
                 scheduled_groups = await asyncio.gather(
                     *(process_event(ordered_events[index]) for index in execution_order)
                 )
-                groups_by_scenario_index = {
-                    index: group
+                groups_by_event_id = {
+                    ordered_events[index]["event_id"]: group
                     for index, group in zip(execution_order, scheduled_groups, strict=True)
                 }
+                # Delivery order controls network scheduling, not report ordering.
                 all_deliveries = [
                     delivery
-                    for index in range(len(ordered_events))
-                    for delivery in groups_by_scenario_index[index]
+                    for event in scenario_events
+                    for delivery in groups_by_event_id[event["event_id"]]
                 ]
 
                 verification = None
