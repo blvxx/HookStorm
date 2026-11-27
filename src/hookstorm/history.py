@@ -848,6 +848,11 @@ def export_history_run(
         encoded = json.dumps(
             document, ensure_ascii=False, indent=2, allow_nan=False
         )
+        if len(encoded.encode("utf-8")) > _MAX_HISTORY_EXPORT_BYTES:
+            raise HistoryError(
+                f"Cannot export run '{resolved_id}': baseline exceeds the "
+                f"{_MAX_HISTORY_EXPORT_BYTES}-byte export limit"
+            )
         _write_private_text(destination, encoded)
     except (OSError, TypeError, ValueError) as exc:
         raise HistoryError(f"Cannot export run '{resolved_id}': {exc}") from exc
