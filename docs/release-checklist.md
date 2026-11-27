@@ -12,6 +12,10 @@ HookStorm is currently in the pre-release stage. Do not publish a stable release
 - [ ] Build both wheel and source distribution with `python -m build`.
 - [ ] Install both wheel and source distribution in clean virtual environments; run `hookstorm --version`, `hookstorm init --no-workflow`, and `hookstorm validate` on the generated scenario without relying on source-checkout files.
 - [ ] Review README installation instructions, supported Python versions, security defaults, and known limitations.
+- [ ] Run the optional FastAPI and Flask integration tests and verify framework dependencies remain optional for core installs.
+- [ ] Build and smoke-test the Docker image; confirm its runtime user is non-root and the CLI works with a read-only root filesystem.
+- [ ] Build the Zensical documentation site and verify internal links and navigation. Deploy it only after GitHub Pages configuration and ownership are confirmed.
+- [ ] Confirm uv / uvx / pipx instructions match the actual published package name and are clearly marked unavailable until PyPI artifacts are verified.
 - [ ] Confirm no credentials, private endpoint URLs, local database files, or generated reports are included in the release artifacts.
 
 ## GitHub release
