@@ -107,18 +107,29 @@ class _FaultInjectingTransport(httpx.AsyncBaseTransport):
 MAX_RESPONSE_BODY_BYTES = 2 * 1024 * 1024
 
 
-async def _read_limited_response_body(response: httpx.Response) -> bytes | None:
-    """Read a decompressed response body up to the fixed memory-safety limit.
+async def _read_limited_response_body(
+    response: httpx.Response,
+) -> tuple[bytes | None, str | None]:
+    """Read an identity-encoded response without invoking unbounded decompression.
 
-    Return None when the body exceeds the limit. Streaming is used so an oversized
-    response is closed as soon as the limit is crossed instead of being buffered in full.
+    The byte cap is applied to raw response chunks before they are buffered. HookStorm
+    asks peers for identity encoding; if a peer sends a compressed body anyway, reject it
+    rather than handing it to HTTPX's automatic decompressor, which can expand one small
+    compressed chunk into an arbitrarily large allocation before the caller can check it.
     """
+    content_encoding = response.headers.get("content-encoding", "identity").strip().lower()
+    if content_encoding not in {"", "identity"}:
+        return None, (
+            "compressed response bodies are not supported; "
+            f"received Content-Encoding: {content_encoding}"
+        )
+
     body = bytearray()
-    async for chunk in response.aiter_bytes():
+    async for chunk in response.aiter_raw():
         if len(body) + len(chunk) > MAX_RESPONSE_BODY_BYTES:
-            return None
+            return None, f"response body exceeds the {MAX_RESPONSE_BODY_BYTES // (1024 * 1024)} MiB safety limit"
         body.extend(chunk)
-    return bytes(body)
+    return bytes(body), None
 
 
 _SIGNATURE_HEADERS = {
@@ -271,6 +282,7 @@ async def run_scenario(
             event_body = _json_bytes(event["payload"])
             base_headers = {
                 "Content-Type": "application/json",
+                "Accept-Encoding": "identity",
                 "User-Agent": f"HookStorm/{__version__} (+https://github.com/blvxx/HookStorm)",
                 "X-HookStorm-Run": run_id,
                 "X-Event-ID": event["event_id"],
@@ -360,7 +372,7 @@ async def run_scenario(
                                 ),
                             ) as response:
                                 outcome["status_code"] = response.status_code
-                                response_body = await _read_limited_response_body(response)
+                                response_body, body_error = await _read_limited_response_body(response)
                                 outcome["latency_ms"] = round(
                                     (time.perf_counter() - started_attempt) * 1000, 2
                                 )
@@ -369,9 +381,7 @@ async def run_scenario(
                                 )
                                 if response_body is None:
                                     outcome["expected_json"] = False
-                                    outcome["error"] = (
-                                        "response body exceeds the 2 MiB safety limit"
-                                    )
+                                    outcome["error"] = body_error or "response body could not be read safely"
                                 elif expected_json is not None:
                                     try:
                                         matched, mismatch = _matches_subset(
@@ -479,6 +489,7 @@ async def run_scenario(
                                 "GET",
                                 verification_url,
                                 headers={
+                                    "Accept-Encoding": "identity",
                                     "User-Agent": f"HookStorm/{__version__} (+https://github.com/blvxx/HookStorm)",
                                     "X-HookStorm-Run": run_id,
                                     **verification_auth_headers,
@@ -486,7 +497,7 @@ async def run_scenario(
                                 timeout=verify_config["timeout_ms"] / 1000,
                             ) as response:
                                 verification["status_code"] = response.status_code
-                                response_body = await _read_limited_response_body(response)
+                                response_body, body_error = await _read_limited_response_body(response)
                                 verification["latency_ms"] = round(
                                     (time.perf_counter() - verify_started) * 1000, 2
                                 )
@@ -496,7 +507,7 @@ async def run_scenario(
                                 if response_body is None:
                                     matched, mismatch = (
                                         False,
-                                        "verification response body exceeds the 2 MiB safety limit",
+                                        body_error or "verification response body could not be read safely",
                                     )
                                 else:
                                     try:
