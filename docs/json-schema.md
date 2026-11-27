@@ -55,7 +55,7 @@ HookStorm performs semantic checks beyond the schema, including:
 - retry-attempt bounds for each injected fault;
 - conflicting fault types on the same attempt;
 - header reserved-name checks and aggregate header-size limits;
-- serialized payload byte limits;
+- serialized payload byte limits and the 100-level JSON nesting limit (the nesting rule is enforced consistently at runtime but is not expressible in the standard schema);
 - capture metadata correspondence with scenario events;
 - estimated request count and worst-case runtime budget.
 
