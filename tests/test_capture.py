@@ -128,7 +128,6 @@ def test_sensitive_headers_are_saved_only_as_non_replayed_capture_metadata(tmp_p
                 "description": (
                     "Captured locally by HookStorm. Review payloads and headers before sharing."
                 ),
-                "name": "capture metadata validation",
                 "delivery": {"signature": "none"},
                 "events": [
                     {
