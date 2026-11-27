@@ -20,7 +20,7 @@ class _UniqueKeySafeLoader(yaml.SafeLoader):
     """Safe YAML loader that rejects duplicate keys before constructing mappings."""
 
     def construct_mapping(self, node: yaml.MappingNode, deep: bool = False) -> dict:
-        seen: dict[Any, yaml.error.Mark] = {}
+        seen: dict[Any, Any] = {}
         for key_node, _value_node in node.value:
             if key_node.tag == "tag:yaml.org,2002:merge":
                 continue
