@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Refresh generated and copy-ready staging workflow installer pins to the CI-validated main commit.
 - Validate history run metrics and delivery identities before storage or baseline comparison; reject non-finite JSON numbers in imported baselines.
 - Add Python 3.14 to the CI compatibility matrix and package classifiers.
 - Restrict local history databases and exported baseline files to owner-only POSIX permissions.
