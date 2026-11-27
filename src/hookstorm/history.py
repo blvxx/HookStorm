@@ -97,7 +97,7 @@ def _write_private_text(path: Path, content: str) -> None:
         dir=path.parent,
     )
     try:
-        with os.fdopen(descriptor, "w", encoding="utf-8", newline="\\n") as stream:
+        with os.fdopen(descriptor, "w", encoding="utf-8", newline="") as stream:
             stream.write(content)
             stream.flush()
             os.fsync(stream.fileno())
