@@ -92,7 +92,7 @@ class WebhookRecorder:
         self._processed: set[tuple[str, str]] = set()
 
     @staticmethod
-    def _header(headers: collections.abc.collections.abc.Mapping[str, typing.Any], *names: str) -> str | None:
+    def _header(headers: collections.abc.Mapping[str, typing.Any], *names: str) -> str | None:
         wanted = {name.lower() for name in names}
         for name, value in headers.items():
             if str(name).lower() in wanted:
@@ -230,7 +230,7 @@ class WebhookRecorder:
             payload=payload,
             raw_body=raw_body,
             headers=self._safe_headers(headers),
-            received_at=datetime.now(UTC).isoformat(),
+            received_at=datetime.datetime.now(datetime.UTC).isoformat(),
         )
         with self._lock:
             self._ensure_capacity()
