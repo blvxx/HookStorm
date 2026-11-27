@@ -65,6 +65,9 @@ def test_capture_server_is_loopback_only_and_redacts_sensitive_headers(tmp_path)
                 "webhook-timestamp": "1700000000",
                 "webhook-signature": "v1,standard-signature",
                 "X-API-Key": "private-key",
+                "X-Auth-Key": "auth-key-value",
+                "X-Private-Key": "private-key-value",
+                "X-Client-Key": "client-key-value",
                 "X-Trace-ID": "trace-123",
                 "X-Event-ID": "provider-event-1",
             },
@@ -94,6 +97,9 @@ def test_capture_server_is_loopback_only_and_redacts_sensitive_headers(tmp_path)
     assert "shopify-hmac-secret" not in saved
     assert "standard-signature" not in saved
     assert "private-key" not in saved
+    assert "auth-key-value" not in saved
+    assert "private-key-value" not in saved
+    assert "client-key-value" not in saved
     assert "redact-me" not in saved
     if os.name == "posix":
         assert output.stat().st_mode & 0o777 == 0o600
