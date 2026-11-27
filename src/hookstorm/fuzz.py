@@ -448,6 +448,7 @@ async def run_fuzz(
             event["payload"], rng, nonce=f"{seed:x}_{iteration:04x}"
         )
         event["payload"] = mutated_payload
+        payload_only_trial = copy.deepcopy(candidate_scenario)
         delivery_mutations = _mutate_delivery(
             candidate_scenario,
             rng,
@@ -458,7 +459,17 @@ async def run_fuzz(
             max_delay_ms=max_delay_ms,
             vary_faults=vary_faults,
         )
-        candidate_scenario = validate_scenario(candidate_scenario)
+        try:
+            candidate_scenario = validate_scenario(candidate_scenario)
+        except ValueError as exc:
+            # Keep the payload trial useful if optional delivery mutations exceed
+            # this scenario's specific runtime or request-count budget.
+            candidate_scenario = validate_scenario(payload_only_trial)
+            delivery_mutations = [{
+                "dimension": "delivery_mutations",
+                "skipped": str(exc),
+                "attempted": delivery_mutations,
+            }]
         event = candidate_scenario["events"][event_index]
         _apply_trial_event_ids(
             candidate_scenario, seed=seed, iteration=iteration, trial=0
