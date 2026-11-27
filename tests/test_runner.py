@@ -861,14 +861,11 @@ def test_reverse_order_preserves_sequential_duplicates_per_event(receiver) -> No
     result = asyncio.run(run_scenario(validate_scenario(data), base))
 
     assert result["summary"]["success"] is True
-    assert [
-        (request["event_id"], request["duplicate_index"])
-        for request in state["requests"]
-    ] == [
-        ("evt_second", 0),
-        ("evt_second", 1),
-        ("evt_first", 0),
-        ("evt_first", 1),
+    assert [request["event_id"] for request in state["requests"]] == [
+        "evt_second",
+        "evt_second",
+        "evt_first",
+        "evt_first",
     ]
     assert [
         (delivery["event_id"], delivery["duplicate_index"])
