@@ -12,6 +12,7 @@ from urllib.parse import urlsplit
 import yaml
 
 from hookstorm.provider_profiles import PROVIDER_NAMES, provider_event, provider_headers
+from hookstorm.safety import validate_target
 
 
 class ScenarioError(ValueError):
@@ -322,15 +323,17 @@ def _validate_verify(value: Any) -> dict[str, Any] | None:
         or any(char in url for char in "\r\n")
     ):
         raise ScenarioError("verify.url must be a non-empty absolute HTTP(S) URL of at most 2048 characters")
-    parsed = urlsplit(url.strip())
-    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
-        raise ScenarioError("verify.url must be an absolute http:// or https:// URL")
-    if parsed.username or parsed.password or parsed.fragment:
-        raise ScenarioError("verify.url must not contain embedded credentials or a fragment")
     try:
-        _ = parsed.port
+        normalized_url = validate_target(
+            url.strip(),
+            allow_remote=True,
+            allow_insecure_http=True,
+        )
+        parsed = urlsplit(normalized_url)
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+            raise ValueError("URL must be absolute HTTP(S)")
     except ValueError as exc:
-        raise ScenarioError("verify.url contains an invalid port") from exc
+        raise ScenarioError(f"verify.url is invalid: {exc}") from exc
 
     expect_status = value.get("expect_status", [200])
     if isinstance(expect_status, int) and not isinstance(expect_status, bool):
@@ -558,14 +561,10 @@ def validate_scenario(data: Any) -> dict[str, Any]:
     for event in normalized_events:
         effective_delivery = {**delivery, **event["delivery"]}
         fault_plan = effective_delivery.get("fault_injection", {})
-        for field in (
-            "connect_error_attempts",
-            "response_loss_attempts",
-            "response_body_error_attempts",
-        ):
+        for field, configured_attempts in fault_plan.items():
             invalid_attempts = [
                 number
-                for number in fault_plan.get(field, [])
+                for number in configured_attempts
                 if number > retry["max_attempts"]
             ]
             if invalid_attempts:
