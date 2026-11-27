@@ -173,6 +173,7 @@ def test_capture_http_statuses_distinguish_quota_size_and_storage_errors(
     finally:
         _stop_server(size_server, size_thread)
 
+    monkeypatch.undo()
     storage_server, storage_store, storage_thread, storage_output = _start_server(
         tmp_path / "storage"
     )
