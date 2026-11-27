@@ -1,0 +1,50 @@
+name: HookStorm webhook contract
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "scenarios/**"
+      - "src/**"
+      - ".github/workflows/hookstorm-action.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "scenarios/**"
+      - "src/**"
+      - ".github/workflows/hookstorm-action.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  webhook-contract:
+    if: github.event_name != 'pull_request' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - name: Check out application
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Run HookStorm scenario
+        id: hookstorm
+        uses: blvxx/HookStorm/.github/actions/run@19e90aa400a06e6bf625108ce5ae6fb1a8d74e5d
+        with:
+          scenario: scenarios/webhook.yaml
+          target-url: ${{ vars.HOOKSTORM_TARGET_URL }}
+          allow-remote: "true"
+          connect-preflight: "true"
+          format: junit
+          output-path: test-results/hookstorm.xml
+        env:
+          HOOKSTORM_SECRET: ${{ secrets.HOOKSTORM_SECRET }}
+
+      - name: Upload HookStorm report
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: hookstorm-junit
+          path: test-results/hookstorm.xml
+          if-no-files-found: warn
+          retention-days: 14
