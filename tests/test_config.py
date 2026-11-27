@@ -508,6 +508,7 @@ def test_validates_deterministic_fault_injection_attempts() -> None:
         "fault_injection": {
             "connect_error_attempts": [1],
             "response_loss_attempts": [2],
+            "response_body_error_attempts": [3],
         }
     }
 
@@ -516,6 +517,7 @@ def test_validates_deterministic_fault_injection_attempts() -> None:
     assert normalized["delivery"]["fault_injection"] == {
         "connect_error_attempts": [1],
         "response_loss_attempts": [2],
+        "response_body_error_attempts": [3],
     }
 
 
@@ -534,6 +536,7 @@ def test_fault_injection_can_be_overridden_per_event() -> None:
     assert normalized["events"][0]["delivery"]["fault_injection"] == {
         "connect_error_attempts": [],
         "response_loss_attempts": [2],
+        "response_body_error_attempts": [],
     }
 
 
@@ -546,8 +549,11 @@ def test_fault_injection_can_be_overridden_per_event() -> None:
         {"connect_error_attempts": [True]},
         {"connect_error_attempts": [0]},
         {"response_loss_attempts": [11]},
+        {"response_body_error_attempts": [True]},
+        {"response_body_error_attempts": [1, 1]},
         {"connect_error_attempts": [1, 1]},
         {"connect_error_attempts": [2], "response_loss_attempts": [2]},
+        {"connect_error_attempts": [2], "response_body_error_attempts": [2]},
     ],
 )
 def test_rejects_invalid_fault_injection_plans(fault_plan: object) -> None:
@@ -563,7 +569,7 @@ def test_fault_injection_attempts_cannot_exceed_retry_budget() -> None:
     data = valid_scenario()
     data["retry"] = {"max_attempts": 2}
     data["delivery"] = {
-        "fault_injection": {"response_loss_attempts": [3]}
+        "fault_injection": {"response_body_error_attempts": [3]}
     }
 
     with pytest.raises(ScenarioError, match="must not exceed retry.max_attempts=2"):
