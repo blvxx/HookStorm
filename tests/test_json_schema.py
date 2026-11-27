@@ -57,3 +57,38 @@ def test_provider_profile_allows_generated_event_defaults() -> None:
     }
 
     assert not list(validator.iter_errors(provider_scenario))
+
+def test_schema_accepts_all_request_fault_injection_options() -> None:
+    schema = json.loads(read_scenario_schema())
+    validator = Draft202012Validator(schema)
+    request_faults = [
+        "malformed_json_attempts",
+        "wrong_content_type_attempts",
+        "gzip_body_attempts",
+        "deflate_body_attempts",
+        "invalid_gzip_attempts",
+        "invalid_deflate_attempts",
+        "chunked_transfer_attempts",
+        "malformed_chunked_attempts",
+        "partial_upload_attempts",
+        "content_length_mismatch_attempts",
+    ]
+    scenario = {
+        "version": 1,
+        "name": "request fault schema",
+        "retry": {"max_attempts": 10},
+        "events": [
+            {
+                "id": "request.test",
+                "event_id": "evt_request_schema",
+                "payload": {},
+                "delivery": {
+                    "fault_injection": {
+                        name: [index + 1] for index, name in enumerate(request_faults)
+                    }
+                },
+            }
+        ],
+    }
+
+    assert not list(validator.iter_errors(scenario))
