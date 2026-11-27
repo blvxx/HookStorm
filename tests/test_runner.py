@@ -32,6 +32,7 @@ def test_retries_transient_server_error(receiver) -> None:
         scenario(retry={"max_attempts": 3, "backoff_ms": 1}), f"{base}/flaky"
     ))
     assert result["summary"]["success"] is True
+    assert len(result["scenario_fingerprint"]) == 64
     assert result["summary"]["attempts"] == 2
     assert [x["status_code"] for x in result["deliveries"][0]["attempts"]] == [503, 200]
     run_id = state["requests"][0]["run_id"]

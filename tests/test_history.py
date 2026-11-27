@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+import json
+
 import pytest
 
 from hookstorm.history import (
@@ -171,6 +173,69 @@ def test_compare_marks_removed_coverage_and_new_failures() -> None:
     assert "new delivery failed" in reasons
 
 
+def test_compare_rejects_changed_scenario_configuration_by_default() -> None:
+    baseline = make_result("run_001")
+    current = make_result("run_002")
+    baseline["scenario_fingerprint"] = "a" * 64
+    current["scenario_fingerprint"] = "b" * 64
+
+    comparison = compare_results(current, baseline)
+
+    assert comparison["same_configuration"] is False
+    assert comparison["has_regressions"] is True
+    assert any(
+        item["reason"] == "scenario configuration changed"
+        for item in comparison["regressions"]
+    )
+
+
+def test_compare_allows_intentional_configuration_change_with_override() -> None:
+    baseline = make_result("run_001")
+    current = make_result("run_002")
+    baseline["scenario_fingerprint"] = "a" * 64
+    current["scenario_fingerprint"] = "b" * 64
+
+    comparison = compare_results(current, baseline, allow_config_change=True)
+
+    assert comparison["same_configuration"] is False
+    assert comparison["allow_config_change"] is True
+    assert comparison["has_regressions"] is False
+
+
+def test_compare_marks_legacy_baselines_as_configuration_unknown() -> None:
+    baseline = make_result("run_001")
+    current = make_result("run_002")
+    current["scenario_fingerprint"] = "a" * 64
+
+    comparison = compare_results(current, baseline)
+
+    assert comparison["same_configuration"] is None
+    assert comparison["has_regressions"] is False
+
+
+@pytest.mark.parametrize("duplicate_side", ["baseline", "current"])
+def test_compare_rejects_duplicate_delivery_identities(duplicate_side: str) -> None:
+    baseline = make_result("run_001")
+    current = make_result("run_002")
+    duplicate_deliveries = [delivery("evt_duplicate"), delivery("evt_duplicate")]
+    if duplicate_side == "baseline":
+        baseline["deliveries"] = duplicate_deliveries
+    else:
+        current["deliveries"] = duplicate_deliveries
+
+    with pytest.raises(HistoryError, match="duplicate delivery identity"):
+        compare_results(current, baseline)
+
+
+def test_compare_rejects_malformed_scenario_fingerprints() -> None:
+    baseline = make_result("run_001")
+    current = make_result("run_002")
+    current["scenario_fingerprint"] = "not-a-sha256"
+
+    with pytest.raises(HistoryError, match="64-character lowercase SHA-256"):
+        compare_results(current, baseline)
+
+
 def test_compare_history_runs_defaults_current_to_latest(tmp_path) -> None:
     database = tmp_path / "history.sqlite3"
     save_run(make_result("run_001"), database)
@@ -267,6 +332,7 @@ def test_history_export_is_portable_and_sanitized(tmp_path) -> None:
     database = tmp_path / "history.sqlite3"
     output = tmp_path / "baselines" / "baseline.json"
     result = make_result("run_export1")
+    result["scenario_fingerprint"] = "c" * 64
     result["payload"] = {"private": "BASELINE_PRIVATE_PAYLOAD"}
     result["secret"] = "BASELINE_PRIVATE_SECRET"
     save_run(result, database)
@@ -281,6 +347,7 @@ def test_history_export_is_portable_and_sanitized(tmp_path) -> None:
     loaded = load_history_export(output)
     assert loaded["run_id"] == "run_export1"
     assert loaded["scenario"] == "payment webhook"
+    assert loaded["scenario_fingerprint"] == "c" * 64
     assert "payload" not in loaded
     assert "secret" not in loaded
 
@@ -304,6 +371,20 @@ def test_compare_history_file_detects_regression_from_another_database(tmp_path)
     assert comparison["has_regressions"] is True
 
 
+def test_load_history_export_validates_optional_scenario_fingerprint(tmp_path) -> None:
+    database = tmp_path / "history.sqlite3"
+    baseline_file = tmp_path / "baseline.json"
+    save_run(make_result("run_fingerprin1"), database)
+    export_history_run("latest", baseline_file, database)
+
+    document = json.loads(baseline_file.read_text(encoding="utf-8"))
+    document["run"]["scenario_fingerprint"] = "invalid"
+    baseline_file.write_text(json.dumps(document), encoding="utf-8")
+
+    with pytest.raises(HistoryError, match="64-character lowercase SHA-256"):
+        load_history_export(baseline_file)
+
+
 def test_load_history_export_rejects_unknown_format(tmp_path) -> None:
     baseline_file = tmp_path / "bad-baseline.json"
     baseline_file.write_text(
@@ -320,8 +401,6 @@ def test_load_history_export_rejects_private_fields_by_whitelisting(tmp_path) ->
     result = make_result("run_safe")
     save_run(result, database)
     export_history_run("latest", baseline_file, database)
-
-    import json
 
     document = json.loads(baseline_file.read_text(encoding="utf-8"))
     document["run"]["payload"] = {"secret": "SHOULD_NOT_SURVIVE"}

@@ -177,6 +177,50 @@ def test_history_compare_command_returns_zero_without_regression(
 
 
 
+def test_history_compare_requires_explicit_override_for_config_change(
+    tmp_path, capsys
+) -> None:
+    database = tmp_path / "history.sqlite3"
+    baseline = {
+        "run_id": "run_config_base",
+        "scenario": "configuration check",
+        "scenario_fingerprint": "a" * 64,
+        "started_at": "2026-11-26T10:00:00+00:00",
+        "target": "http://127.0.0.1:8000/hook",
+        "duration_ms": 20.0,
+        "summary": {"success": True, "total_deliveries": 1, "passed": 1, "failed": 0, "attempts": 1},
+        "deliveries": [{
+            "event_type": "ping",
+            "event_id": "evt_config",
+            "duplicate_index": 0,
+            "passed": True,
+            "attempts": [{"status_code": 200, "latency_ms": 10.0, "error": None}],
+        }],
+    }
+    current = {
+        **baseline,
+        "run_id": "run_config_current",
+        "scenario_fingerprint": "b" * 64,
+        "started_at": "2026-11-26T10:01:00+00:00",
+    }
+    save_run(baseline, database)
+    save_run(current, database)
+
+    command = [
+        "history", "compare", "run_config_base",
+        "--current", "run_config_current", "--db", str(database),
+    ]
+    assert main(command) == 1
+    output = capsys.readouterr().out
+    assert "scenario configuration differs" in output
+    assert "scenario configuration changed" in output
+
+    assert main([*command, "--allow-config-change"]) == 0
+    output = capsys.readouterr().out
+    assert "explicit baseline override is active" in output
+    assert "NO REGRESSIONS DETECTED" in output
+
+
 def test_history_export_and_compare_file_cli(tmp_path, capsys) -> None:
     database = tmp_path / "history.sqlite3"
     baseline = {

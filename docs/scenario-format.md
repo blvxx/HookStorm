@@ -97,10 +97,10 @@ The probe is not a universal exactly-once guarantee: it verifies only the state 
 
 | Field | Required | Meaning |
 |---|---:|---|
-| id | yes | Event type, for example invoice.paid (1–256 characters, no line breaks). |
-| event_id | yes | Stable event identifier reused across retries and duplicates (1–256 characters, no line breaks). |
+| id | yes | Event type, for example invoice.paid (1–256 printable ASCII characters; no control characters). |
+| event_id | yes | Unique stable event identifier within this scenario (1–256 printable ASCII characters; no control characters). The value is reused across retries and duplicate deliveries. |
 | payload | no | JSON-compatible value; defaults to {}. |
-| headers | no | Additional string headers (up to 64 headers / 16 KiB total). Names and values cannot contain line breaks. Transport-managed headers cannot be overridden. |
+| headers | no | Additional HTTP headers (up to 64 headers / 16 KiB total). Names must be valid HTTP tokens; values must be printable ASCII, optionally including horizontal tabs. Other control characters and non-ASCII values are rejected. Transport-managed headers cannot be overridden. |
 | delivery | no | Per-event delivery overrides. |
 | expect_status | no | Accepted final HTTP status code or list; defaults to [200, 201, 202, 204]. |
 | expect_json | no | Expected JSON object for the first delivery; nested objects are subset-matched recursively. |

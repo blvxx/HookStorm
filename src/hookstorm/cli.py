@@ -76,6 +76,11 @@ def _parser() -> argparse.ArgumentParser:
     history_compare.add_argument("baseline_run_id")
     history_compare.add_argument("--current", default="latest")
     history_compare.add_argument("--latency-threshold-pct", type=float, default=20.0)
+    history_compare.add_argument(
+        "--allow-config-change",
+        action="store_true",
+        help="accept a changed scenario configuration when intentionally refreshing a baseline",
+    )
     history_compare.add_argument("--db", help="history database path")
     history_compare_file = history_sub.add_parser(
         "compare-file", help="compare the latest run against a portable JSON baseline"
@@ -83,6 +88,11 @@ def _parser() -> argparse.ArgumentParser:
     history_compare_file.add_argument("baseline_file", help="exported HookStorm baseline JSON")
     history_compare_file.add_argument("--current", default="latest")
     history_compare_file.add_argument("--latency-threshold-pct", type=float, default=20.0)
+    history_compare_file.add_argument(
+        "--allow-config-change",
+        action="store_true",
+        help="accept a changed scenario configuration when intentionally refreshing a baseline",
+    )
     history_compare_file.add_argument("--db", help="history database path")
     history_export = history_sub.add_parser(
         "export", help="export one sanitized run as a portable JSON baseline"
@@ -224,6 +234,19 @@ def _print_history_comparison(comparison: dict) -> int:
     )
     if not comparison["same_scenario"]:
         print("WARNING: scenario names differ; interpret coverage and metric changes carefully.")
+    if comparison["same_configuration"] is False:
+        if comparison["allow_config_change"]:
+            print("WARNING: scenario configuration changed; explicit baseline override is active.")
+        else:
+            print(
+                "ERROR: scenario configuration differs from the baseline. "
+                "Use --allow-config-change only when intentionally accepting this change."
+            )
+    elif comparison["same_configuration"] is None:
+        print(
+            "WARNING: scenario configuration could not be verified because this baseline "
+            "predates configuration fingerprints."
+        )
     baseline = comparison["baseline"]
     current = comparison["current"]
     delta = comparison["delta"]
@@ -269,6 +292,7 @@ def _history_compare_command(args: argparse.Namespace) -> int:
         current_run_id=args.current,
         path=args.db,
         latency_threshold_pct=args.latency_threshold_pct,
+        allow_config_change=args.allow_config_change,
     )
     return _print_history_comparison(comparison)
 
@@ -279,6 +303,7 @@ def _history_compare_file_command(args: argparse.Namespace) -> int:
         current_run_id=args.current,
         path=args.db,
         latency_threshold_pct=args.latency_threshold_pct,
+        allow_config_change=args.allow_config_change,
     )
     print(f"Baseline file: {Path(args.baseline_file).expanduser()}")
     return _print_history_comparison(comparison)

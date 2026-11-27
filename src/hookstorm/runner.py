@@ -16,6 +16,7 @@ from urllib.parse import urlsplit, urlunsplit
 
 import httpx
 
+from hookstorm.config import scenario_fingerprint
 from hookstorm.safety import validate_target
 from hookstorm.standard_webhooks import (
     decode_standard_webhooks_secret,
@@ -139,6 +140,7 @@ async def run_scenario(
 ) -> dict[str, Any]:
     """Execute a validated scenario and return a privacy-conscious result document."""
     target = validate_target(target, allow_remote=allow_remote)
+    config_fingerprint = scenario_fingerprint(scenario)
     verify_config = scenario.get("verify")
     verification_url = (
         validate_target(verify_config["url"], allow_remote=allow_remote)
@@ -414,6 +416,7 @@ async def run_scenario(
         "version": "0.1.0",
         "run_id": run_id,
         "scenario": scenario["name"],
+        "scenario_fingerprint": config_fingerprint,
         "target": reported_target,
         "started_at": started.isoformat(),
         "duration_ms": round((time.perf_counter() - monotonic_started) * 1000, 2),
