@@ -33,7 +33,7 @@ Add one or more attempt lists under an event's `delivery.fault_injection`:
 | `invalid_gzip_attempts` | Labels an intentionally invalid body as gzip | 400 |
 | `invalid_deflate_attempts` | Labels an intentionally invalid body as deflate | 400 |
 | `chunked_transfer_attempts` | Reframes the request body as a valid HTTP/1.1 chunked message | 2xx when supported |
-| `malformed_chunked_attempts` | Sends an invalid chunk-size token | 400 |
+| `malformed_chunked_attempts` | Sends conflicting Content-Length and Transfer-Encoding headers with an invalid chunk marker | 400 |
 | `partial_upload_attempts` | Sends only the first half of the request body, then closes the connection | Client write error / incomplete request |
 | `content_length_mismatch_attempts` | Declares one more byte than is sent, then closes the connection | Client write error / incomplete request |
 
