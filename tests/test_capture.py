@@ -174,8 +174,12 @@ def test_capture_http_statuses_distinguish_quota_size_and_storage_errors(
         _stop_server(size_server, size_thread)
 
     monkeypatch.undo()
+    storage_root = tmp_path / "storage"
+    storage_output_before = storage_root / "captured" / "webhooks.yaml"
+    storage_output_before.parent.mkdir(parents=True)
+    storage_output_before.write_text("previous valid capture", encoding="utf-8")
     storage_server, storage_store, storage_thread, storage_output = _start_server(
-        tmp_path / "storage"
+        storage_root
     )
 
     def fail_replace(_source, _destination):
@@ -189,7 +193,7 @@ def test_capture_http_statuses_distinguish_quota_size_and_storage_errors(
         assert storage_store.events == []
         assert storage_store.capture_events == []
         assert storage_store.total_body_bytes == 0
-        assert not storage_output.exists()
+        assert storage_output.read_text(encoding="utf-8") == "previous valid capture"
     finally:
         _stop_server(storage_server, storage_thread)
 
