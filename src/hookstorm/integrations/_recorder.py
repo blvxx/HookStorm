@@ -2,13 +2,13 @@
 
 from __future__ import annotations
 
+import collections.abc
+import dataclasses
+import datetime
 import json
+import threading
+import typing
 import zlib
-from collections.abc import Mapping
-from dataclasses import dataclass
-from datetime import UTC, datetime
-from threading import Lock
-from typing import Any
 
 
 _DEFAULT_MAX_BODY_BYTES = 1_048_576
@@ -34,7 +34,7 @@ class WebhookRequestError(ValueError):
         self.status_code = status_code
 
 
-@dataclass(frozen=True, slots=True)
+@dataclasses.dataclass(frozen=True, slots=True)
 class WebhookRecord:
     """One captured request; raw_body contains the exact bytes received."""
 
@@ -46,7 +46,7 @@ class WebhookRecord:
     headers: dict[str, str]
     received_at: str
 
-    def response(self) -> dict[str, Any]:
+    def response(self) -> dict[str, typing.Any]:
         """Return a compact JSON-safe acknowledgement for the sender."""
         return {
             "ok": True,
@@ -87,12 +87,12 @@ class WebhookRecorder:
         self.max_body_bytes = max_body_bytes
         self.max_events = max_events
         self.include_sensitive_headers = include_sensitive_headers
-        self._lock = Lock()
+        self._lock = threading.Lock()
         self._events: list[WebhookRecord] = []
         self._processed: set[tuple[str, str]] = set()
 
     @staticmethod
-    def _header(headers: Mapping[str, Any], *names: str) -> str | None:
+    def _header(headers: collections.abc.Mapping[str, typing.Any], *names: str) -> str | None:
         wanted = {name.lower() for name in names}
         for name, value in headers.items():
             if str(name).lower() in wanted:
@@ -101,7 +101,7 @@ class WebhookRecorder:
         return None
 
     @staticmethod
-    def _reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    def _reject_duplicate_keys(pairs: list[tuple[str, typing.Any]]) -> dict[str, typing.Any]:
         value: dict[str, Any] = {}
         for key, item in pairs:
             if key in value:
@@ -218,7 +218,7 @@ class WebhookRecorder:
                     payload=payload,
                     raw_body=raw_body,
                     headers=self._safe_headers(headers),
-                    received_at=datetime.now(UTC).isoformat(),
+                    received_at=datetime.datetime.now(datetime.UTC).isoformat(),
                 )
                 self._events.append(event)
                 return event
