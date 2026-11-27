@@ -108,10 +108,11 @@ def _write_private_text(path: Path, content: str) -> None:
             os.chmod(temporary_name, 0o600)
         os.replace(temporary_name, path)
     except Exception:
-        try:
-            os.close(descriptor)
-        except OSError:
-            pass
+        if descriptor >= 0:
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
         try:
             os.unlink(temporary_name)
         except OSError:
