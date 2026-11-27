@@ -44,7 +44,7 @@ def test_initialize_project_creates_valid_scenario_and_workflow(tmp_path) -> Non
     assert "hookstorm doctor" in preflight["run"]
     assert "--connect" in preflight["run"]
     assert "--allow-insecure-http" in preflight["run"]
-    assert HOOKSTORM_INSTALL_REF == "a4d3793ef780be7e5b8106874e0beeb30a766ca4"
+    assert HOOKSTORM_INSTALL_REF == "a4798688e292e396f2691565dd2c3bf4f9bf4577"
     assert HOOKSTORM_INSTALL_REF in workflow_text
     assert "--allow-insecure-http" in workflow_text
     assert "HOOKSTORM_ALLOW_INSECURE_HTTP" in workflow_text
@@ -129,3 +129,29 @@ def test_initialize_supports_scenario_only(tmp_path) -> None:
 
     assert written == [tmp_path / "scenarios" / "webhook.yaml"]
     assert not (tmp_path / ".github" / "workflows" / "webhook-regression.yml").exists()
+
+
+def test_initialize_project_supports_retry_and_duplicate_options(tmp_path) -> None:
+    initialize_project(root=tmp_path, max_attempts=3, duplicate_count=2)
+
+    scenario = load_scenario(tmp_path / "scenarios" / "webhook.yaml")
+
+    assert scenario["retry"]["max_attempts"] == 3
+    assert scenario["retry"]["backoff_ms"] == 100
+    assert scenario["delivery"]["duplicate_count"] == 2
+
+
+@pytest.mark.parametrize(
+    ("max_attempts", "duplicate_count"),
+    [(0, 0), (11, 0), (True, 0), (1, -1), (1, 101), (1, False)],
+)
+def test_initialize_project_rejects_invalid_retry_and_duplicate_options(
+    tmp_path, max_attempts: object, duplicate_count: object
+) -> None:
+    with pytest.raises(ValueError):
+        initialize_project(
+            root=tmp_path,
+            include_workflow=False,
+            max_attempts=max_attempts,
+            duplicate_count=duplicate_count,
+        )

@@ -150,16 +150,16 @@ From the root of the application repository (after installing HookStorm), run:
 hookstorm init
 ~~~
 
-The wizard creates `scenarios/webhook.yaml` and `.github/workflows/webhook-regression.yml`. In an interactive terminal it asks which signature format your staging receiver uses (`generic`, `stripe`, `github`, `shopify`, or `standard_webhooks`); non-interactive runs default to `generic`.
+The wizard creates `scenarios/webhook.yaml` and `.github/workflows/webhook-regression.yml`. In an interactive terminal it asks for the signature format, event type and ID, maximum attempts per delivery, and additional duplicate deliveries. Non-interactive runs keep safe defaults (`generic`, one attempt, no duplicates).
 
 You can also choose the provider and event contract explicitly:
 
 ~~~bash
 hookstorm init --signature-provider github \\
-  --event-type issues.opened --event-id evt_issues_opened_001
+  --event-type issues.opened --event-id evt_issues_opened_001 --max-attempts 3 --duplicate-count 1
 ~~~
 
-Edit the generated scenario to match your actual payload and response. Then configure the GitHub `staging` Environment with `HOOKSTORM_TARGET_URL` as a variable and `HOOKSTORM_SECRET` as a secret. The optional `HOOKSTORM_ALLOW_INSECURE_HTTP` variable defaults to `0` and should be set to `1` only for a controlled non-loopback staging endpoint that cannot use HTTPS. The wizard never writes endpoint URLs or signing secrets into generated files. Existing files are preserved; use `--force` only when you intentionally want to replace both generated files. Use `--no-workflow` to generate only the scenario.
+`--max-attempts` includes the first request (1–10); `--duplicate-count` adds that many deliveries with the same event ID and body (0–100). The generated retry template adds a 100 ms base backoff when more than one attempt is selected. Edit the generated scenario to match your actual payload and response. Then configure the GitHub `staging` Environment with `HOOKSTORM_TARGET_URL` as a variable and `HOOKSTORM_SECRET` as a secret. The optional `HOOKSTORM_ALLOW_INSECURE_HTTP` variable defaults to `0` and should be set to `1` only for a controlled non-loopback staging endpoint that cannot use HTTPS. The wizard never writes endpoint URLs or signing secrets into generated files. Existing files are preserved; use `--force` only when you intentionally want to replace both generated files. Use `--no-workflow` to generate only the scenario.
 
 The generated workflow targets a dedicated staging endpoint with the explicit `--allow-remote` opt-in, skips fork-originated PRs, and updates the baseline only from trusted successful runs on `main`. HTTPS is expected; non-loopback HTTP is blocked unless the optional `HOOKSTORM_ALLOW_INSECURE_HTTP=1` environment variable is explicitly set. Before sending any webhook event, its preflight step validates the scenario, checks that the required environment variables are present, and verifies staging DNS/TCP/TLS connectivity. Protect the staging Environment with required reviewers before enabling it for same-repository pull requests. See [CI integration for application repositories](docs/ci-integration.md) for the complete setup.
 

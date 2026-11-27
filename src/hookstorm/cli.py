@@ -52,8 +52,24 @@ def _parser() -> argparse.ArgumentParser:
         choices=("generic", "stripe", "github", "shopify", "standard_webhooks"),
         help="webhook signature format (prompted in an interactive terminal; defaults to generic)",
     )
-    init.add_argument("--event-type", default="test.ping")
-    init.add_argument("--event-id", default="evt_hookstorm_init_001")
+    init.add_argument(
+        "--event-type",
+        help="webhook event type (prompted in an interactive terminal; defaults to test.ping)",
+    )
+    init.add_argument(
+        "--event-id",
+        help="stable event ID (prompted in an interactive terminal; defaults to evt_hookstorm_init_001)",
+    )
+    init.add_argument(
+        "--max-attempts",
+        type=int,
+        help="total delivery attempts including the first request (1–10; interactive default: 1)",
+    )
+    init.add_argument(
+        "--duplicate-count",
+        type=int,
+        help="additional deliveries of the same event (0–100; interactive default: 0)",
+    )
     init.add_argument("--no-workflow", action="store_true", help="create only the YAML scenario")
     init.add_argument("--force", action="store_true", help="overwrite generated files if they exist")
 
@@ -333,24 +349,79 @@ def _history_export_command(args: argparse.Namespace) -> int:
     return 0
 
 
-def _init_command(args: argparse.Namespace) -> int:
-    signature_provider = args.signature_provider
-    if signature_provider is None and sys.stdin.isatty():
+def _prompt_text(prompt: str, default: str) -> str:
+    try:
+        answer = input(f"{prompt} ({default}): ").strip()
+    except EOFError:
+        return default
+    return answer or default
+
+
+def _prompt_choice(prompt: str, choices: tuple[str, ...], default: str) -> str:
+    choices_label = "/".join(choices)
+    while True:
+        answer = _prompt_text(f"{prompt} [{choices_label}]", default).lower()
+        if answer in choices:
+            return answer
+        print(f"Choose one of: {choices_label}", file=sys.stderr)
+
+
+def _prompt_integer(prompt: str, default: int, *, minimum: int, maximum: int) -> int:
+    while True:
+        answer = _prompt_text(f"{prompt} [{minimum}–{maximum}]", str(default))
         try:
-            answer = input(
-                "Signature provider [generic/stripe/github/shopify/standard_webhooks] (generic): "
-            ).strip()
-        except EOFError:
-            answer = ""
-        signature_provider = answer or "generic"
+            value = int(answer)
+        except ValueError:
+            print(f"Enter a whole number between {minimum} and {maximum}.", file=sys.stderr)
+            continue
+        if minimum <= value <= maximum:
+            return value
+        print(f"Enter a whole number between {minimum} and {maximum}.", file=sys.stderr)
+
+
+def _init_command(args: argparse.Namespace) -> int:
+    interactive = sys.stdin.isatty()
+    signature_provider = args.signature_provider
+    if signature_provider is None and interactive:
+        signature_provider = _prompt_choice(
+            "Signature provider",
+            ("generic", "stripe", "github", "shopify", "standard_webhooks"),
+            "generic",
+        )
     signature_provider = signature_provider or "generic"
+
+    event_type = args.event_type
+    if event_type is None and interactive:
+        event_type = _prompt_text("Event type", "test.ping")
+    event_type = event_type or "test.ping"
+
+    event_id = args.event_id
+    if event_id is None and interactive:
+        event_id = _prompt_text("Event ID", "evt_hookstorm_init_001")
+    event_id = event_id or "evt_hookstorm_init_001"
+
+    max_attempts = args.max_attempts
+    if max_attempts is None and interactive:
+        max_attempts = _prompt_integer(
+            "Maximum attempts per delivery", 1, minimum=1, maximum=10
+        )
+    max_attempts = 1 if max_attempts is None else max_attempts
+
+    duplicate_count = args.duplicate_count
+    if duplicate_count is None and interactive:
+        duplicate_count = _prompt_integer(
+            "Additional duplicate deliveries", 0, minimum=0, maximum=100
+        )
+    duplicate_count = 0 if duplicate_count is None else duplicate_count
 
     written = initialize_project(
         scenario_path=args.scenario_path,
         workflow_path=args.workflow_path,
-        event_type=args.event_type,
-        event_id=args.event_id,
+        event_type=event_type,
+        event_id=event_id,
         signature_provider=signature_provider,
+        max_attempts=max_attempts,
+        duplicate_count=duplicate_count,
         include_workflow=not args.no_workflow,
         force=args.force,
     )
