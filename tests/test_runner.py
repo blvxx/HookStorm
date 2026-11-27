@@ -106,7 +106,13 @@ def test_response_json_parser_enforces_nesting_and_strict_json_numbers() -> None
     with pytest.raises(ValueError, match="bounded UTF-8 JSON"):
         _parse_response_json(too_deep)
 
-    for body in (b'{"value":NaN}', b'{"value":Infinity}', b'{"value":1e999}'):
+    for body in (
+        b'{"value":NaN}',
+        b'{"value":Infinity}',
+        b'{"value":1e999}',
+        b'{"value":1,"value":2}',
+        b'{"nested":{"value":1,"value":2}}',
+    ):
         with pytest.raises(ValueError, match="bounded UTF-8 JSON"):
             _parse_response_json(body)
 
