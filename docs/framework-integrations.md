@@ -46,7 +46,7 @@ def test_retry_is_recorded():
     assert records[0].payload["type"] == "invoice.paid"
 ~~~
 
-The factory returns a `FastAPIWebhookEndpoint` with two attributes: `router` and `recorder`. You can supply your own `WebhookRecorder` or configure `max_body_bytes` and `include_sensitive_headers`.
+The factory returns a `FastAPIWebhookEndpoint` with two attributes: `router` and `recorder`. You can supply your own `WebhookRecorder` or configure `max_body_bytes`, `max_total_body_bytes`, `max_events`, and `include_sensitive_headers`.
 
 ## Flask
 
@@ -82,16 +82,16 @@ Both adapters use the same framework-independent `WebhookRecorder`.
 | Accepted body | UTF-8 JSON and `application/*+json` |
 | Encodings | identity, gzip, and deflate |
 | Default size limit | 1 MiB for both wire and decoded body |
-| Default event capacity | 1,000 in-memory records; HTTP 429 when full |
+| Default event capacity | 1,000 in-memory records; HTTP 429 when full |\n| Default aggregate body budget | 8 MiB total across wire and decoded body bytes; HTTP 429 when exhausted |\n| Header budget | 64 headers / 16 KiB; HTTP 431 when exceeded |
 | Duplicate detection | `X-HookStorm-Run` plus event ID when supplied |
-| Default sensitive-header handling | Authorization, cookies, and signature headers are redacted |
+| Default sensitive-header handling | Authorization, API keys, tokens, cookies, credentials, and signature-like header names are redacted |
 | Storage | In-memory only; cleared when the process exits |
 | Invalid JSON / duplicate JSON keys | HTTP 400 |
 | Unsupported content type / encoding | HTTP 415 |
 | Body too large | HTTP 413 |
 | Recorder capacity reached | HTTP 429; call `clear()` between test runs |
 
-Both adapters enforce the wire-body limit while reading the incoming request: FastAPI consumes the ASGI request stream incrementally, and Flask reads no more than `max_body_bytes + 1` bytes. An oversized request is rejected before the full body is accumulated or retained by the recorder. The recorder applies the same cap again and separately limits the decoded gzip/deflate body.
+Both adapters enforce the wire-body limit while reading the incoming request: FastAPI consumes the ASGI request stream incrementally, and Flask reads no more than `max_body_bytes + 1` bytes. An oversized request is rejected before the full body is accumulated or retained by the recorder. The recorder applies the same cap again and separately limits the decoded gzip/deflate body. It also enforces an aggregate 8 MiB budget across both wire and decoded request bodies, in addition to the event-count cap, so a long-lived test process cannot retain an unbounded number of maximum-size requests. Header count and total header bytes are capped before a record is retained.
 
 The recorder preserves the original request bytes in `record.raw_body`, including compressed bytes, while `record.payload` contains decoded JSON. Sensitive headers are redacted in `record.headers` unless you explicitly set `include_sensitive_headers=True`.
 
@@ -102,7 +102,7 @@ A record includes `event_id`, `run_id`, `duplicate`, `payload`, `raw_body`, `hea
 - Use these endpoints only in local development or an isolated test application. Do not register them in a production app.
 - Bind local development servers to `127.0.0.1`; do not expose test routes publicly.
 - Use synthetic payloads. The recorder keeps request bodies in process memory so tests can inspect them.
-- Sensitive headers are redacted by default, but payloads may still contain personal or confidential data.
+- Sensitive headers are redacted by default using both known names and secret-like name fragments; custom headers can still carry credentials under names HookStorm cannot recognize. Payloads may also contain personal or confidential data.
 - The helper does not verify HMAC signatures. Signature verification remains the responsibility of the application handler under test.
 - The recorder is not durable, distributed, or designed for concurrent production traffic.
 - Your test suite remains responsible for starting and stopping the app server and any databases, queues, or external dependencies.
