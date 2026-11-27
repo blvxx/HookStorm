@@ -134,6 +134,7 @@ jobs:
           run_case examples/duplicate-delivery.yaml http://127.0.0.1:8000/webhook
           run_case examples/idempotency-verification.yaml http://127.0.0.1:8000/webhook
           run_case examples/commit-then-drop.yaml http://127.0.0.1:8000/webhook/commit-then-drop
+          run_case examples/deterministic-fault-injection.yaml http://127.0.0.1:8000/webhook
           run_case examples/out-of-order.yaml http://127.0.0.1:8000/webhook
           run_case examples/payment-retry.yaml http://127.0.0.1:8000/webhook/flaky
           run_case examples/scheduled-events.yaml http://127.0.0.1:8000/webhook
