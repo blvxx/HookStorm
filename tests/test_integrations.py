@@ -1,7 +1,9 @@
 from __future__ import annotations
 
+import asyncio
 import gzip
 
+import httpx
 import pytest
 
 from hookstorm.integrations import WebhookRecorder, WebhookRequestError
@@ -142,7 +144,6 @@ def test_recorder_clear_resets_events_and_duplicate_state() -> None:
 
 def test_fastapi_router_records_requests_and_rejects_bad_payloads() -> None:
     from fastapi import FastAPI
-    from fastapi.testclient import TestClient
 
     from hookstorm.integrations.fastapi import create_router
 
@@ -150,31 +151,44 @@ def test_fastapi_router_records_requests_and_rejects_bad_payloads() -> None:
     app = FastAPI()
     app.include_router(integration.router)
 
-    with TestClient(app) as client:
-        first = client.post(
-            "/__hookstorm/webhook",
-            content=b'{"type":"order.created"}',
-            headers=_headers(Authorization="Bearer test-secret"),
-        )
-        second = client.post(
-            "/__hookstorm/webhook",
-            content=b'{"type":"order.created"}',
-            headers=_headers(Authorization="Bearer test-secret"),
-        )
-        bad = client.post(
-            "/__hookstorm/webhook",
-            content=b'{"duplicate":1,"duplicate":2}',
-            headers=_headers(),
-        )
-        oversized_integration = create_router(max_body_bytes=8)
-        small_app = FastAPI()
-        small_app.include_router(oversized_integration.router)
-        with TestClient(small_app) as small_client:
-            oversized = small_client.post(
+    oversized_integration = create_router(max_body_bytes=8)
+    small_app = FastAPI()
+    small_app.include_router(oversized_integration.router)
+
+    async def exercise() -> tuple[httpx.Response, httpx.Response, httpx.Response, httpx.Response]:
+        async with (
+            httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=app),
+                base_url="http://test",
+            ) as client,
+            httpx.AsyncClient(
+                transport=httpx.ASGITransport(app=small_app),
+                base_url="http://test",
+            ) as small_client,
+        ):
+            first = await client.post(
+                "/__hookstorm/webhook",
+                content=b'{"type":"order.created"}',
+                headers=_headers(Authorization="Bearer test-secret"),
+            )
+            second = await client.post(
+                "/__hookstorm/webhook",
+                content=b'{"type":"order.created"}',
+                headers=_headers(Authorization="Bearer test-secret"),
+            )
+            bad = await client.post(
+                "/__hookstorm/webhook",
+                content=b'{"duplicate":1,"duplicate":2}',
+                headers=_headers(),
+            )
+            oversized = await small_client.post(
                 "/__hookstorm/webhook",
                 content=b'{"long":"payload"}',
                 headers=_headers(),
             )
+        return first, second, bad, oversized
+
+    first, second, bad, oversized = asyncio.run(exercise())
 
     assert first.status_code == 200
     assert first.json()["duplicate"] is False
