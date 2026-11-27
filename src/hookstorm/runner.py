@@ -187,6 +187,19 @@ def _signature_headers(
     return {_SIGNATURE_HEADERS[provider]: value}
 
 
+async def _gather_cancel_on_error(coroutines: list[Any]) -> list[Any]:
+    """Run concurrent workers and fully cancel siblings if any worker fails."""
+    tasks = [asyncio.create_task(coroutine) for coroutine in coroutines]
+    try:
+        return list(await asyncio.gather(*tasks))
+    except BaseException:
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        raise
+
+
 async def run_scenario(
     scenario: dict[str, Any],
     target: str,
@@ -457,9 +470,9 @@ async def run_scenario(
                     range(len(ordered_events)),
                     key=lambda index: ordered_events[index].get("schedule_after_ms", 0),
                 )
-                scheduled_groups = await asyncio.gather(
-                    *(process_event(ordered_events[index]) for index in execution_order)
-                )
+                scheduled_groups = await _gather_cancel_on_error([
+                    process_event(ordered_events[index]) for index in execution_order
+                ])
                 groups_by_event_id = {
                     ordered_events[index]["event_id"]: group
                     for index, group in zip(execution_order, scheduled_groups, strict=True)
