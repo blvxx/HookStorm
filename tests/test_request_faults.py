@@ -1,8 +1,8 @@
 from __future__ import annotations
 
+import asyncio
 import gzip
 import json
-import socket
 import threading
 import zlib
 from collections.abc import Iterator
@@ -177,7 +177,7 @@ def test_invalid_request_variants_are_rejected_then_retry_cleanly(
     status: int,
 ) -> None:
     target, state = request_receiver
-    result = __import__("asyncio").run(
+    result = asyncio.run(
         run_scenario(_scenario(field, attempts=2), target)
     )
 
@@ -265,7 +265,6 @@ def test_truncated_and_mismatched_length_uploads_fail_safely_then_retry(
 
 def test_request_faults_cannot_be_combined_on_the_same_attempt() -> None:
     with pytest.raises(ScenarioError, match="cannot inject more than one fault"):
-        _scenario("malformed_json_attempts")
         validate_scenario(
             {
                 "version": 1,
