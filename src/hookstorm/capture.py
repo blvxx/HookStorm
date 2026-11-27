@@ -190,6 +190,11 @@ class CaptureStore:
             if len(normalized_headers) < 64:
                 normalized_headers[name] = value
 
+        try:
+            captured_path = urlsplit(request_path).path or "/"
+        except ValueError as exc:
+            raise CaptureError("request target path is invalid") from exc
+
         event_id = f"evt_capture_{len(self.events) + 1:04d}"
         event = {
             "id": self._event_type(headers, payload),
@@ -201,7 +206,7 @@ class CaptureStore:
         self.capture_events.append(
             {
                 "event_id": event_id,
-                "path": urlsplit(request_path).path or "/",
+                "path": captured_path,
                 "original_event_id": self._original_event_id(headers),
                 "sensitive_headers": sensitive_headers,
             }
