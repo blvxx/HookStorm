@@ -609,19 +609,19 @@ def test_compare_rejects_summary_success_flag_that_disagrees_with_outcomes() -> 
 
 def test_history_reads_reject_non_object_corrupt_database_rows(tmp_path) -> None:
     database = tmp_path / "history.sqlite3"
-    save_run(make_result("run_corrupt"), database)
+    save_run(make_result("run_corrup7"), database)
     connection = sqlite3.connect(database)
     try:
         connection.execute(
             "UPDATE runs SET result_json = ? WHERE run_id = ?",
-            (json.dumps(["not", "a", "run"]), "run_corrupt"),
+            (json.dumps(["not", "a", "run"]), "run_corrup7"),
         )
         connection.commit()
     finally:
         connection.close()
 
     with pytest.raises(HistoryError, match="Stored run must be a JSON object"):
-        get_run("run_corrupt", database)
+        get_run("run_corrup7", database)
     with pytest.raises(HistoryError, match="Stored run must be a JSON object"):
         list_runs(database)
 
