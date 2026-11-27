@@ -67,6 +67,7 @@ class WebhookRecorder:
         self,
         *,
         max_body_bytes: int = _DEFAULT_MAX_BODY_BYTES,
+        max_events: int = 1_000,
         include_sensitive_headers: bool = False,
     ) -> None:
         if (
@@ -75,9 +76,16 @@ class WebhookRecorder:
             or max_body_bytes < 1
         ):
             raise ValueError("max_body_bytes must be a positive integer")
+        if (
+            isinstance(max_events, bool)
+            or not isinstance(max_events, int)
+            or max_events < 1
+        ):
+            raise ValueError("max_events must be a positive integer")
         if not isinstance(include_sensitive_headers, bool):
             raise TypeError("include_sensitive_headers must be a boolean")
         self.max_body_bytes = max_body_bytes
+        self.max_events = max_events
         self.include_sensitive_headers = include_sensitive_headers
         self._lock = Lock()
         self._events: list[WebhookRecord] = []
@@ -200,6 +208,7 @@ class WebhookRecorder:
         if event_id is not None:
             identity = (run_id or "", event_id)
             with self._lock:
+                self._ensure_capacity()
                 duplicate = identity in self._processed
                 self._processed.add(identity)
                 event = WebhookRecord(
@@ -224,8 +233,16 @@ class WebhookRecorder:
             received_at=datetime.now(UTC).isoformat(),
         )
         with self._lock:
+            self._ensure_capacity()
             self._events.append(event)
         return event
+
+    def _ensure_capacity(self) -> None:
+        if len(self._events) >= self.max_events:
+            raise WebhookRequestError(
+                f"recorder reached its {self.max_events}-event limit; clear it before continuing",
+                status_code=429,
+            )
 
     @property
     def events(self) -> tuple[WebhookRecord, ...]:
