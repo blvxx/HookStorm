@@ -88,7 +88,7 @@ def mutate_payload(
             selected.append(_random_json_value(rng, nonce))
             operation = "append-array-item"
     else:
-        replacements = [
+        replacements: list[Any] = [
             None,
             True,
             False,
@@ -135,11 +135,11 @@ def _candidate_reductions(value: Any) -> Iterable[Any]:
     elif isinstance(value, list):
         yield []
         for index in range(len(value)):
-            reduced = copy.deepcopy(value)
+            reduced = list(value)
             del reduced[index]
             yield reduced
             for child in _candidate_reductions(value[index]):
-                reduced_child = copy.deepcopy(value)
+                reduced_child = list(value)
                 reduced_child[index] = child
                 yield reduced_child
     elif isinstance(value, str):
