@@ -53,6 +53,8 @@ hookstorm init --no-workflow
 hookstorm validate scenarios/webhook.yaml
 ~~~
 
+This minimal PyPI installation check is self-contained. The demo receiver and prebuilt example scenarios are maintained in the GitHub source checkout; clone it before using the commands below that reference `examples/`.
+
 To work from source or contribute, clone the repository:
 
 ~~~bash
@@ -103,8 +105,6 @@ Export a scenario as a pytest integration test:
 ~~~bash
 hookstorm export-pytest examples/payment-retry.yaml --output tests/test_payment_webhook.py
 ~~~
-
-The PyPI installation path is self-contained: `hookstorm init --no-workflow` creates a starter scenario and `hookstorm validate` checks it without files from the source repository. The demo receiver and named example scenarios below are maintained in the GitHub source checkout.
 
 The generated test reads its target from `HOOKSTORM_TARGET` and the optional HMAC secret from `HOOKSTORM_SECRET`. It does not embed an endpoint or secret. Remote HTTPS requires `HOOKSTORM_ALLOW_REMOTE=1`; remote plaintext HTTP additionally requires `HOOKSTORM_ALLOW_INSECURE_HTTP=1`.
 
