@@ -3,6 +3,7 @@
 ## Unreleased
 
 - Add Python 3.14 to the CI compatibility matrix and package classifiers.
+- Restrict local history databases and exported baseline files to owner-only POSIX permissions.
 
 ## 0.1.0a1 — First public alpha preview
 
