@@ -313,3 +313,51 @@ def test_fuzz_rejects_invalid_delivery_mutation_bounds(keyword: str, value: obje
                 **kwargs,
             )
         )
+
+def test_invalid_delivery_mutation_falls_back_to_valid_payload_trial(monkeypatch) -> None:
+    import hookstorm.fuzz as fuzz_module
+
+    base = validate_scenario(
+        {
+            "version": 1,
+            "run_timeout_ms": 100,
+            "name": "tight budget",
+            "delivery": {"timeout_ms": 50},
+            "events": [{"id": "ping", "event_id": "evt_tight", "payload": {}}],
+        }
+    )
+    observed: list[dict] = []
+
+    def force_over_budget(candidate, rng, **kwargs):
+        candidate["events"][0].setdefault("delivery", {})["delay_ms"] = 60
+        return [{
+            "dimension": "delay_ms",
+            "event_index": 0,
+            "value": 60,
+        }]
+
+    async def fake_runner(candidate, target, **kwargs):
+        observed.append(validate_scenario(candidate))
+        return {
+            "summary": {"success": True, "total_deliveries": 1, "passed": 1, "failed": 0},
+            "run_id": "run-budget-fallback",
+            "scenario_fingerprint": scenario_fingerprint(candidate),
+        }
+
+    monkeypatch.setattr(fuzz_module, "_mutate_delivery", force_over_budget)
+    result = asyncio.run(
+        run_fuzz(
+            base,
+            "http://127.0.0.1:8000/webhook",
+            iterations=1,
+            vary_delay=True,
+            max_delay_ms=60,
+            runner=fake_runner,
+        )
+    )
+
+    assert result["summary"]["success"] is True
+    assert observed[0]["events"][0]["delivery"].get("delay_ms", 0) == 0
+    skipped = result["cases"][0]["delivery_mutations"][0]
+    assert skipped["dimension"] == "delivery_mutations"
+    assert "exceeding run_timeout_ms=100" in skipped["skipped"]
