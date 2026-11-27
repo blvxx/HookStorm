@@ -9,7 +9,7 @@ HookStorm is currently in the pre-release stage. Do not publish a stable release
 - [ ] Confirm `pyproject.toml` and `hookstorm.__version__` agree with the intended release version.
 - [ ] Move the corresponding changelog entries from **Unreleased** into a dated/versioned section.
 - [ ] Build both wheel and source distribution with `python -m build`.
-- [ ] Install the wheel in a clean virtual environment and run `hookstorm --version` and `hookstorm validate examples/standard-webhooks.yaml`.
+- [ ] Install both wheel and source distribution in clean virtual environments; run `hookstorm --version`, `hookstorm init --no-workflow`, and `hookstorm validate` on the generated scenario without relying on source-checkout files.
 - [ ] Review README installation instructions, supported Python versions, security defaults, and known limitations.
 - [ ] Confirm no credentials, private endpoint URLs, local database files, or generated reports are included in the release artifacts.
 
