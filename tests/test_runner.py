@@ -703,7 +703,7 @@ def test_run_timeout_cancels_in_flight_response_processing(receiver, monkeypatch
         "version": 1,
         "name": "runtime deadline",
         "run_timeout_ms": 1_000,
-        "delivery": {"timeout_ms": 1},
+        "delivery": {"timeout_ms": 1_000},
         "events": [{"id": "ping", "event_id": "evt_timeout", "payload": {}}],
     })
 
