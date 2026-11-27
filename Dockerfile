@@ -18,7 +18,8 @@ ENV PYTHONDONTWRITEBYTECODE=1 \
 RUN groupadd --gid 10001 hookstorm \
     && useradd --no-log-init --uid 10001 --gid 10001 \
         --home-dir /home/hookstorm --create-home \
-        --shell /usr/sbin/nologin hookstorm
+        --shell /usr/sbin/nologin hookstorm \
+    && install -d -o 10001 -g 10001 /workspace
 
 COPY --from=builder /wheels /wheels
 RUN python -m pip install --no-cache-dir --no-compile --no-index \
