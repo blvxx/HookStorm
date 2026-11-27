@@ -53,7 +53,7 @@ jobs:
       - name: Install HookStorm
         run: >-
           python -m pip install
-          "git+https://github.com/blvxx/HookStorm.git@7ab9ffb6ab510b4067916a83068bf60f8c010a70"
+          "git+https://github.com/blvxx/HookStorm.git@b163b2a4af28176bae5442eeb4e6c41e7ea326cb"
 
       - name: Preflight staging endpoint
         shell: bash
