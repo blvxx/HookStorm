@@ -576,3 +576,26 @@ def test_capture_cli_parser_requires_explicit_sensitive_header_opt_in() -> None:
     assert args.include_sensitive_headers is True
     assert args.output == "capture.yaml"
     assert args.port == 0
+
+def test_schema_command_prints_packaged_json_schema(capsys) -> None:
+    exit_code = main(["schema"])
+    output = capsys.readouterr().out
+
+    assert exit_code == 0
+    schema = json.loads(output)
+    assert schema["$schema"] == "https://json-schema.org/draft/2020-12/schema"
+    assert schema["$id"] == "urn:hookstorm:scenario:v1"
+
+
+def test_schema_command_writes_without_overwriting_by_default(tmp_path, capsys) -> None:
+    output = tmp_path / "nested" / "scenario.schema.json"
+
+    assert main(["schema", "--output", str(output)]) == 0
+    assert json.loads(output.read_text(encoding="utf-8"))["$id"] == "urn:hookstorm:scenario:v1"
+    capsys.readouterr()
+
+    assert main(["schema", "--output", str(output)]) == 2
+    assert "Refusing to overwrite" in capsys.readouterr().err
+
+    assert main(["schema", "--output", str(output), "--force"]) == 0
+    assert "JSON Schema written:" in capsys.readouterr().out
