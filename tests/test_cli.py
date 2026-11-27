@@ -322,9 +322,10 @@ def test_init_command_handles_working_directory_path_alias(
     tmp_path, monkeypatch, capsys
 ) -> None:
     monkeypatch.chdir(tmp_path)
-    # Simulate Windows returning a short spelling for cwd while generated paths
-    # are resolved using the long spelling.
-    monkeypatch.setattr(Path, "cwd", classmethod(lambda cls: tmp_path.parent))
+    # Simulate Windows returning a different cwd spelling than the one
+    # used by resolved generated paths.
+    simulated_cwd = tmp_path.parent / "cwd-alias"
+    monkeypatch.setattr(Path, "cwd", classmethod(lambda cls: simulated_cwd))
 
     assert main([
         "init",
