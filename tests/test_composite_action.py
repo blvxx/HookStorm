@@ -32,6 +32,8 @@ def test_composite_action_keeps_remote_access_and_history_opt_in() -> None:
 
     run_step = next(step for step in action["runs"]["steps"] if step.get("id") == "run")
     script = run_step["run"]
+    assert "HOOKSTORM_PROJECT_PATH" in action["runs"]["steps"][1]["env"]
+    assert "pip install" in action["runs"]["steps"][1]["run"]
     assert "hookstorm validate" in script
     assert "hookstorm doctor" in script
     assert "run_args[@]" in script
