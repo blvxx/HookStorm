@@ -14,22 +14,25 @@ config.py ---- validate schema, limits, and headers
 safety.py ---- validate target (loopback unless explicitly opted in)
      |
      v
-runner.py ---- serialize -> sign -> send -> retry -> assert response
-     |
-     +-------> report.py ---- JSON / self-contained HTML
+runner.py ---- schedule -> inject selected faults -> serialize -> sign -> send -> retry -> assert
+     |                                           |
+     +-----------------------> report.py --------+---- JSON / JUnit / HTML cards + waterfall
+     |                                           |
+     +-----------------------> history.py -------+---- sanitized SQLite / JSON baselines
      |
      v
-CLI exit code (0 passed, 1 assertions failed, 2 invalid input/configuration)
+CLI summaries + diagnostics + exit code (0 passed, 1 assertions failed, 2 invalid input/configuration)
 ~~~
 
 ## Main modules
 
-- config.py: uses yaml.safe_load, rejects unknown keys, applies defaults, and bounds scenario sizes and timings.
+- config.py: uses yaml.safe_load, rejects unknown keys, applies defaults, and bounds scenario sizes and timings. It validates deterministic per-attempt fault plans, including attempt ranges, duplicate entries, overlapping fault types, and the configured retry budget.
 - safety.py: accepts only loopback IPs and localhost by default. Remote HTTPS requires --allow-remote; non-loopback HTTP additionally requires --allow-insecure-http.
 - doctor.py: validates the scenario, configured HTTP(S) target, required signing-secret presence, and verification-probe authentication environment configuration. It checks Bearer / API-key variable presence and format, plus HTTPS for authenticated non-loopback probes, without transmitting credentials or sending HTTP requests. Optional --connect performs DNS/TCP and HTTPS TLS checks for the webhook target; --verbose reports each resolved IPv4 / IPv6 address, connection timings, negotiated TLS details, and certificate metadata. Its versioned JSON output (schema version 1) exposes readiness, check summaries, network-check state, and per-check details for scripts and CI consumers.
-- runner.py: sends requests asynchronously with HTTPX, supports per-event start offsets and bounded concurrency across independent events, preserves event IDs, generates provider signatures, refreshes timestamped signatures on every retry, and checks nested JSON responses. Delivery and verification responses are streamed with a 2 MiB decoded-body cap.
-- report.py: generates JSON, JUnit XML, or self-contained HTML with elapsed-time attempt tracks, search, result filters, and expandable attempt details.
-- history.py: persists a strict whitelist of run metadata and assertion outcomes to local SQLite, exports versioned sanitized JSON baselines, and compares local or portable baselines for pass-rate, coverage, and latency regressions. On POSIX, the default history directory is owner-only (`0700`) and database / baseline files are owner-only (`0600`).
+- runner.py: sends requests asynchronously with HTTPX, supports per-event start offsets and bounded concurrency across independent events, preserves event IDs, generates provider signatures, refreshes timestamped signatures on every retry, and checks nested JSON responses. Deterministic `connect_error` injection fails before sending a request; `response_loss` sends the request, then discards the receiver response before HookStorm observes the acknowledgement. Delivery and verification responses are streamed with a 2 MiB decoded-body cap.
+- report.py: generates JSON, JUnit XML, or self-contained HTML. The HTML report has attempt cards and a shared-clock waterfall view that aligns attempts across concurrent events by elapsed start time and latency; search, result/fault filters, sorting, and attempt expansion are available without external assets.
+- history.py: persists a strict whitelist of run metadata and assertion outcomes to local SQLite, including validated injected-fault markers but never payloads, headers, response bodies, or secrets. It exports versioned sanitized JSON baselines and compares local or portable baselines for pass-rate, coverage, and latency regressions. On POSIX, the default history directory is owner-only (`0700`) and database / baseline files are owner-only (`0600`).
+- cli.py: presents concise run summaries and `history show` diagnostics, including the event and attempt affected by an injected transport fault.
 - standard_webhooks.py: validates and decodes `whsec_` keys and builds Standard Webhooks v1 HMAC headers.
 - examples/receiver.py: standard-library local demo server with provider-signature, idempotency, and commit-then-drop endpoints; never use it as a public endpoint.
 - pytest_export.py: generates pytest integration modules with an embedded, normalized scenario and runtime-only target / secret environment variables.
@@ -45,7 +48,7 @@ CLI exit code (0 passed, 1 assertions failed, 2 invalid input/configuration)
 ## Current limitations
 
 - Concurrency applies across independent events; retries and duplicate deliveries within one event remain sequential. With concurrency above 1, request completion order is intentionally nondeterministic.
-- A timeout or dropped acknowledgement does not prove the receiver rolled back work. The included commit-then-drop example demonstrates one ambiguous outcome, but cannot model every proxy, crash, database, or queue failure mode.
+- A timeout or dropped acknowledgement does not prove the receiver rolled back work. The included commit-then-drop example demonstrates one ambiguous outcome, but cannot model every proxy, crash, database, or queue failure mode. The deterministic `response_loss` fault is a client-side simulation after the HTTP transport receives the receiver response; it is not a network proxy or proof of an actual packet drop. The `/webhook/commit-then-drop` demo is separate and closes the receiver-side TCP connection after committing its business effect.
 - Provider signing formats include generic HMAC, Stripe, GitHub, Shopify, and Standard Webhooks v1 HMAC. These are request generators for authorized test endpoints, not replacements for provider SDKs or general receiver-side verification libraries. Standard Webhooks asymmetric v1a signing and multi-key rotation are not implemented.
 - JSON object assertions support recursive subset matching; arrays are compared exactly and in order.
 - A passing status or JSON assertion does not prove the business side effect happened exactly once; verify it independently in your test environment.
