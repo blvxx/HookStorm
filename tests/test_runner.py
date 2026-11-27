@@ -765,6 +765,24 @@ def test_run_timeout_cancels_in_flight_response_processing(receiver, monkeypatch
         asyncio.run(run_scenario(data, base))
 
 
+def test_delivery_timeout_is_an_absolute_deadline_for_slow_drip_responses(receiver) -> None:
+    base, _state = receiver
+    data = validate_scenario({
+        "version": 1,
+        "name": "absolute delivery timeout",
+        "run_timeout_ms": 1_000,
+        "delivery": {"timeout_ms": 150},
+        "events": [{"id": "ping", "event_id": "evt_slow_drip", "payload": {}}],
+    })
+
+    result = asyncio.run(run_scenario(data, f"{base}/slow-drip"))
+
+    attempt = result["deliveries"][0]["attempts"][0]
+    assert result["summary"]["success"] is False
+    assert attempt["error"] == "request timed out"
+    assert attempt["latency_ms"] < 300
+
+
 def test_deterministic_fault_injection_example_proves_single_effect(receiver) -> None:
     from pathlib import Path
 
