@@ -5,7 +5,7 @@ from pathlib import Path
 
 import pytest
 
-from hookstorm.cli import main
+from hookstorm.cli import _injected_fault_label, main
 from hookstorm.history import list_runs, save_run
 
 
@@ -23,6 +23,25 @@ events:
         encoding="utf-8",
     )
     return str(path)
+
+
+def test_cli_labels_all_supported_injected_faults() -> None:
+    expected = {
+        "connect_error": "Connect fault",
+        "response_loss": "ACK loss",
+        "response_body_error": "Body read error",
+        "malformed_json": "Malformed JSON",
+        "wrong_content_type": "Wrong Content-Type",
+        "gzip_body": "Gzip body",
+        "deflate_body": "Deflate body",
+        "invalid_gzip": "Invalid gzip",
+        "invalid_deflate": "Invalid deflate",
+        "chunked_transfer": "Chunked transfer",
+        "malformed_chunked": "Malformed chunked framing",
+        "partial_upload": "Partial upload",
+        "content_length_mismatch": "Content-Length mismatch",
+    }
+    assert {fault: _injected_fault_label(fault) for fault in expected} == expected
 
 
 def test_run_command_persists_history_and_history_commands_read_it(
