@@ -261,8 +261,6 @@ def _write_case(directory: Path, name: str, scenario: dict[str, Any]) -> str:
     except FileExistsError as exc:
         raise FileExistsError(f"Refusing to overwrite fuzz case: {path}") from exc
     try:
-        if os.name == "posix":
-            os.fchmod(descriptor, 0o600)
         with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
             descriptor = -1
             stream.write(scenario_to_yaml(scenario))
