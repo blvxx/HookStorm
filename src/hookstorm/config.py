@@ -127,7 +127,11 @@ def _validate_fault_injection(value: Any, where: str) -> dict[str, list[int]]:
     """Validate deterministic per-attempt client-side transport fault plans."""
     if not isinstance(value, dict):
         raise ScenarioError(f"{where} must be a mapping")
-    allowed = {"connect_error_attempts", "response_loss_attempts"}
+    allowed = {
+        "connect_error_attempts",
+        "response_loss_attempts",
+        "response_body_error_attempts",
+    }
     _unknown_keys(value, allowed, where)
 
     normalized: dict[str, list[int]] = {}
@@ -143,14 +147,16 @@ def _validate_fault_injection(value: Any, where: str) -> dict[str, list[int]]:
             raise ScenarioError(f"{where}.{field} must not contain duplicate attempt numbers")
         normalized[field] = sorted(parsed)
 
-    overlap = set(normalized["connect_error_attempts"]) & set(
-        normalized["response_loss_attempts"]
-    )
-    if overlap:
-        numbers = ", ".join(str(number) for number in sorted(overlap))
-        raise ScenarioError(
-            f"{where} cannot inject more than one fault on the same attempt ({numbers})"
-        )
+    attempt_faults: dict[int, str] = {}
+    for field, attempts in normalized.items():
+        for attempt in attempts:
+            previous = attempt_faults.get(attempt)
+            if previous is not None:
+                raise ScenarioError(
+                    f"{where} cannot inject more than one fault on attempt {attempt} "
+                    f"({previous} and {field})"
+                )
+            attempt_faults[attempt] = field
     return normalized
 
 
@@ -527,7 +533,11 @@ def validate_scenario(data: Any) -> dict[str, Any]:
     for event in normalized_events:
         effective_delivery = {**delivery, **event["delivery"]}
         fault_plan = effective_delivery.get("fault_injection", {})
-        for field in ("connect_error_attempts", "response_loss_attempts"):
+        for field in (
+            "connect_error_attempts",
+            "response_loss_attempts",
+            "response_body_error_attempts",
+        ):
             invalid_attempts = [
                 number
                 for number in fault_plan.get(field, [])
