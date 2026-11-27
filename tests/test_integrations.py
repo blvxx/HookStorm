@@ -56,7 +56,11 @@ def test_recorder_redacts_sensitive_headers_by_default() -> None:
     event = recorder.record(
         _headers(
             Authorization="Bearer not-for-reports",
-            **{"Stripe-Signature": "t=1,v1=not-for-reports"},
+            **{
+                "Stripe-Signature": "t=1,v1=not-for-reports",
+                "X-API-Key": "api-key-not-for-reports",
+                "X-Auth-Token": "token-not-for-reports",
+            },
         ),
         b'{"ok":true}',
     )
