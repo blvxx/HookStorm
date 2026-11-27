@@ -687,7 +687,21 @@ def test_load_history_export_rejects_duplicate_json_keys(tmp_path) -> None:
 
 @pytest.mark.parametrize(
     "fault",
-    ["connect_error", "response_loss", "response_body_error"],
+    [
+        "connect_error",
+        "response_loss",
+        "response_body_error",
+        "malformed_json",
+        "wrong_content_type",
+        "gzip_body",
+        "deflate_body",
+        "invalid_gzip",
+        "invalid_deflate",
+        "chunked_transfer",
+        "malformed_chunked",
+        "partial_upload",
+        "content_length_mismatch",
+    ],
 )
 def test_history_preserves_validated_injected_fault_markers(tmp_path, fault: str) -> None:
     result = make_result("run_fault_histor5")
