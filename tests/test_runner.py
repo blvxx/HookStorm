@@ -13,8 +13,8 @@ from hookstorm.config import ScenarioError, load_scenario, validate_scenario
 from hookstorm.report import render_html, render_json, render_junit
 from hookstorm.runner import (
     MAX_RESPONSE_BODY_BYTES,
-    _PinnedNetworkBackend,
     _parse_response_json,
+    _PinnedNetworkBackend,
     run_scenario,
 )
 
