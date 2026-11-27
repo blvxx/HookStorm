@@ -1,0 +1,27 @@
+version: 1
+name: Truncated response body after receiver commit
+description: >
+  The receiver processes the first delivery and returns a response, but HookStorm
+  observes only part of its body before a simulated read failure. The retry must
+  preserve the event ID and avoid applying the business effect twice.
+retry:
+  max_attempts: 2
+  backoff_ms: 50
+delivery:
+  fault_injection:
+    response_body_error_attempts: [1]
+events:
+  - id: order.created
+    event_id: evt_partial_response_001
+    payload:
+      order_id: order_partial_response_001
+      amount: 12500
+    expect_status: [200]
+    expect_json:
+      duplicate: true
+      effect_applied: false
+verify:
+  url: http://127.0.0.1:8000/__hookstorm/state
+  expect_status: [200]
+  expect_json:
+    processed_events: 1
