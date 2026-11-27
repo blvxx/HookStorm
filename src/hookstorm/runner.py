@@ -130,10 +130,12 @@ def _rewrite_request_headers(header_block: bytes, fault: str, body_length: int) 
             headers.append(line)
             continue
         lowered = name.strip().lower()
-        if fault in {"chunked_transfer", "malformed_chunked"} and lowered in {
+        if fault == "chunked_transfer" and lowered in {
             b"content-length",
             b"transfer-encoding",
         }:
+            continue
+        if fault == "malformed_chunked" and lowered == b"transfer-encoding":
             continue
         if fault == "content_length_mismatch" and lowered == b"content-length":
             headers.append(f"Content-Length: {body_length + 1}".encode("ascii"))
@@ -146,7 +148,12 @@ def _rewrite_request_headers(header_block: bytes, fault: str, body_length: int) 
 
     if fault in {"chunked_transfer", "malformed_chunked"}:
         headers.append(b"Transfer-Encoding: chunked")
-    elif fault == "content_length_mismatch" and not replaced_length:
+    if fault == "malformed_chunked" and not any(
+        line.partition(b":")[0].strip().lower() == b"content-length"
+        for line in headers
+    ):
+        headers.append(f"Content-Length: {body_length}".encode("ascii"))
+    if fault == "content_length_mismatch" and not replaced_length:
         headers.append(f"Content-Length: {body_length + 1}".encode("ascii"))
 
     if fault in {"partial_upload", "content_length_mismatch"}:
