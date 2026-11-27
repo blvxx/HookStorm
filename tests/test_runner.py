@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import json
 import socket
 import time
 
@@ -98,9 +99,8 @@ def test_html_report_labels_every_supported_injected_fault() -> None:
 
 
 def test_response_json_parser_enforces_nesting_and_strict_json_numbers() -> None:
-    assert _parse_response_json(b'{"message":"[{{}}] \\"quoted\\""}') == {
-        "message": '[{{}}] "quoted"'
-    }
+    expected = {"message": '[{{}}] "quoted" \\ path'}
+    assert _parse_response_json(json.dumps(expected).encode("utf-8")) == expected
 
     too_deep = ("[" * 101 + "null" + "]" * 101).encode("ascii")
     with pytest.raises(ValueError, match="bounded UTF-8 JSON"):
@@ -110,8 +110,9 @@ def test_response_json_parser_enforces_nesting_and_strict_json_numbers() -> None
         with pytest.raises(ValueError, match="bounded UTF-8 JSON"):
             _parse_response_json(body)
 
+    invalid_utf8 = b'{"value":"' + b"\\xff" + b'"}'
     with pytest.raises(ValueError, match="bounded UTF-8 JSON"):
-        _parse_response_json(b'{"value":"\\xff"}')
+        _parse_response_json(invalid_utf8)
 
 
 def test_custom_header_overrides_default_case_insensitively(receiver) -> None:
