@@ -789,3 +789,38 @@ def test_request_fault_plans_are_validated_and_cannot_overlap() -> None:
     }
     with pytest.raises(ScenarioError, match="cannot inject more than one fault"):
         validate_scenario(conflict)
+
+
+def test_load_scenario_rejects_excessive_yaml_aliases(tmp_path) -> None:
+    lines = ["base: &base [one, two]"]
+    lines.extend(f"alias_{index}: *base" for index in range(17))
+    scenario_file = tmp_path / "aliases.yaml"
+    scenario_file.write_text("\n".join(lines), encoding="utf-8")
+
+    with pytest.raises(ScenarioError, match="more than 16 aliases"):
+        load_scenario(scenario_file)
+
+
+def test_rejects_scenario_with_excessive_aggregate_payload_bytes() -> None:
+    data = valid_scenario()
+    data["events"] = [
+        {
+            "id": f"event.{index}",
+            "event_id": f"evt_{index}",
+            "payload": {"blob": "x" * 1_000_000},
+        }
+        for index in range(17)
+    ]
+
+    with pytest.raises(ScenarioError, match="aggregate limit"):
+        validate_scenario(data)
+
+
+def test_load_scenario_rejects_oversized_source_file(tmp_path) -> None:
+    from hookstorm.config import _MAX_SCENARIO_FILE_BYTES
+
+    scenario_file = tmp_path / "oversized.yaml"
+    scenario_file.write_bytes(b"x" * (_MAX_SCENARIO_FILE_BYTES + 1))
+
+    with pytest.raises(ScenarioError, match="file exceeds"):
+        load_scenario(scenario_file)
