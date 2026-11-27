@@ -35,6 +35,7 @@ The demo receiver binds to `127.0.0.1` only. The command writes a self-contained
 | Signatures | Generic HMAC, Stripe, GitHub, Shopify, Standard Webhooks v1 |
 | Assertions | HTTP status, nested JSON, and optional read-only business-state verification |
 | Seeded fuzzing | Reproducible JSON payload mutations, bounded failure minimization, and replayable YAML cases |
+| Capture | Loopback-only JSON webhook receiver, header redaction, and atomic scenario export |
 | Fuzzing | Seeded JSON payload mutations, replayable failing cases, and bounded failure minimization |
 | Reports and regression checks | HTML, JSON, JUnit, local SQLite history, portable baselines |
 
@@ -69,6 +70,7 @@ Read [SECURITY.md](SECURITY.md) and the [architecture notes](docs/architecture.m
 
 - [Scenario format and behavior](docs/scenario-format.md)
 - [Seeded fuzzing and failure minimization](docs/fuzzing.md)
+- [Loopback webhook capture](docs/capture.md)
 - [Provider profiles and retry-policy notes](docs/provider-profiles.md)
 - [Seeded fuzzing and failure minimization](docs/fuzzing.md)
 - [Ambiguous acknowledgements and idempotency](docs/ambiguous-acknowledgements.md)
@@ -81,8 +83,8 @@ Read [SECURITY.md](SECURITY.md) and the [architecture notes](docs/architecture.m
 Planned work, in priority order:
 
 1. Extend seeded payload fuzzing to vary event order, duplicate deliveries, delays, and controlled failure injection.
-2. A loopback-only `hookstorm capture` receiver that creates scenarios and redacts sensitive headers by default.
-3. Additional request fault injection: malformed JSON, content types, compression, chunking, partial uploads, content-length mismatches, slow bodies, secret rotation, and large payloads.
+2. Expand fuzzing to vary event order, duplicate deliveries, delays, and controlled transport failures.
+3. Add request fault injection for malformed JSON, content types, compression, chunking, partial uploads, content-length mismatches, slow bodies, secret rotation, and large payloads.
 4. A reusable composite GitHub Action with SHA-pinned dependencies.
 5. A structured pytest integration API and small FastAPI / Flask helpers.
 6. JSON Schema output for editor completion.

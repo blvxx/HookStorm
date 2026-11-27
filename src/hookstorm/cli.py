@@ -12,6 +12,7 @@ from pathlib import Path
 
 from hookstorm import __version__
 from hookstorm.config import load_scenario
+from hookstorm.capture import create_capture_server
 from hookstorm.doctor import build_preflight_document, run_preflight
 from hookstorm.fuzz import run_fuzz
 from hookstorm.history import (
@@ -76,6 +77,29 @@ def _parser() -> argparse.ArgumentParser:
     )
     init.add_argument("--no-workflow", action="store_true", help="create only the YAML scenario")
     init.add_argument("--force", action="store_true", help="overwrite generated files if they exist")
+
+    capture = subparsers.add_parser(
+        "capture",
+        help="capture JSON webhooks on loopback and write a replayable YAML scenario",
+    )
+    capture.add_argument("--output", default="captured-webhooks.yaml")
+    capture.add_argument(
+        "--port",
+        type=int,
+        default=8787,
+        help="loopback HTTP port (0 chooses a free port)",
+    )
+    capture.add_argument(
+        "--max-events",
+        type=int,
+        default=25,
+        help="maximum number of captured events (1–500; default: 25)",
+    )
+    capture.add_argument(
+        "--include-sensitive-headers",
+        action="store_true",
+        help="store authorization/signature headers as non-replayed forensic metadata",
+    )
 
     run = subparsers.add_parser("run", help="execute a YAML scenario against a webhook endpoint")
     run.add_argument("scenario", help="path to a scenario YAML file")
@@ -579,6 +603,31 @@ def _doctor_command(args: argparse.Namespace) -> int:
     return document["exit_code"]
 
 
+def _capture_command(args: argparse.Namespace) -> int:
+    server, store = create_capture_server(
+        args.output,
+        port=args.port,
+        include_sensitive_headers=args.include_sensitive_headers,
+        max_events=args.max_events,
+    )
+    actual_port = server.server_address[1]
+    output = Path(args.output)
+    print(f"Capture listening on http://127.0.0.1:{actual_port}/")
+    print(f"Output: {output.resolve()}")
+    print("Send JSON webhook POST requests; press Ctrl+C to stop.")
+    try:
+        server.serve_forever(poll_interval=0.2)
+    except KeyboardInterrupt:
+        print("\\nStopping capture...", file=sys.stderr)
+    finally:
+        server.server_close()
+    if store.events:
+        print(f"Captured {len(store.events)} event(s) to {output.resolve()}")
+    else:
+        print("No webhook requests were captured.")
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
@@ -586,6 +635,8 @@ def main(argv: Sequence[str] | None = None) -> int:
             return _init_command(args)
         if args.command == "doctor":
             return _doctor_command(args)
+        if args.command == "capture":
+            return _capture_command(args)
         if args.command == "history":
             if args.history_command == "list":
                 return _history_list_command(args)

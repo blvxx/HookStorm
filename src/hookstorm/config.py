@@ -46,7 +46,7 @@ _DEFAULT_RUN_TIMEOUT_MS = 3_600_000
 _MAX_RUN_TIMEOUT_MS = 86_400_000
 
 _ALLOWED_TOP_LEVEL = {
-    "version", "name", "description", "delivery", "retry", "events", "verify", "run_timeout_ms", "provider"
+    "version", "name", "description", "delivery", "retry", "events", "verify", "run_timeout_ms", "provider", "capture"
 }
 _ALLOWED_DELIVERY = {
     "order", "duplicate_count", "delay_ms", "timeout_ms", "signature", "concurrency",
@@ -553,6 +553,67 @@ def validate_scenario(data: Any) -> dict[str, Any]:
                 "standard_webhooks"
             )
 
+    capture = data.get("capture")
+    if capture is not None:
+        if not isinstance(capture, dict):
+            raise ScenarioError("capture must be a mapping")
+        _unknown_keys(capture, {"source", "events"}, "capture")
+        if capture.get("source") != "hookstorm.capture":
+            raise ScenarioError("capture.source must be hookstorm.capture")
+        capture_events = capture.get("events")
+        if not isinstance(capture_events, list) or len(capture_events) != len(normalized_events):
+            raise ScenarioError("capture.events must contain one metadata entry per scenario event")
+        normalized_capture_events: list[dict[str, Any]] = []
+        for index, metadata in enumerate(capture_events):
+            where = f"capture.events[{index}]"
+            if not isinstance(metadata, dict):
+                raise ScenarioError(f"{where} must be a mapping")
+            _unknown_keys(
+                metadata,
+                {"event_id", "path", "original_event_id", "sensitive_headers"},
+                where,
+            )
+            if metadata.get("event_id") != normalized_events[index]["event_id"]:
+                raise ScenarioError(f"{where}.event_id must match the corresponding scenario event")
+            path = metadata.get("path", "/")
+            if (
+                not isinstance(path, str)
+                or not path.startswith("/")
+                or len(path) > 2048
+                or not _is_safe_header_value(path, allow_horizontal_tab=False)
+            ):
+                raise ScenarioError(f"{where}.path must be a safe absolute request path")
+            item: dict[str, Any] = {"event_id": metadata["event_id"], "path": path}
+            original_event_id = metadata.get("original_event_id")
+            if original_event_id is not None:
+                if (
+                    not isinstance(original_event_id, str)
+                    or not original_event_id
+                    or len(original_event_id) > 256
+                    or not _is_safe_header_value(original_event_id, allow_horizontal_tab=False)
+                ):
+                    raise ScenarioError(f"{where}.original_event_id must be a safe string")
+                item["original_event_id"] = original_event_id
+            sensitive_headers = metadata.get("sensitive_headers", {})
+            if not isinstance(sensitive_headers, dict) or any(
+                not isinstance(key, str) or not isinstance(value, str)
+                for key, value in sensitive_headers.items()
+            ):
+                raise ScenarioError(f"{where}.sensitive_headers must be a string mapping")
+            if len(sensitive_headers) > 64 or sum(
+                len(key) + len(value) for key, value in sensitive_headers.items()
+            ) > 16_384:
+                raise ScenarioError(f"{where}.sensitive_headers exceed the 64-header / 16 KiB limit")
+            for key, value in sensitive_headers.items():
+                if (
+                    not re.fullmatch(r"[!#$%&'*+._^|~0-9A-Za-z-]+", key)
+                    or not _is_safe_header_value(value)
+                ):
+                    raise ScenarioError(f"{where}.sensitive_headers contains an invalid header")
+            item["sensitive_headers"] = dict(sensitive_headers)
+            normalized_capture_events.append(item)
+        capture = {"source": "hookstorm.capture", "events": normalized_capture_events}
+
     estimated_requests = 0
     for event in normalized_events:
         effective_delivery = {**delivery, **event["delivery"]}
@@ -584,6 +645,8 @@ def validate_scenario(data: Any) -> dict[str, Any]:
     }
     if provider is not None:
         normalized_scenario["provider"] = provider
+    if capture is not None:
+        normalized_scenario["capture"] = capture
     return normalized_scenario
 
 

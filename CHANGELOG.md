@@ -8,6 +8,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 
 ### Added
 
+- Add `hookstorm capture`, a loopback-only JSON webhook receiver that exports version 1 scenarios, redacts sensitive headers by default, and atomically persists captures.
+
 - Add a YAML scenario format (version 1) and CLI commands for running and validating scenarios.
 - Add retries, exponential backoff, duplicate deliveries, reverse ordering, scheduling, bounded concurrency, request timeouts, and a run-wide deadline.
 - Add generic HMAC plus Stripe, GitHub, Shopify, and Standard Webhooks v1 request signatures.

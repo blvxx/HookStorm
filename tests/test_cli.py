@@ -549,3 +549,30 @@ def test_fuzz_cli_executes_seeded_mutations_and_writes_json_summary(
     assert summary["worst_case_http_attempts"] == 3
     assert len({case["event_id"] for case in summary["cases"]}) == 3
     assert "Fuzz summary:" in capsys.readouterr().out
+
+
+
+def test_capture_cli_parser_defaults_to_loopback_capture_output() -> None:
+    from hookstorm.cli import _parser
+
+    args = _parser().parse_args(["capture"])
+    assert args.output == "captured-webhooks.yaml"
+    assert args.port == 8787
+    assert args.max_events == 25
+    assert args.include_sensitive_headers is False
+
+
+def test_capture_cli_parser_requires_explicit_sensitive_header_opt_in() -> None:
+    from hookstorm.cli import _parser
+
+    args = _parser().parse_args([
+        "capture",
+        "--include-sensitive-headers",
+        "--output",
+        "capture.yaml",
+        "--port",
+        "0",
+    ])
+    assert args.include_sensitive_headers is True
+    assert args.output == "capture.yaml"
+    assert args.port == 0

@@ -33,11 +33,16 @@ CLI summaries + diagnostics + exit code (0 passed, 1 assertions failed, 2 invali
 - `fuzz.py`: applies seeded, structure-aware JSON payload mutations, gives every trial a distinct event identity, records privacy-conscious execution summaries, and optionally uses a bounded greedy reducer to preserve failing assertions.
 - `report.py`: generates JSON, JUnit XML, or self-contained HTML with attempt cards, a shared-clock waterfall, search, result/fault filters, and sorting.
 - `history.py`: persists a strict whitelist of run metadata and assertion outcomes to local SQLite and exports sanitized JSON baselines. SQLite uses `PRAGMA user_version` for schema version 1; existing unversioned databases are migrated in place without rewriting stored runs. Schema creation takes an immediate write transaction, and concurrent processes serialize through SQLite with a 30-second busy timeout. Payloads, headers, response bodies, and secret values remain excluded.
-- `cli.py`: exposes run, validate, init, doctor, export-pytest, and history commands.
+- `cli.py`: exposes run, validate, init, capture, fuzz, doctor, export-pytest, and history commands.
+- `capture.py`: serves JSON webhook capture requests on IPv4 loopback only, removes sensitive headers by default, and atomically writes scenarios with restrictive permissions.
 - `standard_webhooks.py`: validates and decodes `whsec_` keys and builds Standard Webhooks v1 HMAC headers.
 - `examples/receiver.py`: standard-library local demo server with provider-signature, idempotency, and commit-then-drop endpoints. Never expose it publicly.
 - `pytest_export.py`: generates pytest integration modules with an embedded normalized scenario and runtime-only target / secret environment variables.
 - `scaffold.py`: generates a starter YAML scenario and SHA-pinned GitHub Actions staging workflow. It refuses to overwrite existing files unless `--force` is passed.
+
+## Capture behavior
+
+`hookstorm capture` binds to `127.0.0.1` only and accepts JSON POST requests with a single `Content-Length` header. Chunked requests and non-JSON bodies are rejected. A body may be at most 1 MiB and the whole captured scenario at most 8 MiB. Authorization, cookie, token, API-key, and signature-like headers are omitted by default. `--include-sensitive-headers` stores these values under optional `capture.events[].sensitive_headers` metadata; that metadata is excluded from the scenario fingerprint and is never used by the runner to create request headers. Capture output is written atomically and has POSIX mode `0600`.
 
 ## Deliberate trade-offs
 

@@ -24,6 +24,10 @@ Unknown keys and duplicate YAML mapping keys are rejected to catch typos and amb
 
 The same deadline is enforced while the run is active. If it expires, HookStorm cancels in-flight tasks and reports a CLI error. Cancellation cannot undo a business side effect that the receiver has already committed, so use idempotent test data and isolated endpoints. Increase `run_timeout_ms` deliberately for longer stress scenarios, up to 24 hours. The default budget preserves legacy scenario fingerprints; explicitly choosing a non-default budget changes the fingerprint and is detected by baseline comparisons.
 
+## Capture metadata
+
+Scenarios created by `hookstorm capture` may contain an optional top-level `capture` mapping with `source: hookstorm.capture` and one metadata record per event. This metadata stores the original request path and, when explicitly requested, sensitive header values. It does not affect runtime delivery or the scenario fingerprint. Sensitive values in capture metadata are never replayed as request headers. Do not share a capture file created with `--include-sensitive-headers` unless those values have been reviewed and removed.
+
 ## Provider profiles
 
 A profile can be selected in YAML or at the command line. For example, `hookstorm run scenarios/webhook.yaml --target http://127.0.0.1:8000/webhook --provider github` uses a synthetic GitHub `issues.opened` event, `X-GitHub-Event`, a stable synthetic `X-GitHub-Delivery` UUID, and the GitHub HMAC signature format. `hookstorm init --provider stripe` creates a Stripe-shaped `payment_intent.succeeded` scenario. All profile payloads are synthetic examples; replace them with representative test payloads for your application. Profiles never call provider APIs or create real events.
