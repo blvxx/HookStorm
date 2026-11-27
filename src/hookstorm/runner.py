@@ -192,7 +192,10 @@ class _FaultInjectingTransport(httpx.AsyncBaseTransport):
         *,
         limits: httpx.Limits | None = None,
     ) -> httpx.AsyncHTTPTransport:
-        transport = httpx.AsyncHTTPTransport(trust_env=False, limits=limits)
+        transport = httpx.AsyncHTTPTransport(
+            trust_env=False,
+            limits=limits or httpx.Limits(),
+        )
         # HTTPX delegates socket creation to its httpcore pool. Replace only
         # the network backend: the original URL host remains intact for the
         # HTTP Host header, TLS SNI, and certificate hostname verification.
@@ -445,24 +448,6 @@ async def run_scenario(
                 for attempt in range(1, retry["max_attempts"] + 1):
                     if delivery_config["delay_ms"]:
                         await asyncio.sleep(delivery_config["delay_ms"] / 1000)
-                    headers = dict(base_headers)
-                    request_body, request_fault_headers = prepare_request_body(
-                        event_body,
-                        injected_fault,
-                    )
-                    headers.update(request_fault_headers)
-                    headers["X-HookStorm-Attempt"] = str(attempt)
-                    headers["X-HookStorm-Duplicate-Index"] = str(duplicate_index)
-                    headers.update(
-                        _signature_headers(
-                            request_body,
-                            secret or "",
-                            delivery_config["signature"],
-                            delivery_config["signature_provider"],
-                            event["event_id"],
-                            delivery_config["signature_timestamp_offset_seconds"],
-                        )
-                    )
                     started_attempt = time.perf_counter()
                     fault_plan = delivery_config.get(
                         "fault_injection",
@@ -494,6 +479,24 @@ async def run_scenario(
                             if attempt in fault_plan.get(field_name, [])
                         ),
                         None,
+                    )
+                    headers = dict(base_headers)
+                    request_body, request_fault_headers = prepare_request_body(
+                        event_body,
+                        injected_fault,
+                    )
+                    headers.update(request_fault_headers)
+                    headers["X-HookStorm-Attempt"] = str(attempt)
+                    headers["X-HookStorm-Duplicate-Index"] = str(duplicate_index)
+                    headers.update(
+                        _signature_headers(
+                            request_body,
+                            secret or "",
+                            delivery_config["signature"],
+                            delivery_config["signature_provider"],
+                            event["event_id"],
+                            delivery_config["signature_timestamp_offset_seconds"],
+                        )
                     )
                     outcome: dict[str, Any] = {
                         "attempt": attempt,
