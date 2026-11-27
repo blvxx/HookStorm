@@ -619,7 +619,11 @@ def _validate_scenario(data: Any) -> dict[str, Any]:
                 "signature_timestamp_offset_seconds can only be used with signature_provider: "
                 "stripe or standard_webhooks"
             )
-        if signature_provider == "standard_webhooks" and "." in event["event_id"]:
+        if (
+            signature_provider == "standard_webhooks"
+            and effective_delivery.get("signature", "none") in {"valid", "invalid"}
+            and "." in event["event_id"]
+        ):
             raise ScenarioError(
                 "events[].event_id must not contain '.' when signature_provider is "
                 "standard_webhooks"
