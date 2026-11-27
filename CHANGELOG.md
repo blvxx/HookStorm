@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-- Pin all repository GitHub Actions workflows to reviewed full commit SHAs, refresh generated and copy-ready integration templates to the latest reviewed HookStorm revision, and enforce Ruff formatting checks in CI and release builds.
+- Pin all repository GitHub Actions workflows to reviewed full commit SHAs and refresh generated and copy-ready integration templates to the latest reviewed HookStorm revision.
 
 - Add a shared-clock waterfall view to the interactive HTML report, reusing search, result/fault filters, and sort controls across both timeline layouts.
 - Show deterministic transport fault markers in terminal run summaries and `history show`, including the affected attempt and event.
