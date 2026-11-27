@@ -24,7 +24,7 @@ After the PR is reviewed and merged, the final release commit must pass the rele
 | Distributions | Wheel and sdist are built and smoke-installed in CI | Required release gates |
 | Release workflow | Tag/version/prerelease validation, main-ancestry check, Twine validation, and PyPI Trusted Publishing | Fail-closed design |
 | Docker | Multi-stage runtime image, non-root UID 10001, read-only container smoke in CI | Local image only; no registry publication |
-| Documentation | Zensical configuration and a separate build workflow | Site source is prepared; not deployed |
+| Documentation | Zensical configuration, build workflow, and main-only Pages deployment workflow | Build is validated; Pages configuration and first deployment remain unverified |
 | Secrets | Reports/history use explicit safe fields; integrations redact sensitive headers by default | Review payloads before sharing |
 
 ## Mandatory blockers before publication
