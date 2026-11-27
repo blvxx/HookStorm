@@ -625,3 +625,46 @@ def test_schema_command_writes_without_overwriting_by_default(tmp_path, capsys) 
 
     assert main(["schema", "--output", str(output), "--force"]) == 0
     assert "JSON Schema written:" in capsys.readouterr().out
+
+def test_fuzz_cli_forwards_delivery_variation_options(monkeypatch, tmp_path, capsys) -> None:
+    observed: dict[str, object] = {}
+
+    async def fake_fuzz(scenario, target, **kwargs):
+        observed.update(kwargs)
+        return {
+            "schema_version": 1,
+            "mode": "seeded-scenario-fuzz",
+            "seed": 9,
+            "iterations": 1,
+            "summary": {"success": True},
+            "cases": [],
+        }
+
+    monkeypatch.setattr("hookstorm.cli.run_fuzz", fake_fuzz)
+    scenario_path = _scenario_file(tmp_path)
+
+    exit_code = main([
+        "fuzz",
+        scenario_path,
+        "--target",
+        "http://127.0.0.1:8000/webhook",
+        "--vary-order",
+        "--vary-duplicates",
+        "--max-duplicates",
+        "4",
+        "--vary-delay",
+        "--max-delay-ms",
+        "250",
+        "--vary-faults",
+        "--output",
+        str(tmp_path / "fuzz.json"),
+    ])
+
+    assert exit_code == 0
+    assert observed["vary_order"] is True
+    assert observed["vary_duplicates"] is True
+    assert observed["max_duplicates"] == 4
+    assert observed["vary_delay"] is True
+    assert observed["max_delay_ms"] == 250
+    assert observed["vary_faults"] is True
+    assert "Fuzz summary:" in capsys.readouterr().out
