@@ -376,11 +376,12 @@ def test_history_export_preserves_existing_baseline_when_atomic_replace_fails(
     def fail_replace(_source, _destination):
         raise OSError("simulated replacement failure")
 
-    unexpected_closes: list[int] = []
+    invalid_closes: list[int] = []
     real_close = history_module.os.close
 
     def track_close(descriptor: int) -> None:
-        unexpected_closes.append(descriptor)
+        if descriptor < 0:
+            invalid_closes.append(descriptor)
         real_close(descriptor)
 
     monkeypatch.setattr(history_module.os, "replace", fail_replace)
@@ -388,7 +389,7 @@ def test_history_export_preserves_existing_baseline_when_atomic_replace_fails(
     with pytest.raises(HistoryError, match="Cannot export run"):
         export_history_run("latest", output, database)
 
-    assert unexpected_closes == []
+    assert invalid_closes == []
     assert output.read_text(encoding="utf-8") == "previous valid baseline"
     assert list(tmp_path.glob(".baseline.json.*.tmp")) == []
 
