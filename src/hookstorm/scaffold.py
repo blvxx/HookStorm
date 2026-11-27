@@ -65,10 +65,24 @@ def render_scenario(
         event_type = event_type or "test.ping"
         event_id = event_id or "evt_hookstorm_init_001"
         payload = {"test": True, "source": "hookstorm"}
-    if not event_type or len(event_type) > 256 or any(ch in event_type for ch in "\r\n"):
-        raise ValueError("event type must contain 1–256 characters and no line breaks")
-    if not event_id or len(event_id) > 256 or any(ch in event_id for ch in "\r\n"):
-        raise ValueError("event ID must contain 1–256 characters and no line breaks")
+    if (
+        not isinstance(event_type, str)
+        or not event_type.strip()
+        or len(event_type) > 256
+        or any(not 0x20 <= ord(character) <= 0x7E for character in event_type)
+    ):
+        raise ValueError(
+            "event type must contain 1–256 printable ASCII characters without controls"
+        )
+    if (
+        not isinstance(event_id, str)
+        or not event_id.strip()
+        or len(event_id) > 256
+        or any(not 0x20 <= ord(character) <= 0x7E for character in event_id)
+    ):
+        raise ValueError(
+            "event ID must contain 1–256 printable ASCII characters without controls"
+        )
     max_attempts = _bounded_integer(max_attempts, "max_attempts", minimum=1, maximum=10)
     duplicate_count = _bounded_integer(duplicate_count, "duplicate_count", minimum=0, maximum=100)
 
