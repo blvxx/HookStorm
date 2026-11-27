@@ -66,6 +66,26 @@ def test_rejects_invalid_headers() -> None:
         validate_scenario(data)
 
 
+@pytest.mark.parametrize(
+    "header",
+    [
+        "Connection",
+        "Keep-Alive",
+        "Proxy-Connection",
+        "Proxy-Authenticate",
+        "Proxy-Authorization",
+        "TE",
+        "Trailer",
+        "Upgrade",
+    ],
+)
+def test_rejects_proxy_and_hop_by_hop_request_headers(header: str) -> None:
+    data = valid_scenario()
+    data["events"][0]["headers"] = {header: "unsafe"}
+    with pytest.raises(ScenarioError, match="may not override"):
+        validate_scenario(data)
+
+
 @pytest.mark.parametrize("value", ["snowman \u2603", "bad\x00value", "bad\x1fvalue", "bad\x7fvalue"])
 def test_rejects_non_ascii_or_control_header_values(value: str) -> None:
     data = valid_scenario()
