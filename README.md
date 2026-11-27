@@ -317,6 +317,8 @@ events:
 
 See docs/scenario-format.md for the complete schema.
 
+Every scenario also has a top-level `run_timeout_ms` budget (60 minutes by default, configurable up to 24 hours). HookStorm estimates the maximum configured request-time budget before sending traffic and cancels in-flight work when the hard deadline expires. See the scenario format guide for the calculation and safety implications.
+
 ## Reports
 
 ~~~bash

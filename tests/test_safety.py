@@ -49,3 +49,22 @@ def test_insecure_http_opt_in_requires_remote_opt_in() -> None:
 def test_rejects_embedded_credentials_even_when_remote_is_allowed() -> None:
     with pytest.raises(UnsafeTargetError, match="credentials"):
         validate_target("https://user:pass@example.com/hook", allow_remote=True)
+
+
+@pytest.mark.parametrize(
+    "target",
+    [
+        "http://127.0.0.1:99999/webhook",
+        "http://127.0.0.1:0/webhook",
+        "https://example.com:99999/webhook",
+        "http://localhost:not-a-port/webhook",
+    ],
+)
+def test_rejects_invalid_ports_before_network_access(target: str) -> None:
+    with pytest.raises(UnsafeTargetError, match="invalid hostname or port|between 1 and 65535"):
+        validate_target(target, allow_remote=True, allow_insecure_http=True)
+
+
+def test_rejects_malformed_ipv6_url() -> None:
+    with pytest.raises(UnsafeTargetError, match="invalid hostname or port"):
+        validate_target("http://[not-an-ipv6-address]/webhook")

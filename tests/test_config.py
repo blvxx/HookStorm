@@ -1,8 +1,16 @@
 from __future__ import annotations
 
+import hashlib
+import json
+
 import pytest
 
-from hookstorm.config import ScenarioError, scenario_fingerprint, validate_scenario
+from hookstorm.config import (
+    ScenarioError,
+    load_scenario,
+    scenario_fingerprint,
+    validate_scenario,
+)
 
 
 def valid_scenario() -> dict:
@@ -431,3 +439,62 @@ def test_rejects_invalid_per_event_schedule_offset(offset: object) -> None:
     data["events"][0]["schedule_after_ms"] = offset
     with pytest.raises(ScenarioError, match="schedule_after_ms"):
         validate_scenario(data)
+
+
+
+def test_default_run_timeout_preserves_legacy_fingerprint_shape() -> None:
+    scenario = validate_scenario(valid_scenario())
+    legacy_behavior = {
+        key: scenario.get(key)
+        for key in ("version", "delivery", "retry", "events", "verify")
+    }
+    canonical = json.dumps(
+        legacy_behavior,
+        sort_keys=True,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+
+    assert scenario_fingerprint(scenario) == hashlib.sha256(canonical).hexdigest()
+
+
+def test_run_timeout_defaults_and_is_included_in_fingerprint() -> None:
+    default = validate_scenario(valid_scenario())
+    extended = validate_scenario({**valid_scenario(), "run_timeout_ms": 900_000})
+
+    assert default["run_timeout_ms"] == 3_600_000
+    assert scenario_fingerprint(default) != scenario_fingerprint(extended)
+
+
+@pytest.mark.parametrize("value", [0, 99, 86_400_001, True, 1.5, "100"])
+def test_rejects_invalid_run_timeout(value: object) -> None:
+    data = valid_scenario()
+    data["run_timeout_ms"] = value
+    with pytest.raises(ScenarioError, match="run_timeout_ms"):
+        validate_scenario(data)
+
+
+def test_rejects_scenarios_whose_worst_case_exceeds_run_timeout() -> None:
+    data = valid_scenario()
+    data["run_timeout_ms"] = 1_000
+    data["delivery"] = {"timeout_ms": 600}
+    data["retry"] = {"max_attempts": 2}
+
+    with pytest.raises(ScenarioError, match="worst-case request-time budget"):
+        validate_scenario(data)
+
+
+@pytest.mark.parametrize(
+    "yaml_text",
+    [
+        "version: 1\nversion: 1\nname: duplicate\nevents: [{id: ping, event_id: evt_1}]\n",
+        "version: 1\nname: duplicate\ndelivery:\n  timeout_ms: 100\n  timeout_ms: 200\nevents: [{id: ping, event_id: evt_1}]\n",
+    ],
+)
+def test_load_scenario_rejects_duplicate_yaml_keys(tmp_path, yaml_text: str) -> None:
+    scenario_file = tmp_path / "duplicate.yaml"
+    scenario_file.write_text(yaml_text, encoding="utf-8")
+
+    with pytest.raises(ScenarioError, match="Duplicate YAML key"):
+        load_scenario(scenario_file)

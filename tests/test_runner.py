@@ -688,3 +688,24 @@ def test_scheduled_event_waits_before_acquiring_concurrency_slot(receiver) -> No
     assert result["deliveries"][1]["schedule_after_ms"] == 0
     assert result["deliveries"][0]["attempts"][0]["elapsed_ms"] >= 0
     assert "scheduled +150 ms" in render_html(result)
+
+
+
+def test_run_timeout_cancels_in_flight_response_processing(receiver, monkeypatch) -> None:
+    base, _state = receiver
+
+    async def slow_body(_response):
+        await asyncio.sleep(2)
+        return b"{}"
+
+    monkeypatch.setattr("hookstorm.runner._read_limited_response_body", slow_body)
+    data = validate_scenario({
+        "version": 1,
+        "name": "runtime deadline",
+        "run_timeout_ms": 1_000,
+        "delivery": {"timeout_ms": 1_000},
+        "events": [{"id": "ping", "event_id": "evt_timeout", "payload": {}}],
+    })
+
+    with pytest.raises(ValueError, match="exceeded run_timeout_ms=1000"):
+        asyncio.run(run_scenario(data, base))

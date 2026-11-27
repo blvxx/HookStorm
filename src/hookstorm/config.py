@@ -16,7 +16,36 @@ class ScenarioError(ValueError):
     """Raised when a scenario file is invalid."""
 
 
-_ALLOWED_TOP_LEVEL = {"version", "name", "description", "delivery", "retry", "events", "verify"}
+class _UniqueKeySafeLoader(yaml.SafeLoader):
+    """Safe YAML loader that rejects duplicate keys before constructing mappings."""
+
+    def construct_mapping(self, node: yaml.MappingNode, deep: bool = False) -> dict:
+        seen: dict[Any, Any] = {}
+        for key_node, _value_node in node.value:
+            if key_node.tag == "tag:yaml.org,2002:merge":
+                continue
+            key = self.construct_object(key_node, deep=deep)
+            try:
+                previous = seen.get(key)
+            except TypeError as exc:
+                raise ScenarioError("YAML mapping keys must be hashable") from exc
+            if previous is not None:
+                raise ScenarioError(
+                    f"Duplicate YAML key {key!r} at line {key_node.start_mark.line + 1}; "
+                    f"first defined at line {previous.line + 1}"
+                )
+            seen[key] = key_node.start_mark
+
+        self.flatten_mapping(node)
+        return super().construct_mapping(node, deep=deep)
+
+
+_DEFAULT_RUN_TIMEOUT_MS = 3_600_000
+_MAX_RUN_TIMEOUT_MS = 86_400_000
+
+_ALLOWED_TOP_LEVEL = {
+    "version", "name", "description", "delivery", "retry", "events", "verify", "run_timeout_ms"
+}
 _ALLOWED_DELIVERY = {
     "order", "duplicate_count", "delay_ms", "timeout_ms", "signature", "concurrency",
     "signature_provider", "signature_timestamp_offset_seconds",
@@ -38,6 +67,47 @@ def _integer(value: Any, name: str, *, minimum: int, maximum: int) -> int:
     if isinstance(value, bool) or not isinstance(value, int) or not minimum <= value <= maximum:
         raise ScenarioError(f"{name} must be an integer between {minimum} and {maximum}")
     return value
+
+
+
+def _estimate_worst_case_duration_ms(
+    delivery: dict[str, Any],
+    retry: dict[str, Any],
+    events: list[dict[str, Any]],
+    verify: dict[str, Any] | None,
+) -> int:
+    """Conservatively estimate request timeouts, waits, scheduling, and verification."""
+    concurrency = delivery.get("concurrency", 1)
+    attempts = retry["max_attempts"]
+    retry_wait_ms = sum(
+        min(retry["backoff_ms"] * (2**index), 60_000)
+        for index in range(attempts - 1)
+    )
+    event_work: list[int] = []
+    latest_schedule_ms = 0
+
+    for event in events:
+        effective = {
+            "duplicate_count": 0,
+            "delay_ms": 0,
+            "timeout_ms": 5_000,
+            **delivery,
+            **event["delivery"],
+        }
+        latest_schedule_ms = max(latest_schedule_ms, event["schedule_after_ms"])
+        one_delivery_ms = (
+            attempts * (effective["timeout_ms"] + effective["delay_ms"])
+            + retry_wait_ms
+        )
+        event_work.append((effective["duplicate_count"] + 1) * one_delivery_ms)
+
+    total_work_ms = sum(event_work)
+    event_phase_ms = (total_work_ms + concurrency - 1) // concurrency
+    if concurrency > 1:
+        event_phase_ms += max(event_work, default=0)
+
+    verification_ms = verify["timeout_ms"] if verify is not None else 0
+    return latest_schedule_ms + event_phase_ms + verification_ms
 
 
 def _is_safe_header_value(value: str, *, allow_horizontal_tab: bool = True) -> bool:
@@ -234,6 +304,12 @@ def validate_scenario(data: Any) -> dict[str, Any]:
     if not isinstance(data, dict):
         raise ScenarioError("Scenario root must be a YAML mapping")
     _unknown_keys(data, _ALLOWED_TOP_LEVEL, "scenario")
+    run_timeout_ms = _integer(
+        data.get("run_timeout_ms", _DEFAULT_RUN_TIMEOUT_MS),
+        "run_timeout_ms",
+        minimum=100,
+        maximum=_MAX_RUN_TIMEOUT_MS,
+    )
     if isinstance(data.get("version"), bool) or not isinstance(data.get("version"), int) or data.get("version") != 1:
         raise ScenarioError("Scenario version must be 1")
     name = data.get("name")
@@ -381,8 +457,19 @@ def validate_scenario(data: Any) -> dict[str, Any]:
             "Scenario could require more than 20,000 HTTP attempts; reduce events, duplicates, or retries"
         )
 
+    estimated_duration_ms = _estimate_worst_case_duration_ms(
+        delivery, retry, normalized_events, verify
+    )
+    if estimated_duration_ms > run_timeout_ms:
+        raise ScenarioError(
+            "Scenario worst-case request-time budget is estimated at "
+            f"{estimated_duration_ms} ms, exceeding run_timeout_ms={run_timeout_ms}; "
+            "increase run_timeout_ms or reduce timeouts, retries, delays, duplicates, or events"
+        )
+
     return {
         "version": 1,
+        "run_timeout_ms": run_timeout_ms,
         "name": name.strip(),
         "description": description,
         "delivery": delivery,
@@ -396,13 +483,19 @@ def scenario_fingerprint(scenario: dict[str, Any]) -> str:
     """Return a stable SHA-256 fingerprint for the behavior-defining scenario config.
 
     Human-facing name and description are deliberately excluded. The digest includes
-    delivery behavior, retry policy, events, and verification expectations, but does
-    not expose those values in history or portable baselines.
+    delivery behavior, retry policy, events, and verification expectations. A non-default
+    run timeout is included; the default retains the pre-timeout fingerprint for baseline
+    compatibility. The digest does not expose the underlying values in history or baselines.
     """
     behavior = {
         key: scenario.get(key)
         for key in ("version", "delivery", "retry", "events", "verify")
     }
+    # Preserve fingerprints created before run_timeout_ms was introduced when the
+    # effective budget is unchanged; explicit non-default budgets remain behavior-defining.
+    run_timeout_ms = scenario.get("run_timeout_ms", _DEFAULT_RUN_TIMEOUT_MS)
+    if run_timeout_ms != _DEFAULT_RUN_TIMEOUT_MS:
+        behavior["run_timeout_ms"] = run_timeout_ms
     try:
         canonical = json.dumps(
             behavior,
@@ -420,7 +513,10 @@ def load_scenario(path: str | Path) -> dict[str, Any]:
     """Load a scenario from a YAML file using the safe loader."""
     scenario_path = Path(path)
     try:
-        raw = yaml.safe_load(scenario_path.read_text(encoding="utf-8"))
+        raw = yaml.load(
+            scenario_path.read_text(encoding="utf-8"),
+            Loader=_UniqueKeySafeLoader,
+        )
     except FileNotFoundError as exc:
         raise ScenarioError(f"Scenario file not found: {scenario_path}") from exc
     except yaml.YAMLError as exc:

@@ -33,9 +33,17 @@ def validate_target(
         raise UnsafeTargetError("Target URL must be a non-empty string")
     if allow_insecure_http and not allow_remote:
         raise UnsafeTargetError("--allow-insecure-http requires --allow-remote")
-    parsed = urlsplit(target.strip())
+    try:
+        parsed = urlsplit(target.strip())
+        port = parsed.port
+    except ValueError as exc:
+        raise UnsafeTargetError("Target URL contains an invalid hostname or port") from exc
     if parsed.scheme not in {"http", "https"} or not parsed.hostname:
         raise UnsafeTargetError("Target must be an absolute http:// or https:// URL")
+    if port == 0:
+        raise UnsafeTargetError("Target URL port must be between 1 and 65535")
+    if any(character.isspace() for character in parsed.hostname):
+        raise UnsafeTargetError("Target URL hostname must not contain whitespace")
     if parsed.username or parsed.password:
         raise UnsafeTargetError("Target URL must not contain embedded credentials")
     if parsed.fragment:
