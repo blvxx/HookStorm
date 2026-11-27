@@ -85,6 +85,18 @@ jobs:
       - name: Validate distribution metadata
         run: python -m twine check dist/*
 
+      - name: Smoke-test wheel and source distribution
+        run: |
+          python -m venv .release-smoke-wheel
+          .release-smoke-wheel/bin/python -m pip install dist/*.whl
+          .release-smoke-wheel/bin/hookstorm --version
+          .release-smoke-wheel/bin/hookstorm validate examples/standard-webhooks.yaml
+
+          python -m venv .release-smoke-sdist
+          .release-smoke-sdist/bin/python -m pip install dist/*.tar.gz
+          .release-smoke-sdist/bin/hookstorm --version
+          .release-smoke-sdist/bin/hookstorm validate examples/standard-webhooks.yaml
+
       - name: Upload release distributions
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
         with:
