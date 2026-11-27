@@ -10,6 +10,7 @@ import json
 import os
 import time
 import uuid
+from collections.abc import AsyncIterator
 from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
@@ -144,7 +145,7 @@ class _PartialResponseReadErrorStream(httpx.AsyncByteStream):
     def __init__(self, stream: httpx.AsyncByteStream) -> None:
         self._stream = stream
 
-    async def __aiter__(self):
+    async def __aiter__(self) -> AsyncIterator[bytes]:
         async for chunk in self._stream:
             if chunk:
                 yield chunk[: max(1, len(chunk) // 2)]
