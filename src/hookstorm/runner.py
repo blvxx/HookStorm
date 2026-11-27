@@ -646,7 +646,21 @@ async def run_scenario(
                 "webhook-signature",
             }
             for key, value in event["headers"].items():
-                if key.lower() not in reserved:
+                normalized_name = key.lower()
+                if normalized_name not in reserved:
+                    # HTTP field names are case-insensitive. Replace any
+                    # built-in header with the same name instead of sending
+                    # two differently-cased copies on the wire.
+                    existing_name = next(
+                        (
+                            existing
+                            for existing in base_headers
+                            if existing.lower() == normalized_name
+                        ),
+                        None,
+                    )
+                    if existing_name is not None:
+                        del base_headers[existing_name]
                     base_headers[key] = value
 
             event_deliveries: list[dict[str, Any]] = []
