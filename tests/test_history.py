@@ -2,7 +2,9 @@ from __future__ import annotations
 
 import json
 import math
+import multiprocessing
 import os
+import sqlite3
 import stat
 
 import pytest
@@ -20,6 +22,11 @@ from hookstorm.history import (
     result_metrics,
     save_run,
 )
+
+
+def _save_concurrent_process_run(database_path: str, index: int) -> str:
+    """Write one independent run from a spawned test process."""
+    return save_run(make_result(f"parallel_run_{index:04d}"), database_path)
 
 
 def make_result(
@@ -358,6 +365,65 @@ def test_history_export_is_portable_and_sanitized(tmp_path) -> None:
     assert "secret" not in loaded
 
 
+def test_history_export_preserves_existing_baseline_when_atomic_replace_fails(
+    tmp_path, monkeypatch
+) -> None:
+    database = tmp_path / "history.sqlite3"
+    output = tmp_path / "baseline.json"
+    save_run(make_result("run_export2"), database)
+    output.write_text("previous valid baseline", encoding="utf-8")
+
+    def fail_replace(_source, _destination):
+        raise OSError("simulated replacement failure")
+
+    invalid_closes: list[int] = []
+    real_close = history_module.os.close
+
+    def track_close(descriptor: int) -> None:
+        if descriptor < 0:
+            invalid_closes.append(descriptor)
+        real_close(descriptor)
+
+    monkeypatch.setattr(history_module.os, "replace", fail_replace)
+    monkeypatch.setattr(history_module.os, "close", track_close)
+    with pytest.raises(HistoryError, match="Cannot export run"):
+        export_history_run("latest", output, database)
+
+    assert invalid_closes == []
+    assert output.read_text(encoding="utf-8") == "previous valid baseline"
+    assert list(tmp_path.glob(".baseline.json.*.tmp")) == []
+
+
+def test_history_export_rejects_baselines_over_import_limit_without_replacing_file(
+    tmp_path, monkeypatch
+) -> None:
+    database = tmp_path / "history.sqlite3"
+    output = tmp_path / "baseline.json"
+    result = make_result("run_exportlimit1")
+    result["deliveries"][0]["attempts"][0]["error"] = "x" * 200
+    save_run(result, database)
+    output.write_text("previous valid baseline", encoding="utf-8")
+    monkeypatch.setattr(history_module, "_MAX_HISTORY_EXPORT_BYTES", 128)
+
+    with pytest.raises(HistoryError, match="baseline exceeds the 128-byte export limit"):
+        export_history_run("latest", output, database)
+
+    assert output.read_text(encoding="utf-8") == "previous valid baseline"
+    assert list(tmp_path.glob(".baseline.json.*.tmp")) == []
+
+
+def test_load_history_export_rejects_oversized_and_deep_json(tmp_path) -> None:
+    oversized = tmp_path / "oversized-baseline.json"
+    oversized.write_bytes(b" " * (history_module._MAX_HISTORY_EXPORT_BYTES + 1))
+    with pytest.raises(HistoryError, match="size limit"):
+        load_history_export(oversized)
+
+    deep = tmp_path / "deep-baseline.json"
+    deep.write_text("[" * 1_200 + "null" + "]" * 1_200, encoding="utf-8")
+    with pytest.raises(HistoryError, match="within parser limits"):
+        load_history_export(deep)
+
+
 def test_compare_history_file_detects_regression_from_another_database(tmp_path) -> None:
     baseline_db = tmp_path / "baseline.sqlite3"
     current_db = tmp_path / "current.sqlite3"
@@ -417,6 +483,22 @@ def test_load_history_export_rejects_private_fields_by_whitelisting(tmp_path) ->
 
 
 
+def test_history_rejects_success_flag_inconsistent_with_delivery_results() -> None:
+    current = make_result("flagcheck1")
+    current["summary"]["success"] = False
+
+    with pytest.raises(HistoryError, match="summary.success does not match"):
+        compare_results(current, make_result("flagcheck2"))
+
+
+def test_history_rejects_success_flag_inconsistent_with_verification_result() -> None:
+    current = make_result("verifybad1")
+    current["verification"] = {"passed": False}
+
+    with pytest.raises(HistoryError, match="summary.success does not match"):
+        compare_results(current, make_result("verifybad2"))
+
+
 def test_business_state_verification_failure_is_a_history_regression() -> None:
     baseline = make_result("baseline1")
     baseline["verification"] = {
@@ -429,6 +511,7 @@ def test_business_state_verification_failure_is_a_history_regression() -> None:
         "passed": True,
     }
     current = make_result("current1")
+    current["summary"]["success"] = False
     current["verification"] = {
         "method": "GET",
         "target": "http://127.0.0.1:8000/state",
@@ -558,6 +641,26 @@ def test_load_history_export_rejects_non_standard_json_numbers(
         load_history_export(baseline_file)
 
 
+def test_load_history_export_rejects_overflowing_exponent_even_in_ignored_fields(
+    tmp_path,
+) -> None:
+    database = tmp_path / "history.sqlite3"
+    baseline_file = tmp_path / "baseline.json"
+    save_run(make_result("run_overflow1"), database)
+    export_history_run("latest", baseline_file, database)
+
+    raw = baseline_file.read_text(encoding="utf-8")
+    raw = raw.replace(
+        '"run": {',
+        '"run": {"ignored_metadata": {"overflow": 1e999},',
+        1,
+    )
+    baseline_file.write_text(raw, encoding="utf-8")
+
+    with pytest.raises(HistoryError, match="not valid JSON within parser limits"):
+        load_history_export(baseline_file)
+
+
 @pytest.mark.parametrize("duplicate_index", [True, -1, 101, 1.5, "1"])
 def test_load_history_export_rejects_invalid_duplicate_indices(
     tmp_path, duplicate_index: object
@@ -678,14 +781,32 @@ def test_load_history_export_rejects_duplicate_json_keys(tmp_path) -> None:
 
 
 
-def test_history_preserves_validated_injected_fault_markers(tmp_path) -> None:
+@pytest.mark.parametrize(
+    "fault",
+    [
+        "connect_error",
+        "response_loss",
+        "response_body_error",
+        "malformed_json",
+        "wrong_content_type",
+        "gzip_body",
+        "deflate_body",
+        "invalid_gzip",
+        "invalid_deflate",
+        "chunked_transfer",
+        "malformed_chunked",
+        "partial_upload",
+        "content_length_mismatch",
+    ],
+)
+def test_history_preserves_validated_injected_fault_markers(tmp_path, fault: str) -> None:
     result = make_result("run_fault_histor5")
-    result["deliveries"][0]["attempts"][0]["injected_fault"] = "response_loss"
+    result["deliveries"][0]["attempts"][0]["injected_fault"] = fault
 
     save_run(result, tmp_path / "history.sqlite3")
 
     stored = get_run("run_fault_histor5", tmp_path / "history.sqlite3")
-    assert stored["deliveries"][0]["attempts"][0]["injected_fault"] == "response_loss"
+    assert stored["deliveries"][0]["attempts"][0]["injected_fault"] == fault
 
 
 @pytest.mark.parametrize("fault", ["random_packet_loss", [], None])
@@ -697,3 +818,116 @@ def test_history_rejects_unknown_injected_fault_markers(
 
     with pytest.raises(HistoryError, match="injected_fault"):
         save_run(result, tmp_path / "history.sqlite3")
+
+
+def test_legacy_history_database_migrates_without_losing_rows(tmp_path) -> None:
+    database = tmp_path / "legacy-history.sqlite3"
+    legacy = make_result("legacy_run_0001")
+    sanitized = history_module._sanitize_result(legacy)
+    metrics = result_metrics(sanitized)
+
+    connection = sqlite3.connect(database)
+    connection.execute(
+        """
+        CREATE TABLE runs (
+            run_id TEXT PRIMARY KEY,
+            scenario TEXT NOT NULL,
+            started_at TEXT NOT NULL,
+            target TEXT NOT NULL,
+            success INTEGER NOT NULL,
+            total_deliveries INTEGER NOT NULL,
+            passed INTEGER NOT NULL,
+            failed INTEGER NOT NULL,
+            attempts INTEGER NOT NULL,
+            duration_ms REAL NOT NULL,
+            result_json TEXT NOT NULL
+        )
+        """
+    )
+    connection.execute(
+        """
+        INSERT INTO runs (
+            run_id, scenario, started_at, target, success,
+            total_deliveries, passed, failed, attempts, duration_ms, result_json
+        ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+        """,
+        (
+            legacy["run_id"],
+            legacy["scenario"],
+            legacy["started_at"],
+            legacy["target"],
+            int(legacy["summary"]["success"]),
+            metrics["total_deliveries"],
+            metrics["passed"],
+            metrics["failed"],
+            metrics["attempts"],
+            metrics["duration_ms"],
+            json.dumps(sanitized),
+        ),
+    )
+    connection.commit()
+    assert connection.execute("PRAGMA user_version").fetchone()[0] == 0
+    connection.close()
+
+    loaded = get_run(legacy["run_id"], database)
+    connection = sqlite3.connect(database)
+    version = connection.execute("PRAGMA user_version").fetchone()[0]
+    connection.close()
+
+    assert version == 1
+    assert loaded["run_id"] == legacy["run_id"]
+    assert loaded["deliveries"] == sanitized["deliveries"]
+
+
+def test_history_rejects_a_database_from_a_newer_schema(tmp_path) -> None:
+    database = tmp_path / "future-history.sqlite3"
+    connection = sqlite3.connect(database)
+    connection.execute("PRAGMA user_version = 99")
+    connection.close()
+
+    with pytest.raises(HistoryError, match="newer than this HookStorm version"):
+        save_run(make_result("unsupported_schema"), database)
+
+
+def test_multiple_processes_can_write_to_the_same_history_database(tmp_path) -> None:
+    database = tmp_path / "concurrent-history.sqlite3"
+    process_context = multiprocessing.get_context("spawn")
+
+    with process_context.Pool(processes=4) as pool:
+        run_ids = pool.starmap(
+            _save_concurrent_process_run,
+            [(str(database), index) for index in range(8)],
+        )
+
+    assert len(run_ids) == 8
+    assert len(set(run_ids)) == 8
+    stored = list_runs(database, limit=20)
+    assert {item["run_id"] for item in stored} == set(run_ids)
+
+
+def test_relative_latency_change_below_absolute_floor_does_not_regress() -> None:
+    baseline = make_result("run_001", deliveries=[delivery("evt_1", latency_ms=1.0)])
+    current = make_result("run_002", deliveries=[delivery("evt_1", latency_ms=2.0)])
+
+    comparison = compare_results(current, baseline, latency_threshold_pct=20.0, latency_min_delta_ms=25.0)
+    assert comparison["has_regressions"] is False
+    assert comparison["latency_min_delta_ms"] == 25.0
+    assert not any("latency increased" in item["reason"] for item in comparison["regressions"])
+
+
+def test_p95_latency_regression_requires_relative_and_absolute_thresholds() -> None:
+    baseline = make_result("run_001", deliveries=[delivery("evt_1", latency_ms=100.0)])
+    current = make_result("run_002", deliveries=[delivery("evt_1", latency_ms=125.0)])
+    comparison = compare_results(current, baseline, latency_threshold_pct=20.0, latency_min_delta_ms=25.0)
+    p95_regressions = [
+        item for item in comparison["regressions"]
+        if item["reason"].startswith("p95 delivery latency increased")
+    ]
+    assert len(p95_regressions) == 1
+    assert p95_regressions[0]["p95_delta_ms"] == 25.0
+
+
+@pytest.mark.parametrize("value", [True, -0.1, 60_000.1, float("nan"), float("inf"), "25"])
+def test_compare_rejects_invalid_minimum_absolute_latency_delta(value: object) -> None:
+    with pytest.raises(HistoryError, match="Minimum absolute latency delta"):
+        compare_results(make_result("run_002"), make_result("run_001"), latency_min_delta_ms=value)

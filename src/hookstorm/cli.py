@@ -11,8 +11,10 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from hookstorm import __version__
+from hookstorm.capture import create_capture_server
 from hookstorm.config import load_scenario
 from hookstorm.doctor import build_preflight_document, run_preflight
+from hookstorm.fuzz import run_fuzz
 from hookstorm.history import (
     HistoryError,
     compare_history_file,
@@ -23,10 +25,12 @@ from hookstorm.history import (
     result_metrics,
     save_run,
 )
+from hookstorm.provider_profiles import provider_event
 from hookstorm.pytest_export import write_pytest
 from hookstorm.report import render_json, write_report
 from hookstorm.runner import run_scenario
 from hookstorm.scaffold import initialize_project
+from hookstorm.scenario_schema import read_scenario_schema
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -49,6 +53,8 @@ def _parser() -> argparse.ArgumentParser:
     init.add_argument("--workflow-path", default=".github/workflows/webhook-regression.yml")
     init.add_argument(
         "--signature-provider",
+        "--provider",
+        dest="signature_provider",
         choices=("generic", "stripe", "github", "shopify", "standard_webhooks"),
         help="webhook signature format (prompted in an interactive terminal; defaults to generic)",
     )
@@ -73,9 +79,37 @@ def _parser() -> argparse.ArgumentParser:
     init.add_argument("--no-workflow", action="store_true", help="create only the YAML scenario")
     init.add_argument("--force", action="store_true", help="overwrite generated files if they exist")
 
+    capture = subparsers.add_parser(
+        "capture",
+        help="capture JSON webhooks on loopback and write a replayable YAML scenario",
+    )
+    capture.add_argument("--output", default="captured-webhooks.yaml")
+    capture.add_argument(
+        "--port",
+        type=int,
+        default=8787,
+        help="loopback HTTP port (0 chooses a free port)",
+    )
+    capture.add_argument(
+        "--max-events",
+        type=int,
+        default=25,
+        help="maximum number of captured events (1–500; default: 25)",
+    )
+    capture.add_argument(
+        "--include-sensitive-headers",
+        action="store_true",
+        help="store authorization/signature headers as non-replayed forensic metadata",
+    )
+
     run = subparsers.add_parser("run", help="execute a YAML scenario against a webhook endpoint")
     run.add_argument("scenario", help="path to a scenario YAML file")
     run.add_argument("--target", required=True, help="webhook URL; localhost only unless opted in")
+    run.add_argument(
+        "--provider",
+        choices=("stripe", "github", "shopify", "standard_webhooks"),
+        help="apply provider-specific event, header, and signature defaults",
+    )
     run.add_argument("--allow-remote", action="store_true", help="allow a remote HTTPS target")
     run.add_argument(
         "--allow-insecure-http",
@@ -87,6 +121,70 @@ def _parser() -> argparse.ArgumentParser:
     run.add_argument("--output", help="write a report to this path")
     run.add_argument("--history-db", help="history database path")
     run.add_argument("--no-history", action="store_true", help="do not persist this run")
+
+    fuzz = subparsers.add_parser(
+        "fuzz",
+        help="run seeded webhook payload and optional delivery mutations against an authorized test endpoint",
+    )
+    fuzz.add_argument("scenario", help="base version 1 YAML scenario")
+    fuzz.add_argument("--target", required=True, help="webhook URL; loopback only unless opted in")
+    fuzz.add_argument(
+        "--provider",
+        choices=("stripe", "github", "shopify", "standard_webhooks"),
+        help="apply provider-specific event, header, and signature defaults",
+    )
+    fuzz.add_argument("--seed", type=int, default=1, help="deterministic mutation seed (default: 1)")
+    fuzz.add_argument("--iterations", type=int, default=25, help="number of mutations (1–500)")
+    fuzz.add_argument(
+        "--minimize-budget",
+        type=int,
+        default=0,
+        help="maximum extra executions to reduce each failing payload (0 disables minimization)",
+    )
+    fuzz.add_argument(
+        "--vary-order",
+        action="store_true",
+        help="also mutate the global delivery order between in_order and reverse",
+    )
+    fuzz.add_argument(
+        "--vary-duplicates",
+        action="store_true",
+        help="also mutate one event's duplicate count in each trial",
+    )
+    fuzz.add_argument(
+        "--max-duplicates",
+        type=int,
+        default=3,
+        help="maximum duplicate count used with --vary-duplicates (0–100)",
+    )
+    fuzz.add_argument(
+        "--vary-delay",
+        action="store_true",
+        help="also mutate one event's delay before each HTTP attempt",
+    )
+    fuzz.add_argument(
+        "--max-delay-ms",
+        type=int,
+        default=1_000,
+        help="maximum delay used with --vary-delay (0–60000 ms)",
+    )
+    fuzz.add_argument(
+        "--vary-faults",
+        action="store_true",
+        help="also inject one deterministic transport fault into an event attempt",
+    )
+    fuzz.add_argument(
+        "--cases-dir",
+        help="optionally save failing and minimized replayable YAML scenarios",
+    )
+    fuzz.add_argument("--secret-env", default="HOOKSTORM_SECRET")
+    fuzz.add_argument("--allow-remote", action="store_true", help="allow a remote HTTPS target")
+    fuzz.add_argument(
+        "--allow-insecure-http",
+        action="store_true",
+        help="allow unencrypted remote HTTP; requires --allow-remote",
+    )
+    fuzz.add_argument("--output", help="write the JSON summary to this path instead of stdout")
 
     history = subparsers.add_parser("history", help="inspect and compare local run history")
     history_sub = history.add_subparsers(dest="history_command", required=True)
@@ -101,6 +199,7 @@ def _parser() -> argparse.ArgumentParser:
     history_compare.add_argument("baseline_run_id")
     history_compare.add_argument("--current", default="latest")
     history_compare.add_argument("--latency-threshold-pct", type=float, default=20.0)
+    history_compare.add_argument("--latency-min-delta-ms", type=float, default=25.0)
     history_compare.add_argument(
         "--allow-config-change",
         action="store_true",
@@ -113,6 +212,7 @@ def _parser() -> argparse.ArgumentParser:
     history_compare_file.add_argument("baseline_file", help="exported HookStorm baseline JSON")
     history_compare_file.add_argument("--current", default="latest")
     history_compare_file.add_argument("--latency-threshold-pct", type=float, default=20.0)
+    history_compare_file.add_argument("--latency-min-delta-ms", type=float, default=25.0)
     history_compare_file.add_argument(
         "--allow-config-change",
         action="store_true",
@@ -157,6 +257,10 @@ def _parser() -> argparse.ArgumentParser:
         help="output format (default: text)",
     )
 
+    schema = subparsers.add_parser("schema", help="print or export the version 1 JSON Schema")
+    schema.add_argument("--output", help="write the schema to a file instead of stdout")
+    schema.add_argument("--force", action="store_true", help="overwrite an existing output file")
+
     validate = subparsers.add_parser("validate", help="validate a scenario without sending requests")
     validate.add_argument("scenario", help="path to a scenario YAML file")
 
@@ -174,6 +278,17 @@ def _injected_fault_label(fault: str) -> str:
     return {
         "connect_error": "Connect fault",
         "response_loss": "ACK loss",
+        "response_body_error": "Body read error",
+        "malformed_json": "Malformed JSON",
+        "wrong_content_type": "Wrong Content-Type",
+        "gzip_body": "Gzip body",
+        "deflate_body": "Deflate body",
+        "invalid_gzip": "Invalid gzip",
+        "invalid_deflate": "Invalid deflate",
+        "chunked_transfer": "Chunked transfer",
+        "malformed_chunked": "Malformed chunked framing",
+        "partial_upload": "Partial upload",
+        "content_length_mismatch": "Content-Length mismatch",
     }.get(fault, fault)
 
 
@@ -299,6 +414,11 @@ def _print_history_comparison(comparison: dict) -> int:
         f"Scenario: {comparison['current_scenario']} "
         f"(baseline: {comparison['baseline_scenario']})"
     )
+    print(
+        "Latency gate: p95 relative increase above "
+        f"{comparison['latency_threshold_pct']:.1f}% and absolute increase of at least "
+        f"{comparison['latency_min_delta_ms']:.2f} ms"
+    )
     if not comparison["same_scenario"]:
         print("WARNING: scenario names differ; interpret coverage and metric changes carefully.")
     if comparison["same_configuration"] is False:
@@ -359,6 +479,7 @@ def _history_compare_command(args: argparse.Namespace) -> int:
         current_run_id=args.current,
         path=args.db,
         latency_threshold_pct=args.latency_threshold_pct,
+        latency_min_delta_ms=args.latency_min_delta_ms,
         allow_config_change=args.allow_config_change,
     )
     return _print_history_comparison(comparison)
@@ -370,6 +491,7 @@ def _history_compare_file_command(args: argparse.Namespace) -> int:
         current_run_id=args.current,
         path=args.db,
         latency_threshold_pct=args.latency_threshold_pct,
+        latency_min_delta_ms=args.latency_min_delta_ms,
         allow_config_change=args.allow_config_change,
     )
     print(f"Baseline file: {Path(args.baseline_file).expanduser()}")
@@ -426,16 +548,21 @@ def _init_command(args: argparse.Namespace) -> int:
             "generic",
         )
     signature_provider = signature_provider or "generic"
+    profile_defaults = (
+        provider_event(signature_provider)
+        if signature_provider != "generic"
+        else {"id": "test.ping", "event_id": "evt_hookstorm_init_001"}
+    )
 
     event_type = args.event_type
     if event_type is None and interactive:
-        event_type = _prompt_text("Event type", "test.ping")
-    event_type = event_type or "test.ping"
+        event_type = _prompt_text("Event type", profile_defaults["id"])
+    event_type = event_type or profile_defaults["id"]
 
     event_id = args.event_id
     if event_id is None and interactive:
-        event_id = _prompt_text("Event ID", "evt_hookstorm_init_001")
-    event_id = event_id or "evt_hookstorm_init_001"
+        event_id = _prompt_text("Event ID", profile_defaults["event_id"])
+    event_id = event_id or profile_defaults["event_id"]
 
     max_attempts = args.max_attempts
     if max_attempts is None and interactive:
@@ -453,6 +580,7 @@ def _init_command(args: argparse.Namespace) -> int:
 
     written = initialize_project(
         scenario_path=args.scenario_path,
+        provider=signature_provider if signature_provider != "generic" else None,
         workflow_path=args.workflow_path,
         event_type=event_type,
         event_id=event_id,
@@ -523,6 +651,31 @@ def _doctor_command(args: argparse.Namespace) -> int:
     return document["exit_code"]
 
 
+def _capture_command(args: argparse.Namespace) -> int:
+    server, store = create_capture_server(
+        args.output,
+        port=args.port,
+        include_sensitive_headers=args.include_sensitive_headers,
+        max_events=args.max_events,
+    )
+    actual_port = server.server_address[1]
+    output = Path(args.output)
+    print(f"Capture listening on http://127.0.0.1:{actual_port}/")
+    print(f"Output: {output.resolve()}")
+    print("Send JSON webhook POST requests; press Ctrl+C to stop.")
+    try:
+        server.serve_forever(poll_interval=0.2)
+    except KeyboardInterrupt:
+        print("\\nStopping capture...", file=sys.stderr)
+    finally:
+        server.server_close()
+    if store.events:
+        print(f"Captured {len(store.events)} event(s) to {output.resolve()}")
+    else:
+        print("No webhook requests were captured.")
+    return 0
+
+
 def main(argv: Sequence[str] | None = None) -> int:
     args = _parser().parse_args(argv)
     try:
@@ -530,6 +683,22 @@ def main(argv: Sequence[str] | None = None) -> int:
             return _init_command(args)
         if args.command == "doctor":
             return _doctor_command(args)
+        if args.command == "capture":
+            return _capture_command(args)
+        if args.command == "schema":
+            serialized_schema = read_scenario_schema()
+            if not args.output:
+                sys.stdout.write(serialized_schema)
+                return 0
+            schema_path = Path(args.output)
+            if schema_path.exists() and not args.force:
+                raise ValueError(
+                    f"Refusing to overwrite existing schema file: {schema_path}; pass --force"
+                )
+            schema_path.parent.mkdir(parents=True, exist_ok=True)
+            schema_path.write_text(serialized_schema, encoding="utf-8")
+            print(f"JSON Schema written: {schema_path.resolve()}")
+            return 0
         if args.command == "history":
             if args.history_command == "list":
                 return _history_list_command(args)
@@ -542,7 +711,40 @@ def main(argv: Sequence[str] | None = None) -> int:
             if args.history_command == "export":
                 return _history_export_command(args)
 
-        scenario = load_scenario(args.scenario)
+        if args.command == "fuzz":
+            scenario = load_scenario(args.scenario, provider=args.provider)
+            fuzz_result = asyncio.run(
+                run_fuzz(
+                    scenario,
+                    args.target,
+                    seed=args.seed,
+                    iterations=args.iterations,
+                    allow_remote=args.allow_remote,
+                    allow_insecure_http=args.allow_insecure_http,
+                    secret=os.getenv(args.secret_env, ""),
+                    minimize_budget=args.minimize_budget,
+                    cases_dir=args.cases_dir,
+                    vary_order=args.vary_order,
+                    vary_duplicates=args.vary_duplicates,
+                    max_duplicates=args.max_duplicates,
+                    vary_delay=args.vary_delay,
+                    max_delay_ms=args.max_delay_ms,
+                    vary_faults=args.vary_faults,
+                )
+            )
+            serialized = json.dumps(fuzz_result, ensure_ascii=False, indent=2) + "\n"
+            if args.output:
+                output_path = Path(args.output)
+                output_path.write_text(serialized, encoding="utf-8")
+                print(f"Fuzz summary: {output_path.resolve()}")
+            else:
+                sys.stdout.write(serialized)
+            return 0 if fuzz_result["summary"]["success"] else 1
+
+        scenario = load_scenario(
+            args.scenario,
+            provider=getattr(args, "provider", None) if args.command == "run" else None,
+        )
         if args.command == "validate":
             print(f"Scenario valid: {scenario['name']} ({len(scenario['events'])} event(s))")
             return 0
@@ -551,7 +753,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(f"pytest integration test written: {output.resolve()}")
             print("Set HOOKSTORM_TARGET to the test receiver URL before running pytest.")
             return 0
-        secret = os.getenv(args.secret_env)
+        # Pass an explicit empty value when the selected variable is absent so
+        # the runner cannot silently fall back to HOOKSTORM_SECRET.
+        secret = os.getenv(args.secret_env, "")
         result = asyncio.run(
             run_scenario(
                 scenario,

@@ -14,14 +14,27 @@ A scenario is a YAML document. It describes events, delivery behavior, and expec
 | events | yes | One to 500 event definitions. Payloads are limited to 1 MiB each. |
 | verify | no | Optional read-only GET probe for checking backend state after all deliveries. |
 | run_timeout_ms | no | Hard wall-clock budget for the entire run; defaults to 3,600,000 ms (60 minutes), range 100–86,400,000 ms (24 hours). |
+| provider | no | Optional `stripe`, `github`, `shopify`, or `standard_webhooks` profile. Supplies synthetic event payload, event ID/type, provider-specific headers, and signed-delivery defaults. Explicit event fields override profile event values. |
 
 Unknown keys and duplicate YAML mapping keys are rejected to catch typos and ambiguous configuration early. Scenarios can be exported with `hookstorm export-pytest`; the generated test embeds the normalized scenario and reads its endpoint from `HOOKSTORM_TARGET` at runtime.
+
+## Input and expansion limits
+
+The YAML source file is limited to 16 MiB and may contain at most 16 YAML aliases. Payloads are limited to 1 MiB per event and 16 MiB in aggregate across the complete scenario. JSON object/array nesting is limited to 100 levels, including scenario payloads and expected JSON values; HookStorm checks this limit before recursive parsing or validation so behavior is consistent across operating systems and Python versions. These limits apply before delivery starts and are intended to keep local runs and CI safe when scenarios come from reviewed pull requests. If a scenario exceeds a limit, split it into smaller focused scenarios rather than increasing limits in the source.
 
 ## Run timeout budget
 
 `run_timeout_ms` is a top-level limit covering event scheduling, delivery attempts, retry backoff, response reading, and the optional business-state verification request. Before sending traffic, HookStorm estimates a conservative worst-case request-time budget from event timeouts, delays, retries, duplicates, scheduling offsets, concurrency, and verification timeout. A scenario whose estimate exceeds `run_timeout_ms` is rejected before any request is sent.
 
 The same deadline is enforced while the run is active. If it expires, HookStorm cancels in-flight tasks and reports a CLI error. Cancellation cannot undo a business side effect that the receiver has already committed, so use idempotent test data and isolated endpoints. Increase `run_timeout_ms` deliberately for longer stress scenarios, up to 24 hours. The default budget preserves legacy scenario fingerprints; explicitly choosing a non-default budget changes the fingerprint and is detected by baseline comparisons.
+
+## Capture metadata
+
+Scenarios created by `hookstorm capture` may contain an optional top-level `capture` mapping with `source: hookstorm.capture` and one metadata record per event. This metadata stores the original request path and, when explicitly requested, sensitive header values. It does not affect runtime delivery or the scenario fingerprint. Sensitive values in capture metadata are never replayed as request headers. Do not share a capture file created with `--include-sensitive-headers` unless those values have been reviewed and removed.
+
+## Provider profiles
+
+A profile can be selected in YAML or at the command line. For example, `hookstorm run scenarios/webhook.yaml --target http://127.0.0.1:8000/webhook --provider github` uses a synthetic GitHub `issues.opened` event, `X-GitHub-Event`, a stable synthetic `X-GitHub-Delivery` UUID, and the GitHub HMAC signature format. `hookstorm init --provider stripe` creates a Stripe-shaped `payment_intent.succeeded` scenario. All profile payloads are synthetic examples; replace them with representative test payloads for your application. Profiles never call provider APIs or create real events.
 
 ## Delivery settings
 
@@ -37,8 +50,9 @@ The same deadline is enforced while the run is active. If it expires, HookStorm 
 | signature_timestamp_offset_seconds | 0 | Stripe and Standard Webhooks; shifts the signed attempt timestamp by -86,400 to +86,400 seconds for replay-window tests. |
 | fault_injection.connect_error_attempts | [] | Attempt numbers (1–10) where HookStorm injects a connection error before the request reaches the receiver. |
 | fault_injection.response_loss_attempts | [] | Attempt numbers (1–10) where HookStorm suppresses the receiver's response after the receiver has processed the request, simulating an ambiguous acknowledgement. |
+| fault_injection.response_body_error_attempts | [] | Attempt numbers (1–10) where HookStorm receives the response headers and part of the body, then injects a read error to simulate a truncated response after the receiver has processed the request. |
 
-Delivery settings may be global or defined per event. Per-event settings override global settings. The `concurrency` setting is global only. Retries and duplicate deliveries belonging to one event stay sequential; independent events may overlap. Each event's `schedule_after_ms` is measured from the beginning of the run, not from the previous event or from the completion of another request. A scheduled event waits before acquiring a concurrency slot, so a later event with an earlier offset is not blocked by it. The separate `delay_ms` setting remains a wait before every HTTP attempt. The report keeps events in scenario order even when requests finish out of order.
+Delivery settings may be global or defined per event. Per-event settings override global settings. A top-level provider profile selects provider-shaped synthetic events and defaults the signature provider to the same provider with `signature: valid`; explicit delivery settings still override those defaults. Existing scenarios without `provider` retain their previous behavior and fingerprint. The `concurrency` setting is global only. Retries and duplicate deliveries belonging to one event stay sequential; independent events may overlap. Each event's `schedule_after_ms` is measured from the beginning of the run, not from the previous event or from the completion of another request. A scheduled event waits before acquiring a concurrency slot, so a later event with an earlier offset is not blocked by it. The separate `delay_ms` setting remains a wait before every HTTP attempt. The report keeps events in scenario order even when requests finish out of order.
 
 For signature valid or invalid, set `HOOKSTORM_SECRET` in the shell. HookStorm signs the exact compact JSON request bytes sent over HTTP. The default `generic` provider preserves the legacy `X-HookStorm-Signature: sha256=<hex>` format.
 
@@ -63,7 +77,7 @@ For `standard_webhooks`, `HOOKSTORM_SECRET` must use the Standard Webhooks `whse
 | backoff_ms | 0 | Base exponential backoff, 0–60,000 ms; each actual wait is capped at 60 seconds. |
 | retry_on | [408, 429, 500, 502, 503, 504] | HTTP statuses that trigger another attempt. Timeouts and transport errors are retried while attempts remain. |
 
-Backoff grows exponentially as backoff_ms * 2^(attempt - 1), capped at 60 seconds per wait. Retries preserve the event ID and request body. `delivery.fault_injection` is an optional deterministic test plan: `connect_error_attempts` fails locally before an HTTP request is sent; `response_loss_attempts` sends the HTTP request to the receiver, lets it process and respond, then discards the response before HookStorm observes it. Each list accepts unique attempt numbers from 1 through `retry.max_attempts`; the two fault types cannot target the same attempt. A per-event `fault_injection` object replaces the global fault plan for that event. This is a client-side simulation for repeatable tests, not a network proxy or proof of a real packet drop; use the `/webhook/commit-then-drop` demo route to exercise a real receiver-side TCP close. The ready-to-run [`examples/deterministic-fault-injection.yaml`](../examples/deterministic-fault-injection.yaml) first injects a pre-send connection error, then suppresses an acknowledgement after the receiver processes the request, and finally verifies one persisted business effect. For timestamped signing formats (Stripe and Standard Webhooks), HookStorm regenerates the timestamp and signature for each attempt. HookStorm rejects scenarios whose worst-case delivery attempts exceed 20,000.
+Backoff grows exponentially as backoff_ms * 2^(attempt - 1), capped at 60 seconds per wait. Retries preserve the event ID and request body. `delivery.fault_injection` is an optional deterministic test plan: `connect_error_attempts` fails locally before an HTTP request is sent; `response_loss_attempts` sends the HTTP request to the receiver, lets it process and respond, then discards the response before HookStorm observes it; `response_body_error_attempts` lets response headers and part of the body arrive, then raises a read error so the runner exercises truncated-body handling after a possible business commit. Each list accepts unique attempt numbers from 1 through `retry.max_attempts`; no two fault types may target the same attempt. A per-event `fault_injection` object replaces the global fault plan for that event. These are deterministic client-side simulations for repeatable tests, not a network proxy or proof of a real packet drop; use the `/webhook/commit-then-drop` demo route to exercise a real receiver-side TCP close. The [`examples/deterministic-fault-injection.yaml`](https://github.com/blvxx/HookStorm/blob/main/examples/deterministic-fault-injection.yaml) example demonstrates pre-send failure and acknowledgement loss. The dedicated [`examples/partial-response-body-error.yaml`](https://github.com/blvxx/HookStorm/blob/main/examples/partial-response-body-error.yaml) example covers a truncated response body and verifies that a retry does not apply the business effect twice. For timestamped signing formats (Stripe and Standard Webhooks), HookStorm regenerates the timestamp and signature for each attempt. HookStorm rejects scenarios whose worst-case delivery attempts exceed 20,000.
 
 ## Business-state verification
 
@@ -104,7 +118,7 @@ The probe is not a universal exactly-once guarantee: it verifies only the state 
 
 ## Response body safety limit
 
-Webhook delivery responses and the business-state verification response are streamed and capped at 2 MiB after HTTP content decoding. If a response exceeds this limit, HookStorm closes the response stream and marks the JSON assertion as failed with a clear size-limit error. The limit applies even when no JSON expectation is configured; HookStorm does not buffer arbitrarily large response bodies or persist response content.
+Webhook delivery responses and the business-state verification response are requested with `Accept-Encoding: identity` and read as raw streams with a 2 MiB cap before JSON parsing. HookStorm deliberately does not automatically decompress response bodies: a compressed response is rejected, even when smaller than the limit, to avoid allocating an unbounded decompressed chunk before the size check. If a target always compresses responses, disable response compression for its test route. The limit applies even when no JSON expectation is configured; HookStorm does not buffer arbitrarily large response bodies or persist response content.
 
 ## Event fields
 

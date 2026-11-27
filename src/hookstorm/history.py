@@ -6,14 +6,44 @@ import json
 import math
 import os
 import sqlite3
+import tempfile
 from pathlib import Path
 from typing import Any
 
+from hookstorm.json_limits import ensure_json_text_depth
+
 _DEFAULT_DB = Path.home() / ".hookstorm" / "history.sqlite3"
+_SCHEMA_VERSION = 1
+_MAX_HISTORY_EXPORT_BYTES = 16 * 1024 * 1024
+_INJECTED_FAULTS = frozenset(
+    {
+        "connect_error",
+        "response_loss",
+        "response_body_error",
+        "malformed_json",
+        "wrong_content_type",
+        "gzip_body",
+        "deflate_body",
+        "invalid_gzip",
+        "invalid_deflate",
+        "chunked_transfer",
+        "malformed_chunked",
+        "partial_upload",
+        "content_length_mismatch",
+    }
+)
 
 
 class HistoryError(RuntimeError):
     """Raised when a local run-history operation cannot be completed."""
+
+
+def _fchmod_private(descriptor: int, mode: int) -> None:
+    """Apply a file mode through the POSIX-only descriptor API when available."""
+    fchmod = getattr(os, "fchmod", None)
+    if not callable(fchmod):
+        raise OSError("The current POSIX platform does not support descriptor chmod")
+    fchmod(descriptor, mode)
 
 
 def resolve_history_db(path: str | Path | None = None) -> str:
@@ -48,62 +78,99 @@ def _connect(path: str | Path | None = None) -> sqlite3.Connection:
                     0o600,
                 )
                 try:
-                    os.fchmod(descriptor, 0o600)
+                    _fchmod_private(descriptor, 0o600)
                 finally:
                     os.close(descriptor)
 
-        connection = sqlite3.connect(location, timeout=10)
+        connection = sqlite3.connect(location, timeout=30)
         connection.row_factory = sqlite3.Row
-        connection.execute("PRAGMA busy_timeout = 10000")
+        connection.execute("PRAGMA busy_timeout = 30000")
         return connection
     except (OSError, sqlite3.Error) as exc:
         raise HistoryError(f"Cannot open HookStorm history database: {exc}") from exc
 
 
 def _write_private_text(path: Path, content: str) -> None:
-    """Write an owner-only text file on POSIX and a normal text file elsewhere."""
-    if os.name != "posix":
-        path.write_text(content, encoding="utf-8")
-        return
-
-    descriptor = os.open(
-        path,
-        os.O_WRONLY | os.O_CREAT | os.O_TRUNC,
-        0o600,
+    """Atomically write a portable text file with private POSIX permissions."""
+    path.parent.mkdir(parents=True, exist_ok=True)
+    descriptor, temporary_name = tempfile.mkstemp(
+        prefix=f".{path.name}.",
+        suffix=".tmp",
+        dir=path.parent,
     )
     try:
-        os.fchmod(descriptor, 0o600)
-        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
-            descriptor = -1
+        with os.fdopen(descriptor, "w", encoding="utf-8", newline="") as stream:
+            descriptor = -1  # The stream now owns and closes the descriptor.
             stream.write(content)
-    finally:
+            stream.flush()
+            os.fsync(stream.fileno())
+        if os.name == "posix":
+            os.chmod(temporary_name, 0o600)
+        os.replace(temporary_name, path)
+    except Exception:
         if descriptor >= 0:
-            os.close(descriptor)
+            try:
+                os.close(descriptor)
+            except OSError:
+                pass
+        try:
+            os.unlink(temporary_name)
+        except OSError:
+            pass
+        raise
 
 
 def _initialize(connection: sqlite3.Connection) -> None:
-    connection.execute(
-        """
-        CREATE TABLE IF NOT EXISTS runs (
-            run_id TEXT PRIMARY KEY,
-            scenario TEXT NOT NULL,
-            started_at TEXT NOT NULL,
-            target TEXT NOT NULL,
-            success INTEGER NOT NULL,
-            total_deliveries INTEGER NOT NULL,
-            passed INTEGER NOT NULL,
-            failed INTEGER NOT NULL,
-            attempts INTEGER NOT NULL,
-            duration_ms REAL NOT NULL,
-            result_json TEXT NOT NULL
-        )
-        """
-    )
-    connection.execute(
-        "CREATE INDEX IF NOT EXISTS idx_runs_scenario_started "
-        "ON runs(scenario, started_at DESC)"
-    )
-    connection.commit()
+    """Create or migrate the local history schema under a write lock.
+
+    Version 0 is the unversioned schema shipped before migrations were added.
+    Its runs table already has the version 1 columns, so migration 1 only
+    records the schema version and preserves every stored run unchanged.
+    """
+    try:
+        connection.execute("BEGIN IMMEDIATE")
+        version = int(connection.execute("PRAGMA user_version").fetchone()[0])
+        if version > _SCHEMA_VERSION:
+            raise HistoryError(
+                f"History database schema version {version} is newer than "
+                f"this HookStorm version supports ({_SCHEMA_VERSION}). Upgrade HookStorm."
+            )
+        if version < 0:
+            raise HistoryError(f"History database has an invalid schema version: {version}")
+
+        if version == 0:
+            connection.execute(
+                """
+                CREATE TABLE IF NOT EXISTS runs (
+                    run_id TEXT PRIMARY KEY,
+                    scenario TEXT NOT NULL,
+                    started_at TEXT NOT NULL,
+                    target TEXT NOT NULL,
+                    success INTEGER NOT NULL,
+                    total_deliveries INTEGER NOT NULL,
+                    passed INTEGER NOT NULL,
+                    failed INTEGER NOT NULL,
+                    attempts INTEGER NOT NULL,
+                    duration_ms REAL NOT NULL,
+                    result_json TEXT NOT NULL
+                )
+                """
+            )
+            connection.execute(
+                "CREATE INDEX IF NOT EXISTS idx_runs_scenario_started "
+                "ON runs(scenario, started_at DESC)"
+            )
+            connection.execute("PRAGMA user_version = 1")
+        elif version == 1:
+            connection.execute(
+                "CREATE INDEX IF NOT EXISTS idx_runs_scenario_started "
+                "ON runs(scenario, started_at DESC)"
+            )
+
+        connection.commit()
+    except Exception:
+        connection.rollback()
+        raise
 
 
 def _latencies(result: dict[str, Any]) -> list[float]:
@@ -327,10 +394,11 @@ def _validate_run_result(result: dict[str, Any], label: str) -> None:
                 raise HistoryError(f"{attempt_label}.error must be a string or null")
             if "injected_fault" in attempt and (
                 not isinstance(attempt["injected_fault"], str)
-                or attempt["injected_fault"] not in {"connect_error", "response_loss"}
+                or attempt["injected_fault"] not in _INJECTED_FAULTS
             ):
                 raise HistoryError(
-                    f"{attempt_label}.injected_fault must be connect_error or response_loss"
+                    f"{attempt_label}.injected_fault must be one of the supported "
+                    "HookStorm fault-injection markers"
                 )
 
         if "schedule_after_ms" in item:
@@ -353,6 +421,13 @@ def _validate_run_result(result: dict[str, Any], label: str) -> None:
             raise HistoryError(f"{label} verification must be a JSON object or null")
         if "passed" in verification and not isinstance(verification["passed"], bool):
             raise HistoryError(f"{label} verification.passed must be a boolean")
+        for field in ("expected_status", "expected_json"):
+            if field in verification and not isinstance(verification[field], bool):
+                raise HistoryError(f"{label} verification.{field} must be a boolean")
+        if "error" in verification and verification["error"] is not None and not isinstance(
+            verification["error"], str
+        ):
+            raise HistoryError(f"{label} verification.error must be a string or null")
         if "latency_ms" in verification:
             _require_finite_non_negative_number(
                 verification["latency_ms"], f"{label} verification.latency_ms"
@@ -367,6 +442,13 @@ def _validate_run_result(result: dict[str, Any], label: str) -> None:
                 raise HistoryError(
                     f"{label} verification.status_code must be null or an HTTP status code"
                 )
+
+    verification_passed = verification is None or verification.get("passed") is True
+    expected_success = actual_passed == len(deliveries) and verification_passed
+    if summary["success"] is not expected_success:
+        raise HistoryError(
+            f"{label} summary.success does not match delivery and verification outcomes"
+        )
 
 
 def save_run(result: dict[str, Any], path: str | Path | None = None) -> str:
@@ -493,12 +575,15 @@ def _delivery_key(delivery: dict[str, Any]) -> tuple[str, str, int]:
     event_type = delivery.get("event_type")
     event_id = delivery.get("event_id")
     duplicate_index = delivery.get("duplicate_index", 0)
-    for field, value in (("event_type", event_type), ("event_id", event_id)):
-        if not isinstance(value, str) or not value.strip() or len(value) > 256:
-            raise HistoryError(
-                f"Delivery {field} must be a non-empty string of at most 256 characters"
-            )
-    _require_non_negative_integer(
+    if not isinstance(event_type, str) or not event_type.strip() or len(event_type) > 256:
+        raise HistoryError(
+            "Delivery event_type must be a non-empty string of at most 256 characters"
+        )
+    if not isinstance(event_id, str) or not event_id.strip() or len(event_id) > 256:
+        raise HistoryError(
+            "Delivery event_id must be a non-empty string of at most 256 characters"
+        )
+    duplicate_index = _require_non_negative_integer(
         duplicate_index, "Delivery duplicate_index", maximum=100
     )
     return (event_type, event_id, duplicate_index)
@@ -516,13 +601,20 @@ def compare_results(
     baseline: dict[str, Any],
     *,
     latency_threshold_pct: float = 20.0,
+    latency_min_delta_ms: float = 25.0,
     allow_config_change: bool = False,
 ) -> dict[str, Any]:
     """Compare two runs and identify failure, coverage, and latency regressions."""
     if isinstance(latency_threshold_pct, bool) or not isinstance(latency_threshold_pct, (int, float)):
         raise HistoryError("Latency threshold must be a number")
-    if not 0 <= latency_threshold_pct <= 1000:
+    if not 0 <= latency_threshold_pct <= 1000 or not math.isfinite(float(latency_threshold_pct)):
         raise HistoryError("Latency threshold must be between 0 and 1000 percent")
+    if (
+        isinstance(latency_min_delta_ms, bool)
+        or not isinstance(latency_min_delta_ms, (int, float))
+        or not 0 <= latency_min_delta_ms <= 60_000
+    ):
+        raise HistoryError("Minimum absolute latency delta must be between 0 and 60000 ms")
     if not isinstance(allow_config_change, bool):
         raise HistoryError("allow_config_change must be a boolean")
 
@@ -556,15 +648,15 @@ def compare_results(
         new = latest.get(key)
         label = f"{key[0]} / {key[1]} / duplicate {key[2]}"
         if old is None and new is not None:
-            change = {"delivery": label, "change": "added", "passed": bool(new.get("passed"))}
-            changes.append(change)
+            coverage_change = {"delivery": label, "change": "added", "passed": bool(new.get("passed"))}
+            changes.append(coverage_change)
             if not new.get("passed"):
-                regressions.append({**change, "reason": "new delivery failed"})
+                regressions.append({**coverage_change, "reason": "new delivery failed"})
             continue
         if new is None and old is not None:
-            change = {"delivery": label, "change": "removed"}
-            changes.append(change)
-            regressions.append({**change, "reason": "delivery coverage decreased"})
+            coverage_change = {"delivery": label, "change": "removed"}
+            changes.append(coverage_change)
+            regressions.append({**coverage_change, "reason": "delivery coverage decreased"})
             continue
 
         assert old is not None and new is not None
@@ -590,16 +682,27 @@ def compare_results(
         if old_latency > 0:
             latency_change_pct = round(((new_latency - old_latency) / old_latency) * 100, 2)
             change["latency_change_pct"] = latency_change_pct
-            if latency_change_pct > latency_threshold_pct:
+            latency_delta_ms = round(new_latency - old_latency, 2)
+            change["latency_delta_ms"] = latency_delta_ms
+            if (
+                latency_change_pct > latency_threshold_pct
+                and latency_delta_ms >= latency_min_delta_ms
+            ):
                 regressions.append({
                     **change,
                     "reason": f"delivery latency increased by {latency_change_pct}% "
-                              f"(threshold {latency_threshold_pct}%)",
+                              f"and {latency_delta_ms} ms "
+                              f"(threshold {latency_threshold_pct}%; "
+                              f"minimum absolute delta {latency_min_delta_ms} ms)",
                 })
-            elif latency_change_pct < -latency_threshold_pct:
+            elif (
+                latency_change_pct < -latency_threshold_pct
+                and -latency_delta_ms >= latency_min_delta_ms
+            ):
                 improvements.append({
                     **change,
-                    "reason": f"delivery latency improved by {abs(latency_change_pct)}%",
+                    "reason": f"delivery latency improved by {abs(latency_change_pct)}% "
+                              f"and {abs(latency_delta_ms)} ms",
                 })
         changes.append(change)
 
@@ -631,18 +734,30 @@ def compare_results(
     current_p95 = current_metrics["p95_latency_ms"]
     if baseline_p95 > 0:
         p95_delta_pct = round(((current_p95 - baseline_p95) / baseline_p95) * 100, 2)
-        if p95_delta_pct > latency_threshold_pct:
+        p95_delta_ms = round(current_p95 - baseline_p95, 2)
+        if (
+            p95_delta_pct > latency_threshold_pct
+            and p95_delta_ms >= latency_min_delta_ms
+        ):
             regressions.append({
                 "reason": f"p95 delivery latency increased by {p95_delta_pct}% "
-                          f"(threshold {latency_threshold_pct}%)",
+                          f"and {p95_delta_ms} ms "
+                          f"(threshold {latency_threshold_pct}%; "
+                          f"minimum absolute delta {latency_min_delta_ms} ms)",
                 "baseline_p95_ms": baseline_p95,
                 "current_p95_ms": current_p95,
+                "p95_delta_ms": p95_delta_ms,
             })
-        elif p95_delta_pct < -latency_threshold_pct:
+        elif (
+            p95_delta_pct < -latency_threshold_pct
+            and -p95_delta_ms >= latency_min_delta_ms
+        ):
             improvements.append({
-                "reason": f"p95 delivery latency improved by {abs(p95_delta_pct)}%",
+                "reason": f"p95 delivery latency improved by {abs(p95_delta_pct)}% "
+                          f"and {abs(p95_delta_ms)} ms",
                 "baseline_p95_ms": baseline_p95,
                 "current_p95_ms": current_p95,
+                "p95_delta_ms": p95_delta_ms,
             })
 
     if failed_delta > 0 and not any(
@@ -665,6 +780,7 @@ def compare_results(
         "same_configuration": same_configuration,
         "allow_config_change": allow_config_change,
         "latency_threshold_pct": float(latency_threshold_pct),
+        "latency_min_delta_ms": float(latency_min_delta_ms),
         "baseline": baseline_metrics,
         "current": current_metrics,
         "delta": {
@@ -688,6 +804,7 @@ def compare_history_runs(
     current_run_id: str = "latest",
     path: str | Path | None = None,
     latency_threshold_pct: float = 20.0,
+    latency_min_delta_ms: float = 25.0,
     allow_config_change: bool = False,
 ) -> dict[str, Any]:
     """Load and compare two records from the local history database."""
@@ -707,6 +824,7 @@ def compare_history_runs(
         current,
         baseline,
         latency_threshold_pct=latency_threshold_pct,
+        latency_min_delta_ms=latency_min_delta_ms,
         allow_config_change=allow_config_change,
     )
 
@@ -744,6 +862,11 @@ def export_history_run(
         encoded = json.dumps(
             document, ensure_ascii=False, indent=2, allow_nan=False
         )
+        if len(encoded.encode("utf-8")) > _MAX_HISTORY_EXPORT_BYTES:
+            raise HistoryError(
+                f"Cannot export run '{resolved_id}': baseline exceeds the "
+                f"{_MAX_HISTORY_EXPORT_BYTES}-byte export limit"
+            )
         _write_private_text(destination, encoded)
     except (OSError, TypeError, ValueError) as exc:
         raise HistoryError(f"Cannot export run '{resolved_id}': {exc}") from exc
@@ -751,8 +874,9 @@ def export_history_run(
 
 
 def load_history_export(source: str | Path) -> dict[str, Any]:
-    """Read a portable baseline and re-apply the history field whitelist."""
+    """Read a bounded portable baseline and re-apply the history field whitelist."""
     location = Path(source).expanduser()
+
     def reject_non_standard_number(value: str) -> None:
         raise HistoryError(
             f"Baseline file '{location}' contains non-standard JSON number {value}"
@@ -769,15 +893,35 @@ def load_history_export(source: str | Path) -> dict[str, Any]:
         return parsed
 
     try:
+        with location.open("rb") as stream:
+            serialized = stream.read(_MAX_HISTORY_EXPORT_BYTES + 1)
+    except OSError as exc:
+        raise HistoryError(f"Cannot read baseline file '{location}': {exc}") from exc
+
+    if len(serialized) > _MAX_HISTORY_EXPORT_BYTES:
+        raise HistoryError(
+            f"Baseline file '{location}' exceeds the "
+            f"{_MAX_HISTORY_EXPORT_BYTES}-byte size limit"
+        )
+
+    try:
+        source_text = serialized.decode("utf-8")
+        ensure_json_text_depth(source_text)
         document = json.loads(
-            location.read_text(encoding="utf-8"),
+            source_text,
             parse_constant=reject_non_standard_number,
             object_pairs_hook=reject_duplicate_keys,
         )
-    except OSError as exc:
-        raise HistoryError(f"Cannot read baseline file '{location}': {exc}") from exc
-    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
-        raise HistoryError(f"Baseline file '{location}' is not valid JSON: {exc}") from exc
+        # The stdlib parser may turn a valid-looking exponent such as 1e999
+        # into infinity. Reject non-finite numbers even in fields later ignored
+        # by the history whitelist.
+        json.dumps(document, ensure_ascii=True, allow_nan=False)
+    except UnicodeDecodeError as exc:
+        raise HistoryError(f"Baseline file '{location}' is not valid UTF-8") from exc
+    except (ValueError, RecursionError) as exc:
+        raise HistoryError(
+            f"Baseline file '{location}' is not valid JSON within parser limits: {exc}"
+        ) from exc
 
     if not isinstance(document, dict):
         raise HistoryError("Baseline file must contain a JSON object")
@@ -801,11 +945,11 @@ def load_history_export(source: str | Path) -> dict[str, Any]:
         raise HistoryError(
             f"Baseline run is incomplete; missing: {', '.join(missing)}"
         )
-    _validate_run_result(result, "Baseline")
     try:
+        _validate_run_result(result, "Baseline")
         safe_result = _sanitize_result(result)
         result_metrics(safe_result)
-    except (KeyError, TypeError, ValueError) as exc:
+    except (KeyError, TypeError, ValueError, RecursionError) as exc:
         raise HistoryError(f"Baseline run contains invalid metrics: {exc}") from exc
     return safe_result
 
@@ -816,6 +960,7 @@ def compare_history_file(
     current_run_id: str = "latest",
     path: str | Path | None = None,
     latency_threshold_pct: float = 20.0,
+    latency_min_delta_ms: float = 25.0,
     allow_config_change: bool = False,
 ) -> dict[str, Any]:
     """Compare the latest local run against a sanitized JSON baseline file."""
@@ -831,5 +976,6 @@ def compare_history_file(
         current,
         baseline,
         latency_threshold_pct=latency_threshold_pct,
+        latency_min_delta_ms=latency_min_delta_ms,
         allow_config_change=allow_config_change,
     )

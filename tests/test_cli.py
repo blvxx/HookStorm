@@ -1,8 +1,11 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
-from hookstorm.cli import main
+import pytest
+
+from hookstorm.cli import _injected_fault_label, main
 from hookstorm.history import list_runs, save_run
 
 
@@ -20,6 +23,91 @@ events:
         encoding="utf-8",
     )
     return str(path)
+
+
+def test_cli_labels_all_supported_injected_faults() -> None:
+    expected = {
+        "connect_error": "Connect fault",
+        "response_loss": "ACK loss",
+        "response_body_error": "Body read error",
+        "malformed_json": "Malformed JSON",
+        "wrong_content_type": "Wrong Content-Type",
+        "gzip_body": "Gzip body",
+        "deflate_body": "Deflate body",
+        "invalid_gzip": "Invalid gzip",
+        "invalid_deflate": "Invalid deflate",
+        "chunked_transfer": "Chunked transfer",
+        "malformed_chunked": "Malformed chunked framing",
+        "partial_upload": "Partial upload",
+        "content_length_mismatch": "Content-Length mismatch",
+    }
+    assert {fault: _injected_fault_label(fault) for fault in expected} == expected
+
+
+def _signed_scenario_file(tmp_path) -> str:
+    path = tmp_path / "signed-scenario.yaml"
+    path.write_text(
+        """version: 1
+name: CLI explicit secret environment
+delivery:
+  signature: valid
+  signature_provider: generic
+events:
+  - id: ping
+    event_id: evt_cli_secret
+    payload:
+      ok: true
+""",
+        encoding="utf-8",
+    )
+    return str(path)
+
+
+def test_run_command_does_not_fall_back_to_default_secret_when_custom_env_is_missing(
+    receiver, tmp_path, monkeypatch, capsys
+) -> None:
+    base, state = receiver
+    scenario = _signed_scenario_file(tmp_path)
+    monkeypatch.setenv("HOOKSTORM_SECRET", "must-not-be-used")
+    monkeypatch.delenv("CUSTOM_HOOKSTORM_SECRET", raising=False)
+
+    assert main([
+        "run",
+        scenario,
+        "--target",
+        base,
+        "--secret-env",
+        "CUSTOM_HOOKSTORM_SECRET",
+        "--no-history",
+        "--format",
+        "json",
+    ]) == 2
+
+    assert state["requests"] == []
+    assert "requires HOOKSTORM_SECRET" in capsys.readouterr().err
+
+
+def test_fuzz_command_does_not_fall_back_to_default_secret_when_custom_env_is_missing(
+    receiver, tmp_path, monkeypatch, capsys
+) -> None:
+    base, state = receiver
+    scenario = _signed_scenario_file(tmp_path)
+    monkeypatch.setenv("HOOKSTORM_SECRET", "must-not-be-used")
+    monkeypatch.delenv("CUSTOM_HOOKSTORM_SECRET", raising=False)
+
+    assert main([
+        "fuzz",
+        scenario,
+        "--target",
+        base,
+        "--secret-env",
+        "CUSTOM_HOOKSTORM_SECRET",
+        "--iterations",
+        "1",
+    ]) == 2
+
+    assert state["requests"] == []
+    assert "requires HOOKSTORM_SECRET" in capsys.readouterr().err
 
 
 def test_run_command_persists_history_and_history_commands_read_it(
@@ -442,3 +530,226 @@ events:
     assert "Injected faults: 1" in details
     assert "Connect fault" in details
     assert "before request reached the endpoint" in details
+
+
+def test_history_compare_cli_exposes_minimum_absolute_latency_delta() -> None:
+    from hookstorm.cli import _parser
+    args = _parser().parse_args([
+        "history", "compare-file", "baseline.json",
+        "--latency-threshold-pct", "30", "--latency-min-delta-ms", "40",
+    ])
+    assert args.latency_threshold_pct == 30.0
+    assert args.latency_min_delta_ms == 40.0
+
+
+@pytest.mark.parametrize(
+    ("provider", "route", "signature_header", "secret"),
+    [
+        ("stripe", "stripe", "Stripe-Signature", "test-secret"),
+        ("github", "github", "X-Hub-Signature-256", "test-secret"),
+        ("shopify", "shopify", "X-Shopify-Hmac-Sha256", "test-secret"),
+        (
+            "standard_webhooks",
+            "standard",
+            "webhook-signature",
+            "whsec_aG9va3N0b3JtLXRlc3Qtc3RhbmRhcmQtd2ViaG9va3Mtc2VjcmV0",
+        ),
+    ],
+)
+def test_run_provider_flag_sends_valid_provider_signature(
+    receiver, tmp_path, monkeypatch, capsys,
+    provider: str, route: str, signature_header: str, secret: str,
+) -> None:
+    base, state = receiver
+    scenario = _scenario_file(tmp_path)
+    monkeypatch.setenv("HOOKSTORM_SECRET", secret)
+
+    assert main([
+        "run",
+        scenario,
+        "--target",
+        f"{base}/signature/{route}",
+        "--provider",
+        provider,
+        "--no-history",
+        "--format",
+        "json",
+    ]) == 0
+
+    output = capsys.readouterr().out
+    assert f'"signature_provider": "{provider}"' in output
+    assert state["requests"][0]["headers"].get(signature_header)
+    if provider == "github":
+        assert state["requests"][0]["headers"]["X-GitHub-Event"] == "ping"
+        assert state["requests"][0]["headers"]["X-GitHub-Delivery"]
+    if provider == "shopify":
+        assert state["requests"][0]["headers"]["X-Shopify-Topic"] == "ping"
+        assert state["requests"][0]["headers"]["X-Shopify-Webhook-Id"]
+    if provider == "standard_webhooks":
+        assert state["requests"][0]["headers"]["webhook-id"] == "evt_cli_history"
+
+
+
+
+def test_init_provider_flag_generates_a_provider_profile(tmp_path, monkeypatch, capsys) -> None:
+    from hookstorm.config import load_scenario
+
+    monkeypatch.chdir(tmp_path)
+    assert main(["init", "--provider", "stripe", "--no-workflow"]) == 0
+    scenario = load_scenario(tmp_path / "scenarios" / "webhook.yaml")
+
+    assert scenario["provider"] == "stripe"
+    assert scenario["delivery"]["signature_provider"] == "stripe"
+    assert scenario["events"][0]["id"] == "payment_intent.succeeded"
+    assert scenario["events"][0]["payload"]["object"] == "event"
+    capsys.readouterr()
+
+
+
+def test_fuzz_cli_executes_seeded_mutations_and_writes_json_summary(
+    receiver, tmp_path, capsys
+) -> None:
+    base, _state = receiver
+    scenario = _scenario_file(tmp_path)
+    output = tmp_path / "fuzz-summary.json"
+
+    assert main([
+        "fuzz",
+        scenario,
+        "--target",
+        base,
+        "--seed",
+        "123",
+        "--iterations",
+        "3",
+        "--output",
+        str(output),
+    ]) == 0
+
+    summary = json.loads(output.read_text(encoding="utf-8"))
+    assert summary["seed"] == 123
+    assert summary["iterations"] == 3
+    assert summary["summary"]["success"] is True
+    assert summary["summary"]["executions"] == 3
+    assert summary["worst_case_http_attempts"] == 3
+    assert len({case["event_id"] for case in summary["cases"]}) == 3
+    assert "Fuzz summary:" in capsys.readouterr().out
+
+
+
+def test_fuzz_cli_parser_exposes_opt_in_delivery_mutations() -> None:
+    from hookstorm.cli import _parser
+
+    args = _parser().parse_args([
+        "fuzz",
+        "scenario.yaml",
+        "--target",
+        "http://127.0.0.1:8000/webhook",
+        "--vary-order",
+        "--vary-duplicates",
+        "--max-duplicates",
+        "4",
+        "--vary-delay",
+        "--max-delay-ms",
+        "250",
+        "--vary-faults",
+    ])
+
+    assert args.vary_order is True
+    assert args.vary_duplicates is True
+    assert args.max_duplicates == 4
+    assert args.vary_delay is True
+    assert args.max_delay_ms == 250
+    assert args.vary_faults is True
+
+
+def test_capture_cli_parser_defaults_to_loopback_capture_output() -> None:
+    from hookstorm.cli import _parser
+
+    args = _parser().parse_args(["capture"])
+    assert args.output == "captured-webhooks.yaml"
+    assert args.port == 8787
+    assert args.max_events == 25
+    assert args.include_sensitive_headers is False
+
+
+def test_capture_cli_parser_requires_explicit_sensitive_header_opt_in() -> None:
+    from hookstorm.cli import _parser
+
+    args = _parser().parse_args([
+        "capture",
+        "--include-sensitive-headers",
+        "--output",
+        "capture.yaml",
+        "--port",
+        "0",
+    ])
+    assert args.include_sensitive_headers is True
+    assert args.output == "capture.yaml"
+    assert args.port == 0
+
+def test_schema_command_prints_packaged_json_schema(capsys) -> None:
+    exit_code = main(["schema"])
+    output = capsys.readouterr().out
+
+    assert exit_code == 0
+    schema = json.loads(output)
+    assert schema["$schema"] == "https://json-schema.org/draft/2020-12/schema"
+    assert schema["$id"] == "urn:hookstorm:scenario:v1"
+
+
+def test_schema_command_writes_without_overwriting_by_default(tmp_path, capsys) -> None:
+    output = tmp_path / "nested" / "scenario.schema.json"
+
+    assert main(["schema", "--output", str(output)]) == 0
+    assert json.loads(output.read_text(encoding="utf-8"))["$id"] == "urn:hookstorm:scenario:v1"
+    capsys.readouterr()
+
+    assert main(["schema", "--output", str(output)]) == 2
+    assert "Refusing to overwrite" in capsys.readouterr().err
+
+    assert main(["schema", "--output", str(output), "--force"]) == 0
+    assert "JSON Schema written:" in capsys.readouterr().out
+
+def test_fuzz_cli_forwards_delivery_variation_options(monkeypatch, tmp_path, capsys) -> None:
+    observed: dict[str, object] = {}
+
+    async def fake_fuzz(scenario, target, **kwargs):
+        observed.update(kwargs)
+        return {
+            "schema_version": 1,
+            "mode": "seeded-scenario-fuzz",
+            "seed": 9,
+            "iterations": 1,
+            "summary": {"success": True},
+            "cases": [],
+        }
+
+    monkeypatch.setattr("hookstorm.cli.run_fuzz", fake_fuzz)
+    scenario_path = _scenario_file(tmp_path)
+
+    exit_code = main([
+        "fuzz",
+        scenario_path,
+        "--target",
+        "http://127.0.0.1:8000/webhook",
+        "--vary-order",
+        "--vary-duplicates",
+        "--max-duplicates",
+        "4",
+        "--vary-delay",
+        "--max-delay-ms",
+        "250",
+        "--vary-faults",
+        "--output",
+        str(tmp_path / "fuzz.json"),
+    ])
+
+    assert exit_code == 0
+    assert observed["vary_order"] is True
+    assert observed["vary_duplicates"] is True
+    assert observed["max_duplicates"] == 4
+    assert observed["vary_delay"] is True
+    assert observed["max_delay_ms"] == 250
+    assert observed["vary_faults"] is True
+    assert "Fuzz summary:" in capsys.readouterr().out

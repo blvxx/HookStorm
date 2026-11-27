@@ -29,7 +29,14 @@ def test_initialize_project_creates_valid_scenario_and_workflow(tmp_path) -> Non
     assert scenario["delivery"]["signature_provider"] == "github"
 
     workflow = yaml.load(workflow_path.read_text(encoding="utf-8"), Loader=yaml.BaseLoader)
-    env = workflow["jobs"]["webhook-regression"]["env"]
+    validation_job = workflow["jobs"]["validate-scenario"]
+    assert validation_job["if"] == "github.event_name == 'pull_request'"
+    assert "environment" not in validation_job
+    assert "secrets." not in str(validation_job)
+    staging_job = workflow["jobs"]["webhook-regression"]
+    assert "pull_request" not in staging_job["if"]
+    assert "refs/heads/main" in staging_job["if"]
+    env = staging_job["env"]
     assert env["HOOKSTORM_SCENARIO"] == (
         "${{ vars.HOOKSTORM_SCENARIO || 'scenarios/webhook.yaml' }}"
     )
@@ -37,6 +44,9 @@ def test_initialize_project_creates_valid_scenario_and_workflow(tmp_path) -> Non
     assert env["HOOKSTORM_SECRET"] == "${{ secrets.HOOKSTORM_SECRET }}"
     assert env["HOOKSTORM_ALLOW_INSECURE_HTTP"] == (
         "${{ vars.HOOKSTORM_ALLOW_INSECURE_HTTP || '0' }}"
+    )
+    assert env["HOOKSTORM_LATENCY_MIN_DELTA_MS"] == (
+        "${{ vars.HOOKSTORM_LATENCY_MIN_DELTA_MS || '25' }}"
     )
     workflow_text = workflow_path.read_text(encoding="utf-8")
     steps = workflow["jobs"]["webhook-regression"]["steps"]
@@ -55,6 +65,7 @@ def test_initialize_project_creates_valid_scenario_and_workflow(tmp_path) -> Non
     assert all(character in "0123456789abcdef" for character in HOOKSTORM_INSTALL_REF)
     assert f"git+https://github.com/blvxx/HookStorm.git@{HOOKSTORM_INSTALL_REF}" in workflow_text
     assert "--allow-insecure-http" in workflow_text
+    assert "--latency-min-delta-ms" in workflow_text
     assert "HOOKSTORM_ALLOW_INSECURE_HTTP" in workflow_text
     assert "7ab9ffb6ab510b4067916a83068bf60f8c010a70" not in workflow_text
     assert "8755dc158c732a420e09b83d8bae0e29a10e9206" not in workflow_text
@@ -162,4 +173,53 @@ def test_initialize_project_rejects_invalid_retry_and_duplicate_options(
             include_workflow=False,
             max_attempts=max_attempts,
             duplicate_count=duplicate_count,
+        )
+
+
+
+@pytest.mark.parametrize(
+    ("provider", "expected_event_type"),
+    [
+        ("stripe", "payment_intent.succeeded"),
+        ("github", "issues.opened"),
+        ("shopify", "orders/create"),
+        ("standard_webhooks", "order.created"),
+    ],
+)
+def test_initialize_project_generates_provider_specific_scenario(
+    tmp_path, provider: str, expected_event_type: str
+) -> None:
+    written = initialize_project(
+        root=tmp_path,
+        provider=provider,
+        include_workflow=False,
+    )
+    scenario = load_scenario(written[0])
+
+    assert scenario["provider"] == provider
+    assert scenario["events"][0]["id"] == expected_event_type
+    assert scenario["delivery"]["signature_provider"] == provider
+    assert scenario["delivery"]["signature"] == "valid"
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("event_type", "   "),
+        ("event_type", "type\twith-tab"),
+        ("event_type", "event-☃"),
+        ("event_type", "event-\x7f"),
+        ("event_id", "   "),
+        ("event_id", "evt-☃"),
+        ("event_id", "evt-\x00"),
+    ],
+)
+def test_initialize_rejects_event_values_that_scenario_validation_would_reject(
+    tmp_path, field: str, value: str
+) -> None:
+    with pytest.raises(ValueError, match="printable ASCII"):
+        initialize_project(
+            root=tmp_path,
+            include_workflow=False,
+            **{field: value},
         )

@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import base64
+import gzip
 import hashlib
 import hmac
 import json
@@ -11,6 +12,7 @@ import socket
 import sqlite3
 import threading
 import time
+import zlib
 from collections import defaultdict
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from urllib.parse import urlsplit
@@ -57,6 +59,72 @@ class Handler(BaseHTTPRequestHandler):
             # Expected when HookStorm intentionally times out a slow delivery.
             pass
 
+    def _read_request_body(self) -> tuple[bytes, str | None]:
+        transfer_encoding = self.headers.get("Transfer-Encoding", "").strip().lower()
+        length_header = self.headers.get("Content-Length")
+        if transfer_encoding:
+            if transfer_encoding != "chunked" or length_header is not None:
+                return b"", "unsupported or conflicting HTTP request framing"
+            chunks = bytearray()
+            while True:
+                line = self.rfile.readline(8192)
+                if not line.endswith(b"\r\n"):
+                    return bytes(chunks), "truncated chunk-size line"
+                try:
+                    size_token = line[:-2].split(b";", 1)[0].strip()
+                    size = int(size_token, 16)
+                except ValueError:
+                    return bytes(chunks), "invalid chunk-size token"
+                if size < 0:
+                    return bytes(chunks), "negative chunk size"
+                if size == 0:
+                    while True:
+                        trailer = self.rfile.readline(8192)
+                        if trailer == b"\r\n":
+                            return bytes(chunks), None
+                        if not trailer or not trailer.endswith(b"\r\n"):
+                            return bytes(chunks), "truncated chunk trailer"
+                chunk = self.rfile.read(size)
+                if len(chunk) != size:
+                    return bytes(chunks + chunk), "incomplete chunk data"
+                if self.rfile.read(2) != b"\r\n":
+                    return bytes(chunks + chunk), "invalid chunk terminator"
+                chunks.extend(chunk)
+                if len(chunks) > 1_048_576:
+                    return bytes(chunks), "request body exceeds the 1 MiB demo limit"
+
+        try:
+            length = int(length_header or "0")
+        except ValueError:
+            return b"", "invalid Content-Length header"
+        if length < 0 or length > 1_048_576:
+            return b"", "request Content-Length exceeds the 1 MiB demo limit"
+        raw = self.rfile.read(length)
+        if len(raw) != length:
+            return raw, "request body ended before Content-Length bytes arrived"
+        return raw, None
+
+    def _validate_json_request(self, raw: bytes) -> tuple[object | None, int | None, str | None]:
+        content_type = self.headers.get("Content-Type", "").split(";", 1)[0].strip().lower()
+        if content_type != "application/json":
+            return None, 415, "Content-Type must be application/json"
+        encoding = self.headers.get("Content-Encoding", "identity").strip().lower()
+        try:
+            if encoding in {"", "identity"}:
+                decoded = raw
+            elif encoding == "gzip":
+                decoded = gzip.decompress(raw)
+            elif encoding == "deflate":
+                decoded = zlib.decompress(raw)
+            else:
+                return None, 415, f"unsupported Content-Encoding: {encoding}"
+        except (OSError, EOFError, zlib.error):
+            return None, 400, f"invalid {encoding} request body"
+        try:
+            return json.loads(decoded), None, None
+        except (UnicodeDecodeError, json.JSONDecodeError):
+            return None, 400, "request body is not valid UTF-8 JSON"
+
     def do_GET(self) -> None:  # noqa: N802 - stdlib handler API
         if urlsplit(self.path).path != "/__hookstorm/state":
             self._reply(404, {"ok": False, "error": "not found"})
@@ -70,8 +138,19 @@ class Handler(BaseHTTPRequestHandler):
         self._reply(200, {"ok": True, "processed_events": int(row[0])})
 
     def do_POST(self) -> None:  # noqa: N802 - stdlib handler API
-        length = int(self.headers.get("Content-Length", "0"))
-        raw = self.rfile.read(length)
+        raw, framing_error = self._read_request_body()
+        if framing_error is not None:
+            self._reply(400, {"ok": False, "error": framing_error})
+            self.close_connection = True
+            return
+        _payload, request_status, request_error = self._validate_json_request(raw)
+        if request_error is not None:
+            self._reply(
+                request_status or 400,
+                {"ok": False, "error": request_error},
+            )
+            return
+
         event_id = self.headers.get("X-Event-ID", "missing-id")
         run_id = self.headers.get("X-HookStorm-Run", "manual")
         delivery_key = (run_id, event_id)

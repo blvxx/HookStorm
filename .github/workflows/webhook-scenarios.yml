@@ -93,7 +93,7 @@ jobs:
 
             if hookstorm run "$scenario" --target "$target" --format junit --output "test-results/${name}.xml" --history-db "$history_db"; then
               if [ -f "$baseline" ]; then
-                if hookstorm history compare-file "$baseline" --db "$history_db" --latency-threshold-pct 1000; then
+                if hookstorm history compare-file "$baseline" --db "$history_db" --latency-threshold-pct 20 --latency-min-delta-ms 25; then
                   echo "Scenario ${name}: PASS · no regression"
                   if is_main_push; then
                     if ! hookstorm history export latest --output "$baseline" --db "$history_db"; then
@@ -135,6 +135,8 @@ jobs:
           run_case examples/idempotency-verification.yaml http://127.0.0.1:8000/webhook
           run_case examples/commit-then-drop.yaml http://127.0.0.1:8000/webhook/commit-then-drop
           run_case examples/deterministic-fault-injection.yaml http://127.0.0.1:8000/webhook
+          run_case examples/partial-response-body-error.yaml http://127.0.0.1:8000/webhook
+          run_case examples/request-level-faults.yaml http://127.0.0.1:8000/webhook
           run_case examples/out-of-order.yaml http://127.0.0.1:8000/webhook
           run_case examples/payment-retry.yaml http://127.0.0.1:8000/webhook/flaky
           run_case examples/scheduled-events.yaml http://127.0.0.1:8000/webhook

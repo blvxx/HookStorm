@@ -25,9 +25,18 @@ def test_external_workflow_template_has_safe_triggers_and_permissions() -> None:
     assert "workflow_dispatch" in workflow["on"]
     assert workflow["permissions"]["contents"] == "read"
 
+    validation_job = workflow["jobs"]["validate-scenario"]
+    assert validation_job["if"] == "github.event_name == 'pull_request'"
+    assert "environment" not in validation_job
+    assert "secrets." not in str(validation_job)
+    assert any("hookstorm validate" in step.get("run", "") for step in validation_job["steps"])
+
     job = workflow["jobs"]["webhook-regression"]
     assert job["environment"] == "staging"
-    assert "github.event.pull_request.head.repo.full_name == github.repository" in job["if"]
+    assert "github.event_name == 'push'" in job["if"]
+    assert "github.event_name == 'workflow_dispatch'" in job["if"]
+    assert "refs/heads/main" in job["if"]
+    assert "pull_request" not in job["if"]
     assert job["env"]["HOOKSTORM_TARGET_URL"] == "${{ vars.HOOKSTORM_TARGET_URL }}"
     assert job["env"]["HOOKSTORM_SECRET"] == "${{ secrets.HOOKSTORM_SECRET }}"
     assert job["env"]["HOOKSTORM_ALLOW_INSECURE_HTTP"] == (
@@ -80,3 +89,34 @@ def test_copy_ready_template_pins_all_github_actions_to_full_shas() -> None:
             continue
         reference = action.rsplit("@", 1)[-1].split()[0]
         assert re.fullmatch(r"[0-9a-f]{40}", reference), action
+
+
+def test_latency_regression_gate_uses_relative_and_absolute_p95_thresholds() -> None:
+    import yaml
+    workflow_root = ROOT / ".github" / "workflows"
+    builtin = yaml.load((workflow_root / "webhook-scenarios.yml").read_text(encoding="utf-8"), Loader=yaml.BaseLoader)
+    run_step = next(step for step in builtin["jobs"]["scenarios"]["steps"] if step.get("name") == "Run and compare provider / delivery scenarios")
+    assert "--latency-threshold-pct 20 --latency-min-delta-ms 25" in run_step["run"]
+    assert "--latency-threshold-pct 1000" not in run_step["run"]
+    external = _load_workflow()
+    job = external["jobs"]["webhook-regression"]
+    assert job["env"]["HOOKSTORM_LATENCY_MIN_DELTA_MS"] == "${{ vars.HOOKSTORM_LATENCY_MIN_DELTA_MS || '25' }}"
+    compare_step = next(step for step in job["steps"] if step.get("name") == "Run webhook scenario and compare with baseline")
+    assert "--latency-min-delta-ms" in compare_step["run"]
+
+def test_composite_action_example_never_exposes_staging_to_pull_requests() -> None:
+    import yaml
+
+    workflow_path = ROOT / "examples" / "ci" / "hookstorm-action.yml"
+    workflow = yaml.load(workflow_path.read_text(encoding="utf-8"), Loader=yaml.BaseLoader)
+    validation = workflow["jobs"]["validate-scenario"]
+    staging = workflow["jobs"]["webhook-contract"]
+
+    assert validation["if"] == "github.event_name == 'pull_request'"
+    assert "environment" not in validation
+    assert "secrets." not in str(validation)
+    assert "hookstorm validate" in str(validation)
+    assert staging["environment"] == "staging"
+    assert "push" in staging["if"] and "workflow_dispatch" in staging["if"]
+    assert "refs/heads/main" in staging["if"]
+    assert "pull_request" not in staging["if"]

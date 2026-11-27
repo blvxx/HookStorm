@@ -10,14 +10,38 @@ from typing import Any
 from urllib.parse import urlsplit
 
 import yaml
+from yaml.events import AliasEvent
+
+from hookstorm.json_limits import ensure_value_depth
+from hookstorm.provider_profiles import PROVIDER_NAMES, provider_event, provider_headers
+from hookstorm.safety import validate_target
 
 
 class ScenarioError(ValueError):
     """Raised when a scenario file is invalid."""
 
 
+_MAX_SCENARIO_FILE_BYTES = 16 * 1_048_576
+_MAX_SCENARIO_PAYLOAD_BYTES = 16 * 1_048_576
+_MAX_YAML_ALIASES = 16
+
+
 class _UniqueKeySafeLoader(yaml.SafeLoader):
-    """Safe YAML loader that rejects duplicate keys before constructing mappings."""
+    """Safe YAML loader with duplicate-key, alias-count, and expansion guards."""
+
+    def __init__(self, stream: Any) -> None:
+        self._alias_count = 0
+        super().__init__(stream)
+
+    def compose_node(self, parent: Any, index: Any) -> Any:
+        if self.check_event(AliasEvent):
+            self._alias_count += 1
+            if self._alias_count > _MAX_YAML_ALIASES:
+                raise ScenarioError(
+                    f"YAML contains more than {_MAX_YAML_ALIASES} aliases; "
+                    "reduce aliases to keep scenario loading bounded"
+                )
+        return super().compose_node(parent, index)
 
     def construct_mapping(self, node: yaml.MappingNode, deep: bool = False) -> dict:
         seen: dict[Any, Any] = {}
@@ -44,7 +68,7 @@ _DEFAULT_RUN_TIMEOUT_MS = 3_600_000
 _MAX_RUN_TIMEOUT_MS = 86_400_000
 
 _ALLOWED_TOP_LEVEL = {
-    "version", "name", "description", "delivery", "retry", "events", "verify", "run_timeout_ms"
+    "version", "name", "description", "delivery", "retry", "events", "verify", "run_timeout_ms", "provider", "capture"
 }
 _ALLOWED_DELIVERY = {
     "order", "duplicate_count", "delay_ms", "timeout_ms", "signature", "concurrency",
@@ -125,11 +149,40 @@ def _validate_fault_injection(value: Any, where: str) -> dict[str, list[int]]:
     """Validate deterministic per-attempt client-side transport fault plans."""
     if not isinstance(value, dict):
         raise ScenarioError(f"{where} must be a mapping")
-    allowed = {"connect_error_attempts", "response_loss_attempts"}
+    allowed = {
+        "connect_error_attempts",
+        "response_loss_attempts",
+        "response_body_error_attempts",
+        "malformed_json_attempts",
+        "wrong_content_type_attempts",
+        "gzip_body_attempts",
+        "deflate_body_attempts",
+        "invalid_gzip_attempts",
+        "invalid_deflate_attempts",
+        "chunked_transfer_attempts",
+        "malformed_chunked_attempts",
+        "partial_upload_attempts",
+        "content_length_mismatch_attempts",
+    }
     _unknown_keys(value, allowed, where)
 
     normalized: dict[str, list[int]] = {}
-    for field in sorted(allowed):
+    fields = ["connect_error_attempts", "response_loss_attempts"]
+    optional_fields = (
+        "response_body_error_attempts",
+        "malformed_json_attempts",
+        "wrong_content_type_attempts",
+        "gzip_body_attempts",
+        "deflate_body_attempts",
+        "invalid_gzip_attempts",
+        "invalid_deflate_attempts",
+        "chunked_transfer_attempts",
+        "malformed_chunked_attempts",
+        "partial_upload_attempts",
+        "content_length_mismatch_attempts",
+    )
+    fields.extend(field for field in optional_fields if field in value)
+    for field in fields:
         attempts = value.get(field, [])
         if not isinstance(attempts, list):
             raise ScenarioError(f"{where}.{field} must be a list of attempt numbers")
@@ -141,14 +194,16 @@ def _validate_fault_injection(value: Any, where: str) -> dict[str, list[int]]:
             raise ScenarioError(f"{where}.{field} must not contain duplicate attempt numbers")
         normalized[field] = sorted(parsed)
 
-    overlap = set(normalized["connect_error_attempts"]) & set(
-        normalized["response_loss_attempts"]
-    )
-    if overlap:
-        numbers = ", ".join(str(number) for number in sorted(overlap))
-        raise ScenarioError(
-            f"{where} cannot inject more than one fault on the same attempt ({numbers})"
-        )
+    attempt_faults: dict[int, str] = {}
+    for field, attempts in normalized.items():
+        for attempt in attempts:
+            previous = attempt_faults.get(attempt)
+            if previous is not None:
+                raise ScenarioError(
+                    f"{where} cannot inject more than one fault on attempt {attempt} "
+                    f"({previous} and {field})"
+                )
+            attempt_faults[attempt] = field
     return normalized
 
 
@@ -241,10 +296,14 @@ def _validate_verify_auth(value: Any) -> dict[str, str] | None:
         return {"type": "bearer", "token_env": env_name}
 
     header = value.get("header", "X-API-Key")
-    if not isinstance(header, str) or not re.fullmatch(
-        r"[!#$%&'*+.^_`|~0-9A-Za-z-]+", header
+    if (
+        not isinstance(header, str)
+        or len(header) > 256
+        or not re.fullmatch(r"[!#$%&'*+.^_`|~0-9A-Za-z-]+", header)
     ):
-        raise ScenarioError("verify.auth.header must be a valid HTTP header name")
+        raise ScenarioError(
+            "verify.auth.header must be a valid HTTP header name of at most 256 characters"
+        )
     reserved_headers = {
         "authorization",
         "connection",
@@ -253,6 +312,8 @@ def _validate_verify_auth(value: Any) -> dict[str, str] | None:
         "host",
         "keep-alive",
         "proxy-connection",
+        "proxy-authenticate",
+        "proxy-authorization",
         "te",
         "trailer",
         "transfer-encoding",
@@ -289,15 +350,17 @@ def _validate_verify(value: Any) -> dict[str, Any] | None:
         or any(char in url for char in "\r\n")
     ):
         raise ScenarioError("verify.url must be a non-empty absolute HTTP(S) URL of at most 2048 characters")
-    parsed = urlsplit(url.strip())
-    if parsed.scheme not in {"http", "https"} or not parsed.hostname:
-        raise ScenarioError("verify.url must be an absolute http:// or https:// URL")
-    if parsed.username or parsed.password or parsed.fragment:
-        raise ScenarioError("verify.url must not contain embedded credentials or a fragment")
     try:
-        _ = parsed.port
+        normalized_url = validate_target(
+            url.strip(),
+            allow_remote=True,
+            allow_insecure_http=True,
+        )
+        parsed = urlsplit(normalized_url)
+        if parsed.scheme not in {"http", "https"} or not parsed.hostname:
+            raise ValueError("URL must be absolute HTTP(S)")
     except ValueError as exc:
-        raise ScenarioError("verify.url contains an invalid port") from exc
+        raise ScenarioError(f"verify.url is invalid: {exc}") from exc
 
     expect_status = value.get("expect_status", [200])
     if isinstance(expect_status, int) and not isinstance(expect_status, bool):
@@ -334,7 +397,7 @@ def _validate_verify(value: Any) -> dict[str, Any] | None:
     }
 
 
-def validate_scenario(data: Any) -> dict[str, Any]:
+def _validate_scenario(data: Any) -> dict[str, Any]:
     """Validate and normalize a parsed scenario mapping."""
     if not isinstance(data, dict):
         raise ScenarioError("Scenario root must be a YAML mapping")
@@ -354,7 +417,23 @@ def validate_scenario(data: Any) -> dict[str, Any]:
     if not isinstance(description, str):
         raise ScenarioError("description must be a string")
 
-    delivery = _validate_delivery(data.get("delivery", {}), "delivery")
+    provider = data.get("provider")
+    if provider is not None and (
+        not isinstance(provider, str) or provider not in PROVIDER_NAMES
+    ):
+        raise ScenarioError(
+            "provider must be stripe, github, shopify, or standard_webhooks"
+        )
+
+    raw_delivery = data.get("delivery", {})
+    if raw_delivery is None:
+        raw_delivery = {}
+    delivery = _validate_delivery(raw_delivery, "delivery")
+    if provider is not None and isinstance(raw_delivery, dict):
+        if "signature_provider" not in raw_delivery:
+            delivery["signature_provider"] = provider
+        if "signature" not in raw_delivery:
+            delivery["signature"] = "valid"
     retry = _validate_retry(data.get("retry"))
     verify = _validate_verify(data.get("verify"))
     events = data.get("events")
@@ -365,13 +444,28 @@ def validate_scenario(data: Any) -> dict[str, Any]:
 
     normalized_events: list[dict[str, Any]] = []
     seen_event_ids: set[str] = set()
+    total_payload_bytes = 0
     for index, event in enumerate(events):
         where = f"events[{index}]"
         if not isinstance(event, dict):
             raise ScenarioError(f"{where} must be a mapping")
         _unknown_keys(event, _ALLOWED_EVENT, where)
-        event_id = event.get("event_id")
-        event_type = event.get("id")
+        profile_event = (
+            provider_event(
+                provider,
+                index,
+                event_type=event.get("id"),
+                event_id=event.get("event_id"),
+            )
+            if provider is not None
+            else None
+        )
+        event_id = event.get(
+            "event_id", profile_event["event_id"] if profile_event is not None else None
+        )
+        event_type = event.get(
+            "id", profile_event["id"] if profile_event is not None else None
+        )
         if (
             not isinstance(event_id, str)
             or not event_id.strip()
@@ -389,7 +483,9 @@ def validate_scenario(data: Any) -> dict[str, Any]:
         if event_id in seen_event_ids:
             raise ScenarioError(f"{where}.event_id must be unique within a scenario")
         seen_event_ids.add(event_id)
-        payload = event.get("payload", {})
+        payload = event.get(
+            "payload", profile_event["payload"] if profile_event is not None else {}
+        )
         try:
             encoded_payload = json.dumps(
                 payload, ensure_ascii=False, separators=(",", ":"), allow_nan=False
@@ -398,13 +494,26 @@ def validate_scenario(data: Any) -> dict[str, Any]:
             raise ScenarioError(f"{where}.payload must be valid JSON-compatible data") from exc
         if len(encoded_payload) > 1_048_576:
             raise ScenarioError(f"{where}.payload exceeds the 1 MiB limit")
-        headers = event.get("headers", {})
-        if not isinstance(headers, dict) or any(
+        total_payload_bytes += len(encoded_payload)
+        if total_payload_bytes > _MAX_SCENARIO_PAYLOAD_BYTES:
+            raise ScenarioError(
+                "Scenario payloads exceed the 16 MiB aggregate limit; "
+                "reduce the number or size of events"
+            )
+        custom_headers = event.get("headers", {})
+        if not isinstance(custom_headers, dict) or any(
             not isinstance(key, str) or not isinstance(value, str)
-            for key, value in headers.items()
+            for key, value in custom_headers.items()
         ):
             raise ScenarioError(f"{where}.headers must be a mapping of string keys to string values")
-        for key, value in headers.items():
+        seen_header_names: set[str] = set()
+        for key, value in custom_headers.items():
+            normalized_name = key.lower()
+            if normalized_name in seen_header_names:
+                raise ScenarioError(
+                    f"{where}.headers must not contain case-insensitive duplicate names: {key}"
+                )
+            seen_header_names.add(normalized_name)
             if (
                 not re.fullmatch(r"[!#$%&'*+._^|~0-9A-Za-z-]+", key)
                 or not _is_safe_header_value(value)
@@ -414,17 +523,41 @@ def validate_scenario(data: Any) -> dict[str, Any]:
                 )
             if key.lower() in {
                 "host", "content-length", "transfer-encoding",
+                "connection", "keep-alive", "proxy-connection",
+                "proxy-authenticate", "proxy-authorization", "te", "trailer", "upgrade",
                 "x-hookstorm-run", "x-event-id", "x-event-type",
                 "x-hookstorm-attempt", "x-hookstorm-duplicate-index",
                 "x-hookstorm-signature", "stripe-signature",
                 "x-hub-signature-256", "x-shopify-hmac-sha256",
                 "webhook-id", "webhook-timestamp", "webhook-signature",
+                "x-github-event", "x-github-delivery", "x-shopify-topic",
+                "x-shopify-shop-domain", "x-shopify-api-version",
+                "x-shopify-triggered-at", "x-shopify-webhook-id",
+                "x-shopify-event-id",
             }:
                 raise ScenarioError(f"{where}.headers may not override {key}")
+        profile_headers = (
+            provider_headers(provider, event_type, event_id)
+            if provider is not None
+            else {}
+        )
+        headers = {**custom_headers, **profile_headers}
         header_bytes = sum(len(key) + len(value) for key, value in headers.items())
         if len(headers) > 64 or header_bytes > 16_384:
             raise ScenarioError(f"{where}.headers exceed the 64-header / 16 KiB limit")
-        event_delivery = _validate_delivery(event.get("delivery", {}), f"{where}.delivery", allow_order=False)
+        raw_event_delivery = event.get("delivery", {})
+        if raw_event_delivery is None:
+            raw_event_delivery = {}
+        event_delivery = _validate_delivery(
+            raw_event_delivery, f"{where}.delivery", allow_order=False
+        )
+        if provider is not None and isinstance(raw_event_delivery, dict):
+            if "signature_provider" not in raw_event_delivery:
+                event_delivery["signature_provider"] = delivery.get(
+                    "signature_provider", provider
+                )
+            if "signature" not in raw_event_delivery:
+                event_delivery["signature"] = delivery.get("signature", "valid")
         expect_status = event.get("expect_status", [200, 201, 202, 204])
         if isinstance(expect_status, int) and not isinstance(expect_status, bool):
             expect_status = [expect_status]
@@ -471,10 +604,10 @@ def validate_scenario(data: Any) -> dict[str, Any]:
     for event in normalized_events:
         effective_delivery = {**delivery, **event["delivery"]}
         fault_plan = effective_delivery.get("fault_injection", {})
-        for field in ("connect_error_attempts", "response_loss_attempts"):
+        for field, configured_attempts in fault_plan.items():
             invalid_attempts = [
                 number
-                for number in fault_plan.get(field, [])
+                for number in configured_attempts
                 if number > retry["max_attempts"]
             ]
             if invalid_attempts:
@@ -482,18 +615,85 @@ def validate_scenario(data: Any) -> dict[str, Any]:
                     f"events[].delivery.fault_injection.{field} entries must not exceed "
                     f"retry.max_attempts={retry['max_attempts']}"
                 )
-        signature_provider = effective_delivery.get("signature_provider", "generic")
+        signature_provider = effective_delivery.get(
+            "signature_provider", provider or "generic"
+        )
         timestamp_offset = effective_delivery.get("signature_timestamp_offset_seconds", 0)
         if timestamp_offset and signature_provider not in {"stripe", "standard_webhooks"}:
             raise ScenarioError(
                 "signature_timestamp_offset_seconds can only be used with signature_provider: "
                 "stripe or standard_webhooks"
             )
-        if signature_provider == "standard_webhooks" and "." in event["event_id"]:
+        if (
+            signature_provider == "standard_webhooks"
+            and effective_delivery.get("signature", "none") in {"valid", "invalid"}
+            and "." in event["event_id"]
+        ):
             raise ScenarioError(
                 "events[].event_id must not contain '.' when signature_provider is "
                 "standard_webhooks"
             )
+
+    capture = data.get("capture")
+    if capture is not None:
+        if not isinstance(capture, dict):
+            raise ScenarioError("capture must be a mapping")
+        _unknown_keys(capture, {"source", "events"}, "capture")
+        if capture.get("source") != "hookstorm.capture":
+            raise ScenarioError("capture.source must be hookstorm.capture")
+        capture_events = capture.get("events")
+        if not isinstance(capture_events, list) or len(capture_events) != len(normalized_events):
+            raise ScenarioError("capture.events must contain one metadata entry per scenario event")
+        normalized_capture_events: list[dict[str, Any]] = []
+        for index, metadata in enumerate(capture_events):
+            where = f"capture.events[{index}]"
+            if not isinstance(metadata, dict):
+                raise ScenarioError(f"{where} must be a mapping")
+            _unknown_keys(
+                metadata,
+                {"event_id", "path", "original_event_id", "sensitive_headers"},
+                where,
+            )
+            if metadata.get("event_id") != normalized_events[index]["event_id"]:
+                raise ScenarioError(f"{where}.event_id must match the corresponding scenario event")
+            path = metadata.get("path", "/")
+            if (
+                not isinstance(path, str)
+                or not path.startswith("/")
+                or len(path) > 2048
+                or not _is_safe_header_value(path, allow_horizontal_tab=False)
+            ):
+                raise ScenarioError(f"{where}.path must be a safe absolute request path")
+            item: dict[str, Any] = {"event_id": metadata["event_id"], "path": path}
+            original_event_id = metadata.get("original_event_id")
+            if original_event_id is not None:
+                if (
+                    not isinstance(original_event_id, str)
+                    or not original_event_id
+                    or len(original_event_id) > 256
+                    or not _is_safe_header_value(original_event_id, allow_horizontal_tab=False)
+                ):
+                    raise ScenarioError(f"{where}.original_event_id must be a safe string")
+                item["original_event_id"] = original_event_id
+            sensitive_headers = metadata.get("sensitive_headers", {})
+            if not isinstance(sensitive_headers, dict) or any(
+                not isinstance(key, str) or not isinstance(value, str)
+                for key, value in sensitive_headers.items()
+            ):
+                raise ScenarioError(f"{where}.sensitive_headers must be a string mapping")
+            if len(sensitive_headers) > 64 or sum(
+                len(key) + len(value) for key, value in sensitive_headers.items()
+            ) > 16_384:
+                raise ScenarioError(f"{where}.sensitive_headers exceed the 64-header / 16 KiB limit")
+            for key, value in sensitive_headers.items():
+                if (
+                    not re.fullmatch(r"[!#$%&'*+._^|~0-9A-Za-z-]+", key)
+                    or not _is_safe_header_value(value)
+                ):
+                    raise ScenarioError(f"{where}.sensitive_headers contains an invalid header")
+            item["sensitive_headers"] = dict(sensitive_headers)
+            normalized_capture_events.append(item)
+        capture = {"source": "hookstorm.capture", "events": normalized_capture_events}
 
     estimated_requests = 0
     for event in normalized_events:
@@ -514,7 +714,7 @@ def validate_scenario(data: Any) -> dict[str, Any]:
             "increase run_timeout_ms or reduce timeouts, retries, delays, duplicates, or events"
         )
 
-    return {
+    normalized_scenario = {
         "version": 1,
         "run_timeout_ms": run_timeout_ms,
         "name": name.strip(),
@@ -524,6 +724,25 @@ def validate_scenario(data: Any) -> dict[str, Any]:
         "events": normalized_events,
         "verify": verify,
     }
+    if provider is not None:
+        normalized_scenario["provider"] = provider
+    if capture is not None:
+        normalized_scenario["capture"] = capture
+    return normalized_scenario
+
+
+def validate_scenario(data: Any) -> dict[str, Any]:
+    """Validate a scenario and normalize pathological nesting into a domain error."""
+    try:
+        ensure_value_depth(data)
+    except ValueError as exc:
+        raise ScenarioError(str(exc)) from exc
+    try:
+        return _validate_scenario(data)
+    except RecursionError as exc:
+        raise ScenarioError(
+            "Scenario nesting exceeds supported validation depth"
+        ) from exc
 
 
 def scenario_fingerprint(scenario: dict[str, Any]) -> str:
@@ -538,6 +757,8 @@ def scenario_fingerprint(scenario: dict[str, Any]) -> str:
         key: scenario.get(key)
         for key in ("version", "delivery", "retry", "events", "verify")
     }
+    if "provider" in scenario:
+        behavior["provider"] = scenario["provider"]
     # Preserve fingerprints created before run_timeout_ms was introduced when the
     # effective budget is unchanged; explicit non-default budgets remain behavior-defining.
     run_timeout_ms = scenario.get("run_timeout_ms", _DEFAULT_RUN_TIMEOUT_MS)
@@ -551,23 +772,39 @@ def scenario_fingerprint(scenario: dict[str, Any]) -> str:
             separators=(",", ":"),
             allow_nan=False,
         ).encode("utf-8")
-    except (TypeError, ValueError, UnicodeEncodeError) as exc:
+    except (TypeError, ValueError, UnicodeEncodeError, RecursionError) as exc:
         raise ScenarioError("Scenario configuration cannot be fingerprinted as JSON") from exc
     return hashlib.sha256(canonical).hexdigest()
 
 
-def load_scenario(path: str | Path) -> dict[str, Any]:
-    """Load a scenario from a YAML file using the safe loader."""
+def load_scenario(
+    path: str | Path, *, provider: str | None = None
+) -> dict[str, Any]:
+    """Load a scenario from YAML, optionally selecting a provider profile."""
     scenario_path = Path(path)
     try:
-        raw = yaml.load(
-            scenario_path.read_text(encoding="utf-8"),
-            Loader=_UniqueKeySafeLoader,
-        )
+        with scenario_path.open("rb") as stream:
+            serialized = stream.read(_MAX_SCENARIO_FILE_BYTES + 1)
+        if len(serialized) > _MAX_SCENARIO_FILE_BYTES:
+            raise ScenarioError(
+                f"Scenario file exceeds the {_MAX_SCENARIO_FILE_BYTES}-byte limit"
+            )
+        source = serialized.decode("utf-8")
+        raw = yaml.load(source, Loader=_UniqueKeySafeLoader)
     except FileNotFoundError as exc:
         raise ScenarioError(f"Scenario file not found: {scenario_path}") from exc
+    except UnicodeDecodeError as exc:
+        raise ScenarioError(f"Scenario file is not valid UTF-8: {scenario_path}") from exc
     except yaml.YAMLError as exc:
         raise ScenarioError(f"Invalid YAML in {scenario_path}: {exc}") from exc
+    except RecursionError as exc:
+        raise ScenarioError(
+            f"Scenario nesting exceeds parser limits in {scenario_path}"
+        ) from exc
     except OSError as exc:
         raise ScenarioError(f"Cannot read scenario file {scenario_path}: {exc}") from exc
+    if provider is not None:
+        if not isinstance(raw, dict):
+            raise ScenarioError("Scenario root must be a YAML mapping")
+        raw = {**raw, "provider": provider}
     return validate_scenario(raw)

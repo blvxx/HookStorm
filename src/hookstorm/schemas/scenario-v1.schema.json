@@ -1,0 +1,688 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "$id": "urn:hookstorm:scenario:v1",
+  "title": "HookStorm scenario version 1",
+  "description": "Editor-facing structural schema for HookStorm YAML scenarios. Run hookstorm validate for cross-field and runtime safety checks.",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "version",
+    "name",
+    "events"
+  ],
+  "properties": {
+    "version": {
+      "const": 1
+    },
+    "run_timeout_ms": {
+      "type": "integer",
+      "minimum": 100,
+      "maximum": 86400000
+    },
+    "name": {
+      "type": "string",
+      "minLength": 1
+    },
+    "description": {
+      "type": "string"
+    },
+    "provider": {
+      "anyOf": [
+        {
+          "type": "string",
+          "enum": [
+            "stripe",
+            "github",
+            "shopify",
+            "standard_webhooks"
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "delivery": {
+      "anyOf": [
+        {
+          "allOf": [
+            {
+              "$ref": "#/$defs/deliveryCommon"
+            },
+            {
+              "type": "object",
+              "additionalProperties": false,
+              "properties": {
+                "order": {
+                  "type": "string",
+                  "enum": [
+                    "in_order",
+                    "reverse"
+                  ]
+                },
+                "concurrency": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 50
+                },
+                "duplicate_count": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 100
+                },
+                "delay_ms": {
+                  "type": "integer",
+                  "minimum": 0,
+                  "maximum": 60000
+                },
+                "timeout_ms": {
+                  "type": "integer",
+                  "minimum": 1,
+                  "maximum": 300000
+                },
+                "signature": {
+                  "type": "string",
+                  "enum": [
+                    "none",
+                    "valid",
+                    "invalid",
+                    "missing"
+                  ]
+                },
+                "signature_provider": {
+                  "type": "string",
+                  "enum": [
+                    "generic",
+                    "stripe",
+                    "github",
+                    "shopify",
+                    "standard_webhooks"
+                  ]
+                },
+                "signature_timestamp_offset_seconds": {
+                  "type": "integer",
+                  "minimum": -86400,
+                  "maximum": 86400
+                },
+                "fault_injection": {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "properties": {
+                    "connect_error_attempts": {
+                      "type": "array",
+                      "uniqueItems": true,
+                      "items": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 10
+                      }
+                    },
+                    "response_loss_attempts": {
+                      "type": "array",
+                      "uniqueItems": true,
+                      "items": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 10
+                      }
+                    },
+                    "response_body_error_attempts": {
+                      "type": "array",
+                      "uniqueItems": true,
+                      "items": {
+                        "type": "integer",
+                        "minimum": 1,
+                        "maximum": 10
+                      }
+                    }
+                  }
+                }
+              }
+            }
+          ]
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "retry": {
+      "anyOf": [
+        {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "max_attempts": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 10
+            },
+            "backoff_ms": {
+              "type": "integer",
+              "minimum": 0,
+              "maximum": 60000
+            },
+            "retry_on": {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "integer",
+                "minimum": 100,
+                "maximum": 599
+              }
+            }
+          }
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "events": {
+      "type": "array",
+      "minItems": 1,
+      "maxItems": 500,
+      "items": {
+        "$ref": "#/$defs/event"
+      }
+    },
+    "verify": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/verify"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    },
+    "capture": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/capture"
+        },
+        {
+          "type": "null"
+        }
+      ]
+    }
+  },
+  "allOf": [
+    {
+      "if": {
+        "required": [
+          "provider"
+        ],
+        "properties": {
+          "provider": {
+            "enum": [
+              "stripe",
+              "github",
+              "shopify",
+              "standard_webhooks"
+            ]
+          }
+        }
+      },
+      "then": {},
+      "else": {
+        "properties": {
+          "events": {
+            "items": {
+              "required": [
+                "id",
+                "event_id"
+              ]
+            }
+          }
+        }
+      }
+    }
+  ],
+  "$defs": {
+    "deliveryCommon": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "duplicate_count": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 100
+        },
+        "delay_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 60000
+        },
+        "timeout_ms": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 300000
+        },
+        "signature": {
+          "type": "string",
+          "enum": [
+            "none",
+            "valid",
+            "invalid",
+            "missing"
+          ]
+        },
+        "signature_provider": {
+          "type": "string",
+          "enum": [
+            "generic",
+            "stripe",
+            "github",
+            "shopify",
+            "standard_webhooks"
+          ]
+        },
+        "signature_timestamp_offset_seconds": {
+          "type": "integer",
+          "minimum": -86400,
+          "maximum": 86400
+        },
+        "fault_injection": {
+          "type": "object",
+          "additionalProperties": false,
+          "properties": {
+            "connect_error_attempts": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 10
+              }
+            },
+            "response_loss_attempts": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 10
+              }
+            },
+            "response_body_error_attempts": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 10
+              }
+            },
+            "malformed_json_attempts": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 10
+              }
+            },
+            "wrong_content_type_attempts": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 10
+              }
+            },
+            "gzip_body_attempts": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 10
+              }
+            },
+            "deflate_body_attempts": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 10
+              }
+            },
+            "invalid_gzip_attempts": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 10
+              }
+            },
+            "invalid_deflate_attempts": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 10
+              }
+            },
+            "chunked_transfer_attempts": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 10
+              }
+            },
+            "malformed_chunked_attempts": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 10
+              }
+            },
+            "partial_upload_attempts": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 10
+              }
+            },
+            "content_length_mismatch_attempts": {
+              "type": "array",
+              "uniqueItems": true,
+              "items": {
+                "type": "integer",
+                "minimum": 1,
+                "maximum": 10
+              }
+            }
+          }
+        },
+        "order": {
+          "type": "string",
+          "enum": [
+            "in_order",
+            "reverse"
+          ]
+        },
+        "concurrency": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 50
+        }
+      }
+    },
+    "delivery": {
+      "$ref": "#/$defs/deliveryCommon"
+    },
+    "eventDelivery": {
+      "anyOf": [
+        {
+          "$ref": "#/$defs/deliveryCommon"
+        },
+        {
+          "type": "null"
+        }
+      ],
+      "allOf": [
+        {
+          "not": {
+            "type": "object",
+            "anyOf": [
+              {
+                "required": [
+                  "order"
+                ]
+              },
+              {
+                "required": [
+                  "concurrency"
+                ]
+              }
+            ]
+          }
+        }
+      ]
+    },
+    "event": {
+      "type": "object",
+      "additionalProperties": false,
+      "properties": {
+        "id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[ -~]+$"
+        },
+        "event_id": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 256,
+          "pattern": "^[ -~]+$"
+        },
+        "payload": {},
+        "headers": {
+          "type": "object",
+          "maxProperties": 64,
+          "propertyNames": {
+            "pattern": "^[!#$%&'*+._^|~0-9A-Za-z-]+$"
+          },
+          "additionalProperties": {
+            "type": "string",
+            "pattern": "^[\\t\\x20-\\x7E]*$"
+          }
+        },
+        "delivery": {
+          "$ref": "#/$defs/eventDelivery"
+        },
+        "expect_status": {
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 100,
+              "maximum": 599
+            },
+            {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "integer",
+                "minimum": 100,
+                "maximum": 599
+              }
+            }
+          ]
+        },
+        "expect_json": {
+          "anyOf": [
+            {
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "expect_duplicate_json": {
+          "anyOf": [
+            {
+              "type": "object"
+            },
+            {
+              "type": "null"
+            }
+          ]
+        },
+        "schedule_after_ms": {
+          "type": "integer",
+          "minimum": 0,
+          "maximum": 300000
+        }
+      }
+    },
+    "verify": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "url",
+        "expect_json"
+      ],
+      "properties": {
+        "url": {
+          "type": "string",
+          "minLength": 1,
+          "maxLength": 2048,
+          "pattern": "^https?://",
+          "format": "uri"
+        },
+        "expect_status": {
+          "oneOf": [
+            {
+              "type": "integer",
+              "minimum": 100,
+              "maximum": 599
+            },
+            {
+              "type": "array",
+              "minItems": 1,
+              "items": {
+                "type": "integer",
+                "minimum": 100,
+                "maximum": 599
+              }
+            }
+          ]
+        },
+        "expect_json": {
+          "type": "object"
+        },
+        "timeout_ms": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 300000
+        },
+        "auth": {
+          "anyOf": [
+            {
+              "oneOf": [
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "type",
+                    "token_env"
+                  ],
+                  "properties": {
+                    "type": {
+                      "const": "bearer"
+                    },
+                    "token_env": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,127}$"
+                    }
+                  }
+                },
+                {
+                  "type": "object",
+                  "additionalProperties": false,
+                  "required": [
+                    "type",
+                    "key_env"
+                  ],
+                  "properties": {
+                    "type": {
+                      "const": "api_key"
+                    },
+                    "key_env": {
+                      "type": "string",
+                      "pattern": "^[A-Za-z_][A-Za-z0-9_]{0,127}$"
+                    },
+                    "header": {
+                      "type": "string",
+                      "maxLength": 256,
+                      "pattern": "^[!#$%&'*+.^_`|~0-9A-Za-z-]+$"
+                    }
+                  }
+                }
+              ]
+            },
+            {
+              "type": "null"
+            }
+          ]
+        }
+      }
+    },
+    "capture": {
+      "type": "object",
+      "additionalProperties": false,
+      "required": [
+        "source",
+        "events"
+      ],
+      "properties": {
+        "source": {
+          "const": "hookstorm.capture"
+        },
+        "events": {
+          "type": "array",
+          "items": {
+            "type": "object",
+            "additionalProperties": false,
+            "required": [
+              "event_id"
+            ],
+            "properties": {
+              "event_id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 256,
+                "pattern": "^[ -~]+$"
+              },
+              "path": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 2048,
+                "pattern": "^/[ -~]*$"
+              },
+              "original_event_id": {
+                "anyOf": [
+                  {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 256,
+                    "pattern": "^[ -~]+$"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "sensitive_headers": {
+                "type": "object",
+                "maxProperties": 64,
+                "propertyNames": {
+                  "pattern": "^[!#$%&'*+._^|~0-9A-Za-z-]+$"
+                },
+                "additionalProperties": {
+                  "type": "string",
+                  "pattern": "^[\\t\\x20-\\x7E]*$"
+                }
+              }
+            }
+          },
+          "minItems": 1,
+          "maxItems": 500
+        }
+      }
+    }
+  }
+}

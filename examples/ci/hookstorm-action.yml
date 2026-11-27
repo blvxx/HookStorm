@@ -1,0 +1,78 @@
+name: HookStorm webhook contract
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - "scenarios/**"
+      - "src/**"
+      - ".github/workflows/hookstorm-action.yml"
+  pull_request:
+    branches: [main]
+    paths:
+      - "scenarios/**"
+      - "src/**"
+      - ".github/workflows/hookstorm-action.yml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  validate-scenario:
+    # Pull requests perform local scenario validation only and never access staging.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    env:
+      HOOKSTORM_SCENARIO: scenarios/webhook.yaml
+    steps:
+      - name: Check out application
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
+        with:
+          python-version: "3.12"
+
+      - name: Install HookStorm
+        run: >-
+          python -m pip install
+          "git+https://github.com/blvxx/HookStorm.git@cb29c9aaeefcfa4e885ef78b511ec28e0c010946"
+
+      - name: Validate scenario without staging access
+        run: hookstorm validate "$HOOKSTORM_SCENARIO"
+
+  webhook-contract:
+    # Only trusted main-branch pushes and manual runs on main may access staging secrets.
+    if: >-
+      github.event_name == 'push' ||
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
+    runs-on: ubuntu-latest
+    environment: staging
+    steps:
+      - name: Check out application
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Run HookStorm scenario
+        id: hookstorm
+        uses: blvxx/HookStorm/.github/actions/run@7a1006aa943afdb4afb8eb67b10393a51f2319cb
+        with:
+          scenario: scenarios/webhook.yaml
+          target-url: ${{ vars.HOOKSTORM_TARGET_URL }}
+          allow-remote: "true"
+          connect-preflight: "true"
+          format: junit
+          output-path: test-results/hookstorm.xml
+        env:
+          HOOKSTORM_SECRET: ${{ secrets.HOOKSTORM_SECRET }}
+
+      - name: Upload HookStorm report
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: hookstorm-junit
+          path: test-results/hookstorm.xml
+          if-no-files-found: warn
+          retention-days: 14

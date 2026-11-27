@@ -2,7 +2,7 @@
 
 HookStorm can run against a staging webhook endpoint and compare each run with a baseline recorded by a successful run on your default branch. This is useful for checking webhook contract behavior and detecting delivery or latency regressions before a change is released.
 
-The copy-ready example is in [examples/ci/webhook-regression.yml](../examples/ci/webhook-regression.yml). The matching scenario example is [examples/ci/webhook-regression.yaml](../examples/ci/webhook-regression.yaml).
+The copy-ready example is in [examples/ci/webhook-regression.yml](https://github.com/blvxx/HookStorm/blob/main/examples/ci/webhook-regression.yml). The matching scenario example is [examples/ci/webhook-regression.yaml](https://github.com/blvxx/HookStorm/blob/main/examples/ci/webhook-regression.yaml).
 
 ## Quick setup with the CLI
 
@@ -73,7 +73,7 @@ The versioned document currently uses `schema_version: 1` and includes an overal
 
 In your GitHub repository, open **Settings → Environments** and create an environment named `staging`.
 
-Treat this environment as a deployment boundary, not just a place to store variables. Configure **Required reviewers** so a trusted maintainer must approve access from pull-request runs, and restrict which branches can deploy to the environment where that is practical. The workflow skips fork-originated PRs, but same-repository PRs can reach the job; do not make staging credentials available to code from contributors you do not trust. Use a dedicated staging signing secret with the minimum privileges needed, never a production credential.
+Treat this environment as a deployment boundary, not just a place to store variables. Configure **Required reviewers** and restrict allowed deployment branches to `main` where practical. The supplied workflow templates deliberately keep pull-request jobs separate: PRs only check out the proposed change and run `hookstorm validate`; they do not attach the `staging` environment, read staging variables/secrets, or call the endpoint. The staging job runs only for pushes to `main` and manual dispatches on `main`. Keep this separation if you customize the workflow. Use a dedicated staging signing secret with the minimum privileges needed, never a production credential.
 
 Add the following values to that environment:
 
@@ -86,6 +86,7 @@ Add the following values to that environment:
 | `HOOKSTORM_VERIFY_API_KEY` | Optional secret | Example API key referenced by `verify.auth.key_env`; use the exact variable name from your scenario. |
 | `HOOKSTORM_SCENARIO` | Optional variable | Scenario path. Defaults to `scenarios/webhook.yaml`. |
 | `HOOKSTORM_LATENCY_THRESHOLD_PCT` | Optional variable | Allowed latency increase. Defaults to `20`. |
+| `HOOKSTORM_LATENCY_MIN_DELTA_MS` | Optional variable | Minimum absolute p95 latency increase in milliseconds. Defaults to `25`. |
 
 The target must be a test environment you own or are authorized to exercise. The sample workflow passes `--allow-remote` because a staging URL is normally not loopback; remote HTTPS is the expected transport. Non-loopback plaintext HTTP is blocked by default. Only when HTTPS cannot be used for a controlled test endpoint, set the optional `HOOKSTORM_ALLOW_INSECURE_HTTP=1` environment variable; the generated workflow then passes `--allow-insecure-http` to both doctor and run. Authenticated remote verification probes still require HTTPS. Do not point it at production payment, billing, or customer-facing webhook endpoints. Use synthetic records and an isolated test account.
 
@@ -93,7 +94,7 @@ If the application needs to be deployed before testing, add your staging deploym
 
 ## 3. Copy the workflow
 
-Copy [examples/ci/webhook-regression.yml](../examples/ci/webhook-regression.yml) into your application repository at:
+Copy [examples/ci/webhook-regression.yml](https://github.com/blvxx/HookStorm/blob/main/examples/ci/webhook-regression.yml) into your application repository at:
 
 ```text
 .github/workflows/webhook-regression.yml
@@ -101,16 +102,16 @@ Copy [examples/ci/webhook-regression.yml](../examples/ci/webhook-regression.yml)
 
 Review the `paths` filters and add the folders that should trigger webhook testing in your application. The example installs HookStorm from a fixed repository commit so that the test tool does not silently change between runs. Update that commit SHA when you intentionally upgrade HookStorm.
 
-The workflow runs for pushes to `main`, pull requests targeting `main`, and manual dispatches. It intentionally skips fork-originated pull requests because those runs do not receive the staging secrets and should not send requests to a private staging endpoint. Keep your ordinary unit-test workflow enabled for fork PRs. The **Preflight staging endpoint** step runs before the first delivery and fails early on an invalid scenario, missing target or required secret, DNS/TCP failure, or TLS certificate error.
+The workflow starts for pushes to `main`, pull requests targeting `main`, and manual dispatches. Pull requests run only the separate `validate-scenario` job: it installs the pinned HookStorm version and validates the YAML without a staging environment or secrets. The staging integration job runs only for pushes to `main` and manual dispatches targeting `main`; it never runs for a pull request, including same-repository PRs. Keep this separation when adapting the template. The **Preflight staging endpoint** step runs before the first delivery and fails early on an invalid scenario, missing target or required secret, DNS/TCP failure, or TLS certificate error.
 
 ## 4. How baseline handling works
 
 - On the first successful run on `main`, HookStorm exports the run to `.hookstorm-baselines/webhook.json`.
 - GitHub Actions stores that file in a cache scoped to the application repository.
-- Pull requests restore the baseline from the default branch, execute the current scenario, and run `hookstorm history compare-file`.
-- A failed delivery, reduced delivery coverage, or latency increase above the configured threshold returns a non-zero exit code and fails the job.
-- Pull requests never update the baseline. Only successful runs on `main` can save a refreshed baseline.
-- If a PR cannot restore a baseline, the workflow fails with instructions to seed it from `main`; it does not silently disable regression checks.
+- Pull requests do not access the staging endpoint or baseline; they run the standalone scenario-validation job only.
+- Pushes to `main` and manual dispatches on `main` run the staging integration and compare the current run with the saved baseline.
+- A failed delivery, reduced delivery coverage, or latency increase above the configured threshold returns a non-zero exit code and fails the staging job.
+- Only successful runs on `main` can save a refreshed baseline.
 
 The sample workflow serializes runs for each Git ref to avoid competing main-branch runs racing to update the baseline cache. Baselines are data, not secrets. GitHub cache contents can be read by people who can open a pull request against the repository, so never put tokens, credentials, or private payloads into cached files. The exported HookStorm record excludes request payloads, headers, response bodies, and signing secrets, but it retains event identifiers and target metadata. Review identifiers and assertion values before sharing reports or baselines.
 
@@ -118,7 +119,7 @@ GitHub documents [cache scope and security restrictions](https://docs.github.com
 
 ## 5. Tune and troubleshoot
 
-The default latency regression threshold is `20` percent. CI runners can be noisy, so measure several successful runs before choosing a threshold. Increase the threshold only when the observed variation is environmental noise you have investigated; keep functional delivery and coverage regressions gated.
+The default latency gate requires both a p95 increase above `20` percent and an absolute increase of at least `25` ms. This avoids failing on large relative changes between very small timings while retaining a meaningful regression check. Tune both values after observing successful runs on your runners; functional delivery and coverage regressions remain gated independently.
 
 Useful commands:
 
@@ -140,7 +141,7 @@ hookstorm history export latest --output .hookstorm-baselines/webhook.json
 
 # Compare a later run with that baseline
 hookstorm history compare-file .hookstorm-baselines/webhook.json \
-  --db .hookstorm/history.sqlite3 --latency-threshold-pct 20
+  --db .hookstorm/history.sqlite3 --latency-threshold-pct 20 --latency-min-delta-ms 25
 ```
 
-For the full scenario schema, see [scenario-format.md](scenario-format.md). For portable baseline format and CLI semantics, see the run history section in the [README](../README.md).
+For the full scenario schema, see [scenario-format.md](scenario-format.md). For portable baseline format and CLI semantics, see the run history section in the [README](https://github.com/blvxx/HookStorm/blob/main/README.md).

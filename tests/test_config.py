@@ -66,11 +66,42 @@ def test_rejects_invalid_headers() -> None:
         validate_scenario(data)
 
 
+@pytest.mark.parametrize(
+    "header",
+    [
+        "Connection",
+        "Keep-Alive",
+        "Proxy-Connection",
+        "Proxy-Authenticate",
+        "Proxy-Authorization",
+        "TE",
+        "Trailer",
+        "Upgrade",
+    ],
+)
+def test_rejects_proxy_and_hop_by_hop_request_headers(header: str) -> None:
+    data = valid_scenario()
+    data["events"][0]["headers"] = {header: "unsafe"}
+    with pytest.raises(ScenarioError, match="may not override"):
+        validate_scenario(data)
+
+
 @pytest.mark.parametrize("value", ["snowman \u2603", "bad\x00value", "bad\x1fvalue", "bad\x7fvalue"])
 def test_rejects_non_ascii_or_control_header_values(value: str) -> None:
     data = valid_scenario()
     data["events"][0]["headers"] = {"X-Custom": value}
     with pytest.raises(ScenarioError, match="invalid HTTP header"):
+        validate_scenario(data)
+
+
+def test_rejects_case_insensitive_duplicate_custom_header_names() -> None:
+    data = valid_scenario()
+    data["events"][0]["headers"] = {
+        "X-Delivery-Mode": "first",
+        "x-delivery-mode": "second",
+    }
+
+    with pytest.raises(ScenarioError, match="case-insensitive duplicate"):
         validate_scenario(data)
 
 
@@ -261,6 +292,19 @@ def test_standard_webhooks_event_id_rejects_period_delimiter() -> None:
         validate_scenario(data)
 
 
+def test_standard_webhooks_event_id_may_contain_period_when_unsigned() -> None:
+    data = valid_scenario()
+    data["delivery"] = {
+        "signature_provider": "standard_webhooks",
+        "signature": "none",
+    }
+    data["events"][0]["event_id"] = "evt.with.periods"
+
+    normalized = validate_scenario(data)
+
+    assert normalized["events"][0]["event_id"] == "evt.with.periods"
+
+
 def test_rejects_standard_webhooks_managed_headers() -> None:
     data = valid_scenario()
     data["events"][0]["headers"] = {"webhook-signature": "attacker"}
@@ -314,6 +358,22 @@ def test_verify_is_optional_and_defaults_to_none() -> None:
 def test_rejects_invalid_verification_urls(url: str) -> None:
     data = valid_scenario()
     data["verify"] = {"url": url, "expect_json": {"processed_events": 1}}
+    with pytest.raises(ScenarioError, match="verify.url"):
+        validate_scenario(data)
+
+
+@pytest.mark.parametrize(
+    "url",
+    [
+        "http://[::1/state",
+        "http://bad host/state",
+        "http://localhost:0/state",
+        "http://localhost:not-a-port/state",
+    ],
+)
+def test_rejects_malformed_verification_host_and_port(url: str) -> None:
+    data = valid_scenario()
+    data["verify"] = {"url": url, "expect_json": {}}
     with pytest.raises(ScenarioError, match="verify.url"):
         validate_scenario(data)
 
@@ -394,7 +454,10 @@ def test_validates_api_key_verification_auth_defaults() -> None:
         {"type": "bearer", "token_env": "BAD-NAME"},
         {"type": "bearer", "token_env": ""},
         {"type": "api_key", "key_env": "HOOKSTORM_KEY", "header": "bad header"},
+        {"type": "api_key", "key_env": "HOOKSTORM_KEY", "header": "X" * 257},
         {"type": "api_key", "key_env": "HOOKSTORM_KEY", "header": "Authorization"},
+        {"type": "api_key", "key_env": "HOOKSTORM_KEY", "header": "Proxy-Authorization"},
+        {"type": "api_key", "key_env": "HOOKSTORM_KEY", "header": "Proxy-Authenticate"},
         {"type": "api_key", "key_env": "HOOKSTORM_KEY", "header": "X-HookStorm-Run"},
         {"type": "api_key", "key_env": "HOOKSTORM_KEY", "unexpected": "value"},
     ],
@@ -508,6 +571,7 @@ def test_validates_deterministic_fault_injection_attempts() -> None:
         "fault_injection": {
             "connect_error_attempts": [1],
             "response_loss_attempts": [2],
+            "response_body_error_attempts": [3],
         }
     }
 
@@ -516,6 +580,7 @@ def test_validates_deterministic_fault_injection_attempts() -> None:
     assert normalized["delivery"]["fault_injection"] == {
         "connect_error_attempts": [1],
         "response_loss_attempts": [2],
+        "response_body_error_attempts": [3],
     }
 
 
@@ -546,8 +611,11 @@ def test_fault_injection_can_be_overridden_per_event() -> None:
         {"connect_error_attempts": [True]},
         {"connect_error_attempts": [0]},
         {"response_loss_attempts": [11]},
+        {"response_body_error_attempts": [True]},
+        {"response_body_error_attempts": [1, 1]},
         {"connect_error_attempts": [1, 1]},
         {"connect_error_attempts": [2], "response_loss_attempts": [2]},
+        {"connect_error_attempts": [2], "response_body_error_attempts": [2]},
     ],
 )
 def test_rejects_invalid_fault_injection_plans(fault_plan: object) -> None:
@@ -559,12 +627,271 @@ def test_rejects_invalid_fault_injection_plans(fault_plan: object) -> None:
         validate_scenario(data)
 
 
-def test_fault_injection_attempts_cannot_exceed_retry_budget() -> None:
+@pytest.mark.parametrize(
+    "fault_field",
+    [
+        "connect_error_attempts",
+        "response_loss_attempts",
+        "response_body_error_attempts",
+        "malformed_json_attempts",
+        "wrong_content_type_attempts",
+        "gzip_body_attempts",
+        "deflate_body_attempts",
+        "invalid_gzip_attempts",
+        "invalid_deflate_attempts",
+        "chunked_transfer_attempts",
+        "malformed_chunked_attempts",
+        "partial_upload_attempts",
+        "content_length_mismatch_attempts",
+    ],
+)
+def test_fault_injection_attempts_cannot_exceed_retry_budget(fault_field: str) -> None:
     data = valid_scenario()
     data["retry"] = {"max_attempts": 2}
-    data["delivery"] = {
-        "fault_injection": {"response_loss_attempts": [3]}
-    }
+    data["delivery"] = {"fault_injection": {fault_field: [3]}}
 
     with pytest.raises(ScenarioError, match="must not exceed retry.max_attempts=2"):
         validate_scenario(data)
+
+
+
+@pytest.mark.parametrize(
+    ("provider", "event_type", "prefix"),
+    [
+        ("stripe", "payment_intent.succeeded", "evt_hookstorm_stripe_"),
+        ("github", "issues.opened", "evt_hookstorm_github_"),
+        ("shopify", "orders/create", "evt_hookstorm_shopify_"),
+        ("standard_webhooks", "order.created", "evt_hookstorm_standard_"),
+    ],
+)
+def test_provider_profile_fills_event_defaults_and_signed_delivery(
+    provider: str, event_type: str, prefix: str
+) -> None:
+    data = valid_scenario()
+    data.pop("events")
+    data["provider"] = provider
+    data["events"] = [{}]
+
+    normalized = validate_scenario(data)
+    event = normalized["events"][0]
+
+    assert normalized["provider"] == provider
+    assert normalized["delivery"]["signature"] == "valid"
+    assert normalized["delivery"]["signature_provider"] == provider
+    assert event["id"] == event_type
+    assert event["event_id"].startswith(prefix)
+    assert event["payload"]
+    assert normalized["events"][0]["delivery"]["signature"] == "valid"
+    assert normalized["events"][0]["delivery"]["signature_provider"] == provider
+
+
+def test_provider_profile_respects_explicit_event_overrides() -> None:
+    data = valid_scenario()
+    data["provider"] = "github"
+    data["events"][0]["id"] = "pull_request.opened"
+    data["events"][0]["event_id"] = "evt_custom_github"
+    data["events"][0]["payload"] = {"action": "opened", "pull_request": {"number": 7}}
+
+    normalized = validate_scenario(data)
+    event = normalized["events"][0]
+
+    assert event["id"] == "pull_request.opened"
+    assert event["event_id"] == "evt_custom_github"
+    assert event["payload"] == {"action": "opened", "pull_request": {"number": 7}}
+    assert event["headers"]["X-GitHub-Event"] == "pull_request"
+    assert "X-GitHub-Delivery" in event["headers"]
+
+
+def test_provider_profile_requires_valid_known_provider() -> None:
+    data = valid_scenario()
+    data["provider"] = "unknown"
+    with pytest.raises(ScenarioError, match="provider must be"):
+        validate_scenario(data)
+
+
+def test_provider_profile_fingerprint_is_behavior_defining_but_legacy_fingerprint_is_stable() -> None:
+    legacy = validate_scenario(valid_scenario())
+    profiled_data = valid_scenario()
+    profiled_data["provider"] = "stripe"
+    profiled = validate_scenario(profiled_data)
+
+    assert scenario_fingerprint(legacy) != scenario_fingerprint(profiled)
+    assert "provider" not in legacy
+
+
+
+def test_github_profile_keeps_payload_action_and_headers_in_sync() -> None:
+    data = valid_scenario()
+    data["provider"] = "github"
+    data["events"] = [{}]
+
+    normalized = validate_scenario(data)
+    event = normalized["events"][0]
+
+    assert event["id"] == "issues.opened"
+    assert event["payload"]["action"] == "opened"
+    assert event["headers"]["X-GitHub-Event"] == "issues"
+    assert event["headers"]["X-GitHub-Delivery"]
+
+
+def test_github_profile_updates_action_when_event_type_is_overridden() -> None:
+    data = valid_scenario()
+    data["provider"] = "github"
+    data["events"] = [{"id": "issues.closed"}]
+
+    event = validate_scenario(data)["events"][0]
+
+    assert event["payload"]["action"] == "closed"
+    assert event["headers"]["X-GitHub-Event"] == "issues"
+
+
+def test_standard_webhooks_profile_has_standard_event_envelope() -> None:
+    data = valid_scenario()
+    data["provider"] = "standard_webhooks"
+    data["events"] = [{}]
+
+    event = validate_scenario(data)["events"][0]
+
+    assert event["payload"]["id"] == event["event_id"]
+    assert event["payload"]["type"] == "order.created"
+    assert event["payload"]["created_at"].endswith("Z")
+    assert "data" in event["payload"]
+
+
+def test_provider_managed_headers_cannot_be_overridden() -> None:
+    data = valid_scenario()
+    data["provider"] = "shopify"
+    data["events"][0]["headers"] = {"X-Shopify-Webhook-Id": "forged"}
+
+    with pytest.raises(ScenarioError, match="may not override"):
+        validate_scenario(data)
+
+
+
+def test_empty_payload_is_a_valid_json_object() -> None:
+    data = valid_scenario()
+    data["events"][0]["payload"] = {}
+
+    normalized = validate_scenario(data)
+
+    assert normalized["events"][0]["payload"] == {}
+
+
+def test_payload_at_exact_one_megabyte_boundary_is_accepted() -> None:
+    data = valid_scenario()
+    data["events"][0]["payload"] = {"blob": "x" * (1_048_576 - 11)}
+
+    normalized = validate_scenario(data)
+
+    assert len(json.dumps(
+        normalized["events"][0]["payload"],
+        ensure_ascii=False,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")) == 1_048_576
+
+
+def test_scheduled_event_and_delivery_timeout_must_fit_run_timeout() -> None:
+    data = valid_scenario()
+    data["run_timeout_ms"] = 300
+    data["delivery"] = {"timeout_ms": 200}
+    data["events"][0]["schedule_after_ms"] = 150
+
+    with pytest.raises(ScenarioError, match="worst-case request-time budget"):
+        validate_scenario(data)
+
+def test_request_fault_plans_are_validated_and_cannot_overlap() -> None:
+    data = valid_scenario()
+    data["retry"] = {"max_attempts": 10}
+    field_names = [
+        "malformed_json_attempts",
+        "wrong_content_type_attempts",
+        "gzip_body_attempts",
+        "deflate_body_attempts",
+        "invalid_gzip_attempts",
+        "invalid_deflate_attempts",
+        "chunked_transfer_attempts",
+        "malformed_chunked_attempts",
+        "partial_upload_attempts",
+        "content_length_mismatch_attempts",
+    ]
+    data["events"][0]["delivery"] = {
+        "fault_injection": {
+            field: [index + 1] for index, field in enumerate(field_names)
+        }
+    }
+
+    normalized = validate_scenario(data)
+    assert all(
+        normalized["events"][0]["delivery"]["fault_injection"][field] == [index + 1]
+        for index, field in enumerate(field_names)
+    )
+
+    conflict = valid_scenario()
+    conflict["events"][0]["delivery"] = {
+        "fault_injection": {
+            "malformed_json_attempts": [1],
+            "partial_upload_attempts": [1],
+        }
+    }
+    with pytest.raises(ScenarioError, match="cannot inject more than one fault"):
+        validate_scenario(conflict)
+
+
+def test_validate_scenario_rejects_excessive_json_nesting() -> None:
+    data = valid_scenario()
+    payload: object = None
+    for _ in range(1_200):
+        payload = [payload]
+    data["events"][0]["payload"] = payload
+
+    with pytest.raises(ScenarioError, match="JSON nesting exceeds the 100-level safety limit"):
+        validate_scenario(data)
+
+
+def test_load_scenario_rejects_excessive_yaml_nesting(tmp_path) -> None:
+    scenario_file = tmp_path / "deep.yaml"
+    nested = "[" * 1_200 + "null" + "]" * 1_200
+    scenario_file.write_text(
+        "version: 1\nname: deep\nevents:\n  - id: ping\n    event_id: evt_deep\n    payload: "
+        + nested,
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ScenarioError, match="nesting exceeds parser limits"):
+        load_scenario(scenario_file)
+
+
+def test_load_scenario_rejects_excessive_yaml_aliases(tmp_path) -> None:
+    lines = ["base: &base [one, two]"]
+    lines.extend(f"alias_{index}: *base" for index in range(17))
+    scenario_file = tmp_path / "aliases.yaml"
+    scenario_file.write_text("\n".join(lines), encoding="utf-8")
+
+    with pytest.raises(ScenarioError, match="more than 16 aliases"):
+        load_scenario(scenario_file)
+
+
+def test_rejects_scenario_with_excessive_aggregate_payload_bytes() -> None:
+    data = valid_scenario()
+    data["events"] = [
+        {
+            "id": f"event.{index}",
+            "event_id": f"evt_{index}",
+            "payload": {"blob": "x" * 1_000_000},
+        }
+        for index in range(17)
+    ]
+
+    with pytest.raises(ScenarioError, match="aggregate limit"):
+        validate_scenario(data)
+
+
+def test_load_scenario_rejects_oversized_source_file(tmp_path) -> None:
+    from hookstorm.config import _MAX_SCENARIO_FILE_BYTES
+
+    scenario_file = tmp_path / "oversized.yaml"
+    scenario_file.write_bytes(b"x" * (_MAX_SCENARIO_FILE_BYTES + 1))
+
+    with pytest.raises(ScenarioError, match="file exceeds"):
+        load_scenario(scenario_file)

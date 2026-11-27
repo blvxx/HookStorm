@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import argparse
+import json
 import os
 import subprocess
 import tempfile
@@ -68,6 +69,18 @@ def _smoke_distribution(distribution: Path) -> None:
             check=True,
         )
         subprocess.run([str(cli), "--version"], check=True, cwd=temporary)
+        exported_schema = subprocess.run(
+            [str(cli), "schema"],
+            check=True,
+            cwd=temporary,
+            capture_output=True,
+            text=True,
+        )
+        schema_document = json.loads(exported_schema.stdout)
+        if schema_document.get("$id") != "urn:hookstorm:scenario:v1":
+            raise SystemExit(
+                f"Installed HookStorm CLI did not expose its packaged JSON Schema for {distribution.name}"
+            )
         subprocess.run(
             [
                 str(cli),

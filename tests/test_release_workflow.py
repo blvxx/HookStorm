@@ -159,3 +159,13 @@ def test_published_release_attaches_validated_distributions_with_limited_permiss
     assert "--clobber" not in upload["run"]
 
     assert workflow["jobs"]["publish"]["permissions"] == {"id-token": "write"}
+
+def test_release_preflight_installs_optional_frameworks_for_integration_tests() -> None:
+    workflow_path = Path(__file__).resolve().parents[1] / ".github" / "workflows" / "release.yml"
+    workflow = yaml.load(workflow_path.read_text(encoding="utf-8"), Loader=yaml.BaseLoader)
+    install = next(
+        step for step in workflow["jobs"]["build"]["steps"]
+        if step.get("name") == "Install test and build dependencies"
+    )
+
+    assert install["run"] == "python -m pip install -e '.[dev,fastapi,flask]' \"twine>=6,<7\""

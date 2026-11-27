@@ -1,0 +1,68 @@
+version: 1
+name: Request framing and encoding fault matrix
+description: Exercises JSON parsing, content types, compressed bodies, chunked transfer, partial uploads, and Content-Length mismatch against the local receiver.
+retry:
+  max_attempts: 2
+  backoff_ms: 1
+  retry_on: [400, 415, 500, 502, 503, 504]
+events:
+  - id: request.malformed_json
+    event_id: evt_request_malformed_json
+    payload: {kind: malformed-json}
+    delivery:
+      fault_injection:
+        malformed_json_attempts: [1]
+  - id: request.wrong_content_type
+    event_id: evt_request_wrong_content_type
+    payload: {kind: wrong-content-type}
+    delivery:
+      fault_injection:
+        wrong_content_type_attempts: [1]
+  - id: request.gzip
+    event_id: evt_request_gzip
+    payload: {kind: gzip, value: 1}
+    delivery:
+      fault_injection:
+        gzip_body_attempts: [1]
+  - id: request.deflate
+    event_id: evt_request_deflate
+    payload: {kind: deflate, value: 2}
+    delivery:
+      fault_injection:
+        deflate_body_attempts: [1]
+  - id: request.invalid_gzip
+    event_id: evt_request_invalid_gzip
+    payload: {kind: invalid-gzip}
+    delivery:
+      fault_injection:
+        invalid_gzip_attempts: [1]
+  - id: request.invalid_deflate
+    event_id: evt_request_invalid_deflate
+    payload: {kind: invalid-deflate}
+    delivery:
+      fault_injection:
+        invalid_deflate_attempts: [1]
+  - id: request.chunked
+    event_id: evt_request_chunked
+    payload: {kind: chunked, value: 3}
+    delivery:
+      fault_injection:
+        chunked_transfer_attempts: [1]
+  - id: request.malformed_chunked
+    event_id: evt_request_malformed_chunked
+    payload: {kind: malformed-chunked}
+    delivery:
+      fault_injection:
+        malformed_chunked_attempts: [1]
+  - id: request.partial_upload
+    event_id: evt_request_partial_upload
+    payload: {kind: partial-upload, value: 4}
+    delivery:
+      fault_injection:
+        partial_upload_attempts: [1]
+  - id: request.length_mismatch
+    event_id: evt_request_length_mismatch
+    payload: {kind: length-mismatch, value: 5}
+    delivery:
+      fault_injection:
+        content_length_mismatch_attempts: [1]

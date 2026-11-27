@@ -1,471 +1,112 @@
 # HookStorm
 
-**Break your webhook delivery flow on purpose — before production does.**
-
-A local-first webhook reliability CLI for retries, duplicate events, out-of-order delivery, timeouts, signature validation, and ambiguous acknowledgements.
+**A local-first CLI for testing webhook delivery failures, retries, idempotency, and recovery before production.**
 
 [![CI](https://github.com/blvxx/HookStorm/actions/workflows/ci.yml/badge.svg)](https://github.com/blvxx/HookStorm/actions/workflows/ci.yml)
 [![Python](https://img.shields.io/badge/python-3.11%2B-3776AB)](https://www.python.org/)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 
-## Why HookStorm?
+## 30 seconds to first result
 
-Webhook integrations fail in ways that are easy to miss in happy-path tests:
+Requires Python 3.11+. Run the first command in a terminal, then use two terminals from the cloned repository:
 
-- A provider retries after a 500, but your handler processes the same payment twice.
-- Events arrive out of order and overwrite newer state with stale data.
-- A signature is missing, invalid, or calculated from the wrong request bytes.
-- A slow handler exceeds the sender's timeout, even though it eventually finishes.
-- A receiver returns 429 or 503, and retry behavior is not what you expected.
+1. Clone and install:
 
-HookStorm sends controlled webhook traffic to **your own endpoint** and checks responses against expectations. It is a test harness, not a hosted webhook inbox or production delivery service.
+   `git clone https://github.com/blvxx/HookStorm.git && cd HookStorm && python -m pip install .`
+
+2. Start the local demo receiver:
+
+   `python examples/receiver.py`
+
+3. Run a retry scenario in another terminal:
+
+   `hookstorm run examples/payment-retry.yaml --target http://127.0.0.1:8000/webhook/flaky`
+
+The demo receiver binds to `127.0.0.1` only. The command writes a self-contained HTML report to `hookstorm-report.html`.
 
 ## Capabilities
 
-| Failure mode | Scenario setting |
+| Test behavior | HookStorm support |
 |---|---|
-| Retry after transient HTTP errors | retry.max_attempts, retry.retry_on, retry.backoff_ms |
-| Duplicate event delivery | delivery.duplicate_count |
-| Out-of-order delivery | delivery.order: reverse |
-| Concurrent event delivery | delivery.concurrency: 1–50 (default: 1) |
-| Per-event scheduling | events[].schedule_after_ms: 0–300,000 ms from run start |
-| Slow receiver / timeout | delivery.timeout_ms |
-| Deterministic client-side transport faults | delivery.fault_injection.connect_error_attempts / response_loss_attempts |
-| Fault diagnostics in CLI and history | injected attempt labels in `hookstorm run` and `hookstorm history show` |
-| Provider-compatible signatures | delivery.signature + signature_provider: generic / stripe / github / shopify / standard_webhooks |
-| Expected HTTP status | expect_status |
-| Nested JSON response assertions | expect_json, expect_duplicate_json |
-| Business-state / idempotency verification after delivery | verify.url, verify.expect_json |
-| Total run-time budget | run_timeout_ms (60 minutes by default; configurable up to 24 hours) |
-
-The same event_id is preserved across retries and duplicate deliveries, so the receiver can recognize repeated deliveries. The self-contained HTML report offers both attempt cards and a cross-event waterfall view on a shared run clock. Deterministic fault plans can also fail selected attempts before sending or discard a response after receiver processing; see `examples/deterministic-fault-injection.yaml` for a combined retry/idempotency test. HookStorm also includes a commit-then-drop example: the receiver commits the business effect, closes the connection before acknowledging it, and then receives the same event again. The retry response and run-scoped verify probe prove whether the effect was applied only once. Set delivery.concurrency from 1 to 50 to run independent events concurrently; retries and duplicate deliveries for each event remain ordered. JSON and JUnit reports preserve scenario order; the self-contained HTML timeline filters by result, event, and injected faults, and sorts by first observed time, total latency, or attempt count. Use events[].schedule_after_ms to start individual events at offsets from run start without holding a worker slot while waiting.
-
-## Quick start
-
-Requires Python 3.11 or newer.
-
-After the first public alpha is published, install it directly from PyPI:
-
-~~~bash
-python -m pip install --pre hookstorm
-hookstorm --version
-
-# Generate and validate a starter scenario using only the installed package
-hookstorm init --no-workflow
-hookstorm validate scenarios/webhook.yaml
-~~~
-
-This minimal PyPI installation check is self-contained. The demo receiver and prebuilt example scenarios are maintained in the GitHub source checkout; clone it before using the commands below that reference `examples/`.
-
-To work from source or contribute, clone the repository:
-
-~~~bash
-git clone https://github.com/blvxx/HookStorm.git
-cd HookStorm
-python -m venv .venv
-source .venv/bin/activate
-python -m pip install -e .
-~~~
-
-**Windows PowerShell:**
-
-~~~powershell
-py -3.11 -m venv .venv
-.\.venv\Scripts\Activate.ps1
-python -m pip install -e .
-~~~
-
-If PowerShell blocks activation, allow it for the current terminal only:
-
-~~~powershell
-Set-ExecutionPolicy -Scope Process -ExecutionPolicy Bypass
-.\.venv\Scripts\Activate.ps1
-~~~
-
-Start the included demo receiver in a second terminal:
-
-~~~bash
-python examples/receiver.py
-~~~
-
-Run a retry scenario against its flaky endpoint:
-
-~~~bash
-hookstorm run examples/payment-retry.yaml --target http://127.0.0.1:8000/webhook/flaky
-~~~
-
-HookStorm writes hookstorm-report.html by default. Open it in a browser to inspect delivery outcomes and attempt counts.
-
-Validate a scenario without sending requests:
-
-~~~bash
-hookstorm validate examples/duplicate-delivery.yaml
-~~~
-
-Export a scenario as a pytest integration test:
-
-~~~bash
-hookstorm export-pytest examples/payment-retry.yaml --output tests/test_payment_webhook.py
-~~~
-
-The generated test reads its target from `HOOKSTORM_TARGET` and the optional HMAC secret from `HOOKSTORM_SECRET`. It does not embed an endpoint or secret. Remote HTTPS requires `HOOKSTORM_ALLOW_REMOTE=1`; remote plaintext HTTP additionally requires `HOOKSTORM_ALLOW_INSECURE_HTTP=1`.
-
-~~~bash
-# Linux / macOS
-HOOKSTORM_TARGET=http://127.0.0.1:8000/webhook/flaky pytest tests/test_payment_webhook.py
-
-# Windows PowerShell
-$env:HOOKSTORM_TARGET = "http://127.0.0.1:8000/webhook/flaky"
-pytest tests/test_payment_webhook.py
-~~~
-
-## Try the scenarios
-
-~~~bash
-hookstorm run examples/duplicate-delivery.yaml --target http://127.0.0.1:8000/webhook
-hookstorm run examples/out-of-order.yaml --target http://127.0.0.1:8000/webhook
-hookstorm run examples/timeout.yaml --target http://127.0.0.1:8000/webhook/slow
-~~~
-
-The timeout example is intentionally expected to fail: it proves that HookStorm detects a receiver that takes longer than the configured timeout.
-
-For signature examples, start the demo receiver with the same development secret in its terminal, then set it in the HookStorm terminal:
-
-~~~bash
-# Linux / macOS — set in both terminals
-export HOOKSTORM_SECRET='local-demo-secret'
-python examples/receiver.py
-~~~
-
-~~~powershell
-# Windows PowerShell — set in both terminals
-$env:HOOKSTORM_SECRET = "local-demo-secret"
-python examples/receiver.py
-~~~
-
-### Bootstrap a webhook CI integration in your own project
-
-From the root of the application repository (after installing HookStorm), run:
-
-~~~bash
-hookstorm init
-~~~
-
-The wizard creates `scenarios/webhook.yaml` and `.github/workflows/webhook-regression.yml`. In an interactive terminal it asks for the signature format, event type and ID, maximum attempts per delivery, and additional duplicate deliveries. Non-interactive runs keep safe defaults (`generic`, one attempt, no duplicates).
-
-You can also choose the provider and event contract explicitly:
-
-~~~bash
-hookstorm init --signature-provider github \\
-  --event-type issues.opened --event-id evt_issues_opened_001 --max-attempts 3 --duplicate-count 1
-~~~
-
-`--max-attempts` includes the first request (1–10); `--duplicate-count` adds that many deliveries with the same event ID and body (0–100). The generated retry template adds a 100 ms base backoff when more than one attempt is selected. Edit the generated scenario to match your actual payload and response. Then configure the GitHub `staging` Environment with `HOOKSTORM_TARGET_URL` as a variable and `HOOKSTORM_SECRET` as a secret. The optional `HOOKSTORM_ALLOW_INSECURE_HTTP` variable defaults to `0` and should be set to `1` only for a controlled non-loopback staging endpoint that cannot use HTTPS. The wizard never writes endpoint URLs or signing secrets into generated files. Existing files are preserved; use `--force` only when you intentionally want to replace both generated files. Use `--no-workflow` to generate only the scenario.
-
-The generated workflow targets a dedicated staging endpoint with the explicit `--allow-remote` opt-in, skips fork-originated PRs, and updates the baseline only from trusted successful runs on `main`. HTTPS is expected; non-loopback HTTP is blocked unless the optional `HOOKSTORM_ALLOW_INSECURE_HTTP=1` environment variable is explicitly set. Before sending any webhook event, its preflight step validates the scenario, checks that the required environment variables are present, and verifies staging DNS/TCP/TLS connectivity. Protect the staging Environment with required reviewers before enabling it for same-repository pull requests. See [CI integration for application repositories](docs/ci-integration.md) for the complete setup.
-
-Run the same checks locally before the first integration run. Set the endpoint and, for signed scenarios, the HMAC secret:
-
-~~~bash
-export HOOKSTORM_TARGET_URL='https://staging.example.com/webhooks/test'
-export HOOKSTORM_SECRET='your-staging-secret'
-hookstorm doctor scenarios/webhook.yaml
-~~~
-
-Add `--connect` for a compact socket check, or `--verbose` for detailed diagnostics:
-
-~~~bash
-hookstorm doctor scenarios/webhook.yaml --connect
-hookstorm doctor scenarios/webhook.yaml --verbose
-~~~
-
-The default `doctor` command does not contact the endpoint. `--connect` resolves the host and opens a socket (plus a TLS handshake for HTTPS). `--verbose` implies `--connect` and reports each resolved IPv4 / IPv6 address, DNS lookup time, per-address TCP connection time, negotiated TLS version and cipher, certificate subject / issuer, and expiry date. It warns when an address fails while another succeeds, or when a certificate is nearing expiry. No HTTP request or webhook event is sent, so these checks cannot verify the application route, HTTP authentication, or the receiver's response.
-
-For scripts and CI integrations, use the versioned JSON output:
-
-~~~bash
-hookstorm doctor scenarios/webhook.yaml --format json
-hookstorm doctor scenarios/webhook.yaml --verbose --format json
-~~~
-
-The JSON document has `schema_version: 1`, an overall `status` / `ready` flag, a stable `summary`, a `network` section describing whether a connection check was requested and performed, and a `checks` array. Each check contains `status`, `label`, `message`, and `details`. The command still returns exit code `0` when ready and `1` when a required check fails; argument/configuration errors use exit code `2`. JSON is written to stdout without text banners, and secret values or the full target URL are not included.
-
-When a scenario defines `verify.auth`, doctor checks that the named Bearer / API-key environment variable is present and follows the accepted credential format. It also requires HTTPS for authenticated non-loopback verification URLs. These are local checks only: doctor does not send the credential or test whether the application accepts it.
-
-The demo receiver verifies the generic format and provider-compatible Stripe, GitHub, Shopify, and Standard Webhooks signatures. Try the provider scenarios:
-
-~~~bash
-hookstorm run examples/stripe-signature.yaml --target http://127.0.0.1:8000/webhook/signature/stripe
-hookstorm run examples/github-signature.yaml --target http://127.0.0.1:8000/webhook/signature/github
-hookstorm run examples/shopify-signature.yaml --target http://127.0.0.1:8000/webhook/signature/shopify
-hookstorm run examples/standard-webhooks.yaml --target http://127.0.0.1:8000/webhook/signature/standard
-hookstorm run examples/standard-webhooks-stale-timestamp.yaml --target http://127.0.0.1:8000/webhook/signature/standard
-~~~
-
-- **Stripe:** `Stripe-Signature: t=...,v1=...`; signs `timestamp.raw_body`.
-- **GitHub:** `X-Hub-Signature-256: sha256=...`; HMAC-SHA256 hex over the raw body.
-- **Shopify:** `X-Shopify-Hmac-Sha256`; Base64-encoded HMAC-SHA256 over the raw body.
-- **Standard Webhooks:** `webhook-id`, `webhook-timestamp`, and `webhook-signature: v1,<base64>`; signs `webhook-id.timestamp.raw_body` using an HMAC key decoded from a `whsec_<base64>` secret.
-
-For the Standard Webhooks example, the local demo receiver prints a public, demo-only `whsec_` value at startup. Copy that value to `HOOKSTORM_SECRET` in the HookStorm terminal. Never reuse the demo key for a real endpoint. Standard Webhooks keeps `webhook-id` stable across retries and refreshes the timestamp and signature for each attempt.
-
-Set `signature: invalid` to send a deliberately incorrect digest, or `signature: missing` to omit the provider header. The optional `signature_timestamp_offset_seconds` works with Stripe and Standard Webhooks so you can test stale or future timestamps in your own receiver.
-
-~~~bash
-# Linux / macOS
-export HOOKSTORM_SECRET='local-demo-secret'
-# Windows PowerShell
-$env:HOOKSTORM_SECRET = 'local-demo-secret'
-hookstorm run examples/invalid-signature.yaml --target http://127.0.0.1:8000/webhook/signature
-~~~
-
-The invalid-signature scenario expects 401, so a correct rejection is reported as a passing test. The `standard-webhooks-stale-timestamp.yaml` example sends a valid HMAC with a timestamp one hour in the past; the demo receiver rejects it because it falls outside the five-minute replay window.
-
-For Standard Webhooks, copy the `whsec_` demo secret printed by `examples/receiver.py` into `HOOKSTORM_SECRET` in the HookStorm terminal. This key is intentionally public and for local demonstration only. Real integrations must use the secret issued for their endpoint.
-
-## Reproduce a committed event with a lost acknowledgement
-
-One of the most dangerous webhook edge cases is an ambiguous acknowledgement: the handler commits the order or payment, but the connection closes before the sender receives the HTTP response. The sender cannot know whether the operation committed, so it retries.
-
-The included receiver has a dedicated endpoint that reproduces this exact sequence:
-
-~~~bash
-hookstorm run examples/commit-then-drop.yaml \
-  --target http://127.0.0.1:8000/webhook/commit-then-drop
-~~~
-
-The first request is committed to SQLite and then its connection is closed without a response. HookStorm retries with the same event ID and body. The receiver reports that the retry was a duplicate and did not apply a second effect; the final `verify` GET confirms that only one row exists for the run.
-
-This is a local demonstration of at-least-once delivery and idempotent processing. It does not claim that every receiver is transactional: use your own database-backed test endpoint to verify your application's transaction boundary.
-
-For the failure model, receiver transaction boundary, and application-specific adaptation notes, see [Ambiguous webhook acknowledgements](docs/ambiguous-acknowledgements.md).
-
-## Verify business state after delivery
-
-A successful webhook response does not prove that an order, payment, or other business operation was written exactly once. Add a read-only verification endpoint to your test receiver and configure a verify block:
-
-~~~yaml
-verify:
-  url: http://127.0.0.1:8000/__hookstorm/state
-  expect_status: [200]
-  expect_json:
-    processed_events: 1
-~~~
-
-After all webhook deliveries finish, HookStorm performs one **GET** request. It sends the generated X-HookStorm-Run header so the receiver can return state scoped to that test run. The expected JSON is checked with the same recursive subset rules as delivery responses. A failed probe makes the overall run fail and is included in JSON, HTML, JUnit, and run history.
-
-Try the database-backed demo:
-
-~~~bash
-hookstorm run examples/idempotency-verification.yaml \
-  --target http://127.0.0.1:8000/webhook
-~~~
-
-The included receiver uses SQLite with a unique (run_id, event_id) key to simulate an idempotent business write. It exposes the run-scoped count at GET /__hookstorm/state. The scenario sends one event three times and verifies that only one row was created.
-
-Verification URLs follow the same local-only default as webhook targets. Use `--allow-remote` for an authorized remote HTTPS test environment; non-loopback HTTP also requires `--allow-insecure-http`. Authenticated remote verification probes still require HTTPS. HookStorm stores only the probe URL path (not query parameters), status, timing, and assertion outcome; it never stores the response body or authentication values.
-
-Private verification endpoints can use environment-backed authentication. The scenario stores only the environment variable name, never the credential itself:
-
-~~~yaml
-verify:
-  url: https://staging.example.test/__hookstorm/state
-  expect_json:
-    processed_events: 1
-  auth:
-    type: bearer
-    token_env: HOOKSTORM_VERIFY_TOKEN
-~~~
-
-For an API key header, use `type: api_key` and `key_env`; the header defaults to `X-API-Key`, or set a safe custom header:
-
-~~~yaml
-  auth:
-    type: api_key
-    key_env: HOOKSTORM_VERIFY_API_KEY
-    header: X-Client-Key
-~~~
-
-Set the environment variable in the shell before running HookStorm:
-
-~~~bash
-# Linux / macOS
-export HOOKSTORM_VERIFY_TOKEN='your-staging-token'
-
-# Windows PowerShell
-$env:HOOKSTORM_VERIFY_TOKEN = 'your-staging-token'
-~~~
-
-HookStorm resolves and validates the credential before sending any webhook events. A missing, empty, or malformed value stops the run before traffic is sent. Credentials are sent only on the read-only verification GET; they are not included in terminal output, JSON / HTML / JUnit reports, or run history. Bearer credentials use the `Authorization: Bearer` header. API-key header names cannot override HookStorm-managed or hop-by-hop headers. Authenticated remote verification URLs must use HTTPS; HTTP is allowed only for localhost / loopback development endpoints.
-
-## Write your own scenario
-
-~~~yaml
-version: 1
-name: Order webhook idempotency
-delivery:
-  concurrency: 4
-  duplicate_count: 2
-  order: in_order
-  timeout_ms: 1500
-  signature: valid
-retry:
-  max_attempts: 3
-  backoff_ms: 200
-  retry_on: [408, 429, 500, 502, 503, 504]
-events:
-  - id: order.created
-    event_id: evt_order_1001
-    payload:
-      order_id: order_1001
-      total: 12500
-    expect_status: [200]
-    expect_json: { duplicate: false }
-    expect_duplicate_json: { duplicate: true }
-~~~
-
-See docs/scenario-format.md for the complete schema.
-
-Every scenario also has a top-level `run_timeout_ms` budget (60 minutes by default, configurable up to 24 hours). HookStorm estimates the maximum configured request-time budget before sending traffic and cancels in-flight work when the hard deadline expires. See the scenario format guide for the calculation and safety implications.
-
-## Reports
-
-~~~bash
-hookstorm run examples/payment-retry.yaml --target http://127.0.0.1:8000/webhook/flaky --format html --output artifacts/payment-retry.html
-hookstorm run examples/payment-retry.yaml --target http://127.0.0.1:8000/webhook/flaky --format json
-~~~
-
-Export delivery checks as JUnit XML for CI systems:
-
-~~~bash
-hookstorm run examples/payment-retry.yaml --target http://127.0.0.1:8000/webhook/flaky --format junit --output test-results/payment-retry.xml
-~~~
-
-JUnit output creates one testcase per event delivery (including duplicates), records assertion failures separately from transport errors, and omits payloads, secrets, and URL query strings. GitHub Actions runs the built-in webhook scenarios and uploads JUnit XML reports as workflow artifacts.
-
-Reports include event IDs, delivery/attempt counts, elapsed attempt timing, status codes, latency, and pass/fail checks. The self-contained HTML report offers two views: attempt cards for detailed inspection and a cross-event waterfall that places attempts on one shared run clock, making concurrency and retry gaps visible. Both views reuse event search, pass/fail and injected-fault filters, and sorting by first observed time, total latency, or attempt count. Reports intentionally omit request payloads, request headers, response bodies, and secrets.
-
-## Run history and regression detection
-
-Every `hookstorm run` is saved to a local SQLite database by default:
-
-- Windows: `%USERPROFILE%\\.hookstorm\\history.sqlite3`
-- Linux / macOS: `~/.hookstorm/history.sqlite3`
-
-The history stores run metadata and assertion outcomes only. Payloads, request headers, response bodies, and secrets are not persisted. Event IDs, the target URL path, and an opaque scenario configuration fingerprint are retained for comparison; query strings are stripped by the runner. Keep the database local and review identifiers / URL paths before sharing it. On POSIX systems, the default `.hookstorm` directory is restricted to its owner (`0700`), and history databases plus exported baseline files are restricted to owner read/write (`0600`).
-
-List recent runs:
-
-~~~bash
-hookstorm history list --limit 20
-hookstorm history list --scenario "Payment webhook retry"
-~~~
-
-Inspect one run:
-
-~~~bash
-hookstorm history show RUN_ID
-~~~
-
-Compare a new run with a saved baseline:
-
-~~~bash
-hookstorm history compare BASELINE_RUN_ID
-~~~
-
-HookStorm stores a SHA-256 fingerprint of the behavior-defining scenario configuration (delivery policy, retries, events, and verification expectations). The fingerprint does not expose the underlying payload or credentials. If the current configuration differs from the baseline, comparison reports a configuration regression instead of presenting the result as a clean pass. Legacy baselines created before fingerprints were introduced remain readable, but the CLI warns that their configuration cannot be verified.
-
-When you intentionally change a scenario and want to compare the new outcomes while accepting that contract change, pass `--allow-config-change`:
-
-~~~bash
-hookstorm history compare BASELINE_RUN_ID --allow-config-change
-hookstorm history compare-file .hookstorm-baselines/payment.json --allow-config-change
-~~~
-
-Use the override only as part of an intentional baseline refresh. Duplicate delivery identities in a history run or imported baseline are rejected rather than silently overwritten during comparison.
-
-The current run defaults to the latest recorded run. You can select it explicitly and adjust the latency threshold:
-
-~~~bash
-hookstorm history compare BASELINE_RUN_ID --current CURRENT_RUN_ID --latency-threshold-pct 20
-~~~
-
-### Portable baselines for CI
-
-SQLite history is local to a runner. Export a sanitized JSON baseline to carry it between isolated CI jobs, then compare a new run with that file:
-
-~~~bash
-# Export the latest saved run
-hookstorm history export latest --output .hookstorm-baselines/payment.json
-
-# Run the same scenario in a later job after restoring that file
-hookstorm run scenarios/payment.yaml --target http://127.0.0.1:8000/webhook \
-  --history-db .hookstorm/history.sqlite3
-hookstorm history compare-file .hookstorm-baselines/payment.json \
-  --db .hookstorm/history.sqlite3 --latency-threshold-pct 20
-~~~
-
-`history export` writes a versioned JSON file using the same explicit field whitelist as SQLite. `history compare-file` compares that baseline with the latest run in the selected local database; use `--current RUN_ID` to select a different current run. The file excludes payloads, request / response headers, response bodies, and secrets, but retains event identifiers and the target URL path.
-
-The repository's `.github/workflows/webhook-scenarios.yml` demonstrates the full GitHub Actions flow. It restores baseline files from the main-branch Actions cache, compares each PR scenario, and saves refreshed baselines only after a successful run on `main`. A new scenario is seeded on its first successful main-branch run. The built-in workflow sets a very high latency threshold to avoid flaky timing gates on shared runners; for a controlled application test environment, choose a stricter threshold such as 20%.
-
-The comparison checks pass rate, failed deliveries, per-delivery latency, p95 delivery latency, and delivery coverage. Latency is calculated as the sum of HTTP attempt times for each delivery (retry backoff is excluded). A regression exits with code `1`, so the command can fail a CI step. Use `--no-history` on `hookstorm run` to skip persistence, `--history-db PATH` to choose a database for a run, or set `HOOKSTORM_HISTORY_DB` for a shared local default.
-
-### Use HookStorm in another repository
-
-A copy-ready GitHub Actions workflow and matching staging scenario are available in `examples/ci/`. Follow [the external CI integration guide](docs/ci-integration.md) to configure a staging endpoint, HMAC secret, cached baseline, and pull-request regression gate.
+| Transient failures and retries | Bounded attempts, exponential backoff, configurable retry statuses |
+| Duplicate and reordered events | Stable event IDs, duplicate deliveries, reverse ordering |
+| Timing and concurrency | Request timeouts, run deadline, per-event scheduling, bounded concurrency |
+| Ambiguous acknowledgements | Deterministic pre-send errors, dropped acknowledgements, and truncated response bodies after processing |
+| Signatures | Generic HMAC, Stripe, GitHub, Shopify, Standard Webhooks v1 |
+| Assertions | HTTP status, nested JSON, and optional read-only business-state verification |
+| Capture | Loopback-only JSON webhook receiver, header redaction, and atomic scenario export |
+| Fuzzing | Seeded JSON payloads plus optional order, duplicate, delay, and transport-fault variation with replayable failures |
+| Request faults | Malformed JSON, content-type and compression variants, chunked framing, partial uploads, and Content-Length mismatch |
+| Reports and regression checks | HTML, JSON, JUnit, local SQLite history, portable baselines |
+| Pytest and framework integrations | Optional fixtures plus FastAPI / Flask test-receiver adapters |
+| Docker | Minimal non-root runtime image |
+
+Scenarios use the backwards-compatible `version: 1` YAML format. Provider profiles for Stripe, GitHub, Shopify, and Standard Webhooks supply synthetic event shapes and provider headers (`hookstorm run --provider github`, or `hookstorm init --provider stripe`). See the [scenario reference](docs/scenario-format.md) and [provider guide](docs/provider-profiles.md) for fields, limits, signatures, and examples.
+
+## How is HookStorm different?
+
+HookStorm is a **test runner for webhook consumers**, not a hosted inbox, event gateway, relay, or production delivery service.
+
+| Tool | Primary workflow | Where HookStorm differs |
+|---|---|---|
+| [webhook.site](https://webhook.site/) | Capture and inspect incoming HTTP requests at a hosted URL | HookStorm sends repeatable test events to your endpoint and checks the receiver's behavior |
+| [Hookdeck](https://hookdeck.com/docs) | Managed event gateway, inspection, routing, retries, and replay | HookStorm does not sit in production traffic; it exercises your handler locally or in an explicitly opted-in test environment |
+| [Stripe CLI](https://docs.stripe.com/stripe-cli) | Trigger Stripe test events and forward Stripe webhooks to a local listener | HookStorm is provider-agnostic and focuses on scenario-driven retries, duplicates, failure injection, assertions, and baselines |
+| [ngrok Traffic Inspector](https://ngrok.com/docs/obs/traffic-inspection/http-requests) | Expose a local service through a tunnel, inspect traffic, and replay captured requests | HookStorm needs no public tunnel and generates controlled scenarios instead of replaying captured production/provider requests |
+| [Svix Play](https://docs.svix.com/play) | Hosted webhook debugger, relay, and programmable response/failure behavior | HookStorm is local-first and adds scenario assertions plus a separate state probe for checking idempotent side effects |
+| [HookChaos](https://dev.to/umutkeskin1001/hookchaos-webhook-stress-tester-cliopen-sourced-project-21ne) | Local-first chaos CLI with reusable packs, history/replay, and Git-backed sharing | The projects overlap directly; HookStorm currently emphasizes explicit per-attempt fault plans, provider HMAC formats, state verification, and baseline regression checks |
+
+The important distinction is the **verify** probe: a `200` response is not proof that an order or payment was applied exactly once. HookStorm can make a read-only request after delivery and assert the resulting test state. Its reports and history deliberately omit request payloads, request/response headers, response bodies, and secret values.
 
 ## Safety and privacy
 
-- **Local-only by default.** Targets must resolve to loopback. Remote HTTPS requires `--allow-remote`; non-loopback HTTP additionally requires the explicit `--allow-insecure-http` opt-in.
-- Only send tests to systems you own or are authorized to test. Do not point chaos scenarios at a production payment endpoint.
-- Redirects are not followed. Credentials embedded in target URLs are rejected.
-- HMAC secrets are read from HOOKSTORM_SECRET (or a custom --secret-env variable), not from the scenario file.
-- No cloud relay, tunnel, telemetry, account, or hosted service is involved.
-- Reports omit payloads, headers, response bodies, secrets, and URL query strings. Event IDs and endpoint paths remain; review reports before sharing them.
-- The demo receiver is for development only, not public exposure.
+- Loopback targets only by default. Remote HTTPS requires `--allow-remote`; non-loopback HTTP additionally requires `--allow-insecure-http`.
+- Redirects are not followed. Embedded URL credentials are rejected. HookStorm requests identity-encoded responses and caps raw response bodies at 2 MiB before parsing; compressed responses are rejected to avoid decompression-bomb allocations.
+- Signing secrets and verification credentials are read from environment variables, never scenario literals.
+- Reports and history retain the URL scheme, hostname, explicit port (when present), and path. Query strings and fragments are removed. Event identifiers and endpoint paths can still be sensitive; review artifacts before sharing them.
+- History is local SQLite data. Payloads, headers, response bodies, and secret values are excluded by an explicit field whitelist.
 
-See SECURITY.md and docs/architecture.md for additional details.
+Read [SECURITY.md](SECURITY.md) and the [architecture notes](docs/architecture.md) before testing a remote environment.
+
+## Documentation
+
+- [Installation: pip, uv, pipx, Docker](docs/installation.md)
+- [Scenario format and behavior](docs/scenario-format.md)
+- [FastAPI and Flask test endpoints](docs/framework-integrations.md)
+- [Seeded fuzzing and failure minimization](docs/fuzzing.md)
+- [Pytest integration API](docs/pytest-integration.md)
+- [Composite GitHub Action](docs/github-action.md)
+- [JSON Schema and editor support](docs/json-schema.md)
+- [Request and transport fault injection](docs/fault-injection.md)
+- [Loopback webhook capture](docs/capture.md)
+- [Provider profiles and retry-policy notes](docs/provider-profiles.md)
+- [Ambiguous acknowledgements and idempotency](docs/ambiguous-acknowledgements.md)
+- [Architecture and current limitations](docs/architecture.md)
+- [CI integration for application repositories](docs/ci-integration.md)
+- [Alpha release readiness review](docs/alpha-release-review.md)
+- [Security and robustness audit](docs/security-audit.md)
+- [Release and PyPI publishing checklist](docs/release-checklist.md)
+
+## Help validate the alpha
+
+HookStorm now has a broad set of deterministic webhook failure scenarios. The next priority is not adding more fault types — it is finding out whether backend teams will use the existing workflows against their own test endpoints.
+
+The most useful first test is the **committed side effect with a lost acknowledgement**: the receiver saves an event, its response disappears, and the retry must not apply the business effect twice.
+
+- [Run the first demo and test your own isolated endpoint](docs/user-validation.md)
+- [Understand the ambiguous acknowledgement scenario](docs/ambiguous-acknowledgements.md)
+- [Report a reproducible issue or adoption blocker](https://github.com/blvxx/HookStorm/issues)
+
+The alpha's technical scope and limitations are documented. Further protocol breadth, hosted services, and monetization should follow evidence from independent users, not precede it.
 
 ## Development
 
 ~~~bash
 python -m pip install -e '.[dev]'
 ruff check .
-pytest
+mypy
+coverage run -m pytest
+coverage report
 ~~~
 
-CI tests Python 3.11, 3.12, 3.13, and 3.14 on Linux, plus Python 3.12 on Windows and macOS. Every matrix job runs lint and tests, builds both the wheel and source distribution, then installs each artifact in a clean virtual environment and validates a scenario generated by the installed CLI.
-
-Webhook responses and business-state verification responses are streamed with a 2 MiB decoded-body limit. Larger responses fail the corresponding assertion rather than being buffered without a bound.
-
-For release gates and artifact checks, see [the release checklist](docs/release-checklist.md) and [PyPI Trusted Publishing guide](docs/pypi-publishing.md).
-
-## Roadmap
-
-- [x] YAML scenario format and validation
-- [x] Local-first CLI with safety guard
-- [x] Retries, duplicates, reverse ordering, delays and timeouts
-- [x] HMAC signature modes and response assertions
-- [x] HTML / JSON reports
-- [x] Local demo receiver and CI test suite
-- [x] Bounded concurrent event delivery groups
-- [x] JUnit XML reports for CI integrations
-- [x] GitHub Actions webhook scenario workflow
-- [x] Staging preflight diagnostics for scenario, secrets, and endpoint connectivity
-- [x] Local SQLite run history and baseline comparison
-- [x] Pass-rate, delivery-coverage, and latency regression detection
-- [x] Per-event scheduling with run-relative event offsets
-- [x] Deterministic pre-send connection faults and post-processing acknowledgement-loss simulation
-- [x] CLI and history diagnostics for injected transport faults
-- [x] Export scenarios as pytest tests
-- [x] Interactive HTML run timeline with detailed attempt cards, injected-fault filters, and shared-clock waterfall view
-- [x] Stripe, GitHub, Shopify, and Standard Webhooks v1 signature adapters
-
-## Contributing
-
-Bug reports, reproducible scenarios, documentation improvements, and focused pull requests are welcome. Read CONTRIBUTING.md before opening a PR.
-
-## License
-
-MIT. See LICENSE.
+See [CONTRIBUTING.md](CONTRIBUTING.md). HookStorm is licensed under the MIT License.

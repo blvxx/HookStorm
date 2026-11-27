@@ -2,13 +2,21 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import json
+import socket
 import time
 
+import httpx
 import pytest
 
 from hookstorm.config import ScenarioError, load_scenario, validate_scenario
 from hookstorm.report import render_html, render_json, render_junit
-from hookstorm.runner import MAX_RESPONSE_BODY_BYTES, run_scenario
+from hookstorm.runner import (
+    MAX_RESPONSE_BODY_BYTES,
+    _parse_response_json,
+    _PinnedNetworkBackend,
+    run_scenario,
+)
 
 
 def scenario(*, delivery=None, retry=None, event=None):
@@ -26,6 +34,119 @@ def scenario(*, delivery=None, retry=None, event=None):
     })
 
 
+def test_html_report_labels_every_supported_injected_fault() -> None:
+    fault_labels = {
+        "connect_error": ("Connect fault", "connection failure"),
+        "response_loss": ("ACK loss", "acknowledgement loss"),
+        "response_body_error": ("Body read error", "partial response-body read error"),
+        "malformed_json": ("Malformed JSON", "malformed JSON request body"),
+        "wrong_content_type": ("Wrong Content-Type", "wrong Content-Type request header"),
+        "gzip_body": ("Gzip body", "gzip-compressed request body"),
+        "deflate_body": ("Deflate body", "deflate-compressed request body"),
+        "invalid_gzip": ("Invalid gzip", "invalid gzip request body"),
+        "invalid_deflate": ("Invalid deflate", "invalid deflate request body"),
+        "chunked_transfer": ("Chunked transfer", "HTTP/1.1 chunked transfer"),
+        "malformed_chunked": (
+            "Malformed chunked framing",
+            "malformed HTTP/1.1 chunked framing",
+        ),
+        "partial_upload": ("Partial upload", "partial request upload"),
+        "content_length_mismatch": (
+            "Content-Length mismatch",
+            "Content-Length mismatch",
+        ),
+    }
+    deliveries = [
+        {
+            "event_type": "test.fault",
+            "event_id": f"evt_fault_{index}",
+            "duplicate_index": 0,
+            "passed": False,
+            "attempts": [
+                {
+                    "attempt": 1,
+                    "status_code": 400,
+                    "latency_ms": 1.0,
+                    "elapsed_ms": float(index),
+                    "error": "synthetic fault",
+                    "passed": False,
+                    "injected_fault": fault,
+                }
+            ],
+        }
+        for index, fault in enumerate(fault_labels)
+    ]
+    report = render_html(
+        {
+            "summary": {
+                "success": False,
+                "total_deliveries": len(deliveries),
+                "passed": 0,
+                "attempts": len(deliveries),
+            },
+            "deliveries": deliveries,
+            "duration_ms": 20.0,
+            "started_at": "2026-11-27T00:00:00Z",
+            "scenario": "fault report",
+            "target": "http://127.0.0.1:8000/webhook",
+            "version": "0.1.0a1",
+        }
+    )
+
+    for label, description in fault_labels.values():
+        assert f">{label}</span>" in report
+        assert f"injected {description}" in report
+
+
+def test_response_json_parser_enforces_nesting_and_strict_json_numbers() -> None:
+    expected = {"message": '[{{}}] "quoted" \\ path'}
+    assert _parse_response_json(json.dumps(expected).encode("utf-8")) == expected
+
+    too_deep = ("[" * 101 + "null" + "]" * 101).encode("ascii")
+    with pytest.raises(ValueError, match="bounded UTF-8 JSON"):
+        _parse_response_json(too_deep)
+
+    for body in (
+        b'{"value":NaN}',
+        b'{"value":Infinity}',
+        b'{"value":1e999}',
+        b'{"value":1,"value":2}',
+        b'{"nested":{"value":1,"value":2}}',
+    ):
+        with pytest.raises(ValueError, match="bounded UTF-8 JSON"):
+            _parse_response_json(body)
+
+    invalid_utf8 = b'{"value":"' + bytes([0xFF]) + b'"}'
+    with pytest.raises(ValueError, match="bounded UTF-8 JSON"):
+        _parse_response_json(invalid_utf8)
+
+
+def test_custom_header_overrides_default_case_insensitively(receiver) -> None:
+    base, state = receiver
+    result = asyncio.run(
+        run_scenario(
+            scenario(
+                event={
+                    "headers": {
+                        "content-type": "application/problem+json",
+                    }
+                }
+            ),
+            base,
+        )
+    )
+
+    assert result["summary"]["success"] is True
+    content_type_headers = [
+        (name, value)
+        for name, value in state["requests"][0]["headers"].items()
+        if name.lower() == "content-type"
+    ]
+    assert content_type_headers == [
+        ("content-type", "application/problem+json")
+    ]
+
+
 def test_retries_transient_server_error(receiver) -> None:
     base, state = receiver
     result = asyncio.run(run_scenario(
@@ -37,6 +158,7 @@ def test_retries_transient_server_error(receiver) -> None:
     assert [x["status_code"] for x in result["deliveries"][0]["attempts"]] == [503, 200]
     run_id = state["requests"][0]["run_id"]
     assert state["attempts"][(run_id, "evt_test_1")] == 2
+    assert state["requests"][0]["headers"]["Accept-Encoding"] == "identity"
 
 
 def test_injected_connect_error_fails_before_request_reaches_receiver(receiver) -> None:
@@ -59,6 +181,23 @@ def test_injected_connect_error_fails_before_request_reaches_receiver(receiver) 
     assert "before request reached the endpoint" in attempts[0]["error"]
     assert attempts[1]["status_code"] == 200
     assert len(state["requests"]) == 1
+
+
+def test_response_body_reader_rejects_compressed_body_without_decompressing() -> None:
+    import gzip
+
+    from hookstorm.runner import _read_limited_response_body
+
+    compressed = gzip.compress(
+        b'{"large":"' + (b"x" * (MAX_RESPONSE_BODY_BYTES * 3)) + b'"}'
+    )
+    response = httpx.Response(
+        200,
+        headers={"Content-Encoding": "gzip"},
+        content=compressed,
+    )
+
+    assert asyncio.run(_read_limited_response_body(response)) is None
 
 
 def test_injected_response_loss_retries_after_receiver_applies_effect(receiver) -> None:
@@ -86,6 +225,38 @@ def test_injected_response_loss_retries_after_receiver_applies_effect(receiver) 
     assert len(state["requests"]) == 2
     assert state["requests"][0]["event_id"] == state["requests"][1]["event_id"]
     assert len(state["effects"]) == 1
+
+
+def test_injected_partial_response_body_error_retries_after_receiver_commit(receiver) -> None:
+    base, state = receiver
+    result = asyncio.run(run_scenario(
+        scenario(
+            delivery={
+                "fault_injection": {"response_body_error_attempts": [1]}
+            },
+            retry={"max_attempts": 2, "backoff_ms": 1},
+            event={
+                "expect_json": {"duplicate": True, "effect_applied": False},
+            },
+        ),
+        base,
+    ))
+
+    attempts = result["deliveries"][0]["attempts"]
+    assert result["summary"]["success"] is True
+    assert len(attempts) == 2
+    assert attempts[0]["injected_fault"] == "response_body_error"
+    assert attempts[0]["status_code"] == 200
+    assert attempts[0]["passed"] is False
+    assert "partial response body" in attempts[0]["error"]
+    assert attempts[1]["status_code"] == 200
+    assert attempts[1]["passed"] is True
+    assert len(state["requests"]) == 2
+    assert state["requests"][0]["event_id"] == state["requests"][1]["event_id"]
+    assert len(state["effects"]) == 1
+    html_report = render_html(result)
+    assert "Body read error" in html_report
+    assert "partial response-body read error" in html_report
 
 
 def test_detects_duplicate_idempotency_response(receiver) -> None:
@@ -178,7 +349,7 @@ def test_oversized_webhook_response_fails_without_buffering_unbounded_body(recei
     assert attempt["status_code"] == 200
     assert attempt["expected_json"] is False
     assert attempt["error"] == (
-        f"response body exceeds the {MAX_RESPONSE_BODY_BYTES // (1024 * 1024)} MiB safety limit"
+        f"response body is compressed or exceeds the {MAX_RESPONSE_BODY_BYTES // (1024 * 1024)} MiB safety limit"
     )
 
 
@@ -199,7 +370,7 @@ def test_oversized_business_verification_response_fails(receiver) -> None:
     assert result["verification"]["status_code"] == 200
     assert result["verification"]["expected_json"] is False
     assert result["verification"]["error"] == (
-        f"verification response body exceeds the "
+        f"verification response body is compressed or exceeds the "
         f"{MAX_RESPONSE_BODY_BYTES // (1024 * 1024)} MiB safety limit"
     )
 
@@ -793,3 +964,124 @@ def test_deterministic_fault_injection_example_proves_single_effect(receiver) ->
     ]
     assert len(state["effects"]) == 1
     assert result["verification"]["passed"] is True
+
+
+
+def test_runner_connects_only_to_the_prevalidated_dns_addresses(receiver, monkeypatch) -> None:
+    base, state = receiver
+    port = int(base.rsplit(":", 1)[1])
+    original_getaddrinfo = socket.getaddrinfo
+    hostname_lookups = 0
+
+    def rebinding_getaddrinfo(host, service, *args, **kwargs):
+        nonlocal hostname_lookups
+        if host == "localhost":
+            hostname_lookups += 1
+            # The two checked lookups remain loopback. Any connection-time
+            # resolution would receive an address outside the local network.
+            address = "127.0.0.1" if hostname_lookups <= 2 else "192.0.2.1"
+            return original_getaddrinfo(address, service, *args, **kwargs)
+        return original_getaddrinfo(host, service, *args, **kwargs)
+
+    monkeypatch.setattr(socket, "getaddrinfo", rebinding_getaddrinfo)
+
+    result = asyncio.run(
+        run_scenario(
+            scenario(),
+            f"http://localhost:{port}/webhook",
+        )
+    )
+
+    assert result["summary"]["success"] is True
+    assert hostname_lookups == 2
+    assert state["requests"][0]["headers"]["Host"] == f"localhost:{port}"
+
+
+
+def test_zero_backoff_retries_without_waiting(receiver) -> None:
+    base, state = receiver
+    result = asyncio.run(
+        run_scenario(
+            scenario(retry={"max_attempts": 2, "backoff_ms": 0}),
+            f"{base}/flaky",
+        )
+    )
+
+    assert result["summary"]["success"] is True
+    assert [attempt["status_code"] for attempt in result["deliveries"][0]["attempts"]] == [
+        503,
+        200,
+    ]
+    assert state["attempts"][(state["requests"][0]["run_id"], "evt_test_1")] == 2
+
+
+def test_reverse_order_preserves_sequential_duplicates_per_event(receiver) -> None:
+    base, state = receiver
+    data = {
+        "version": 1,
+        "name": "reverse plus duplicates",
+        "delivery": {"order": "reverse", "duplicate_count": 1},
+        "retry": {"max_attempts": 1, "backoff_ms": 0},
+        "events": [
+            {"id": "first", "event_id": "evt_first", "payload": {}},
+            {"id": "second", "event_id": "evt_second", "payload": {}},
+        ],
+    }
+
+    result = asyncio.run(run_scenario(validate_scenario(data), base))
+
+    assert result["summary"]["success"] is True
+    assert [request["event_id"] for request in state["requests"]] == [
+        "evt_second",
+        "evt_second",
+        "evt_first",
+        "evt_first",
+    ]
+    assert [
+        (delivery["event_id"], delivery["duplicate_index"])
+        for delivery in result["deliveries"]
+    ] == [
+        ("evt_second", 0),
+        ("evt_second", 1),
+        ("evt_first", 0),
+        ("evt_first", 1),
+    ]
+
+
+
+def test_pinned_backend_refuses_unvalidated_host_without_dns_fallback() -> None:
+    import httpcore
+
+    class Backend:
+        async def connect_tcp(self, *args, **kwargs):
+            raise AssertionError("unpinned hosts must never reach the resolver")
+
+    backend = _PinnedNetworkBackend(
+        Backend(),
+        {"xn--bcher-kva.de": ("203.0.113.10",)},
+    )
+
+    with pytest.raises(httpcore.ConnectError, match="not prevalidated"):
+        asyncio.run(backend.connect_tcp("unlisted.example", 443))
+
+
+def test_pinned_backend_matches_httpx_idna_ascii_host() -> None:
+    class Stream:
+        pass
+
+    class Backend:
+        calls: list[str] = []
+
+        async def connect_tcp(self, host, port, **kwargs):
+            self.calls.append(host)
+            return Stream()
+
+    backend_impl = Backend()
+    backend = _PinnedNetworkBackend(
+        backend_impl,
+        {"xn--bcher-kva.de": ("203.0.113.10",)},
+    )
+    stream = asyncio.run(backend.connect_tcp("XN--BCHER-KVA.DE", 443))
+
+    assert isinstance(stream, Stream)
+    assert backend_impl.calls == ["203.0.113.10"]
