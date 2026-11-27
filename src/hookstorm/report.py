@@ -20,18 +20,30 @@ def _render_attempt(attempt: dict[str, Any], index: int, *, final: bool, passed:
     latency = float(attempt.get("latency_ms", 0.0))
     elapsed = float(attempt.get("elapsed_ms", 0.0))
     error = html.escape(str(attempt.get("error") or ""))
+    injected_fault = attempt.get("injected_fault")
     state = "pass" if final and passed else "fail" if final else "retry"
     title = html.escape(
         f"Attempt {index}: HTTP {status_label}; {latency:.2f} ms; +{elapsed:.2f} ms",
         quote=True,
     )
     error_markup = f"<em>{error}</em>" if error else ""
+    fault_label = (
+        "Connect fault"
+        if injected_fault == "connect_error"
+        else "ACK loss"
+        if injected_fault == "response_loss"
+        else ""
+    )
+    fault_markup = (
+        f"<span class='fault-chip'>{fault_label}</span>" if fault_label else ""
+    )
     return (
-        f"<li class='attempt {state}' title='{title}'>"
+        f"<li class='attempt {state}{' injected' if injected_fault else ''}' title='{title}'>"
         f"<span class='attempt-index'>#{index}</span>"
         f"<strong>{html.escape(status_label)}</strong>"
         f"<span>{latency:.2f} ms</span>"
         f"<small>+{elapsed:.0f} ms</small>"
+        f"{fault_markup}"
         f"{error_markup}"
         "</li>"
     )
@@ -161,6 +173,8 @@ input{{min-width:min(280px,70vw)}}button{{cursor:pointer;font-weight:650}}button
 .attempt{{position:relative;display:grid;gap:3px;flex:1 0 130px;max-width:220px;min-width:125px;padding:10px 11px;border:1px solid color-mix(in srgb,CanvasText 18%,transparent);border-radius:10px;background:color-mix(in srgb,CanvasText 4%,Canvas);font-size:.78rem}}
 .attempt::before{{content:"";position:absolute;left:0;right:0;top:0;height:3px;border-radius:10px 10px 0 0;background:GrayText}}
 .attempt.pass::before{{background:#16a34a}}.attempt.fail::before{{background:#dc2626}}.attempt.retry::before{{background:#d97706}}
+.attempt.injected{{border-style:dashed}}.attempt.injected::before{{background:#7c3aed}}
+.fault-chip{{display:inline-block;width:max-content;padding:2px 6px;border-radius:5px;background:#5b21b6;color:#f5f3ff;font-size:.66rem;font-weight:800}}
 .attempt-index,.attempt small{{color:GrayText;font-size:.7rem}}.attempt strong{{font-size:1.03rem}}.attempt em{{font-size:.72rem;font-style:normal;color:#dc6b6b;overflow-wrap:anywhere}}
 .attempt-details summary{{cursor:pointer;display:inline-block;color:GrayText;font-size:.8rem;padding:4px 0}}
 .attempt-notes{{font-size:.82rem;color:GrayText;overflow-wrap:anywhere}}.empty{{padding:26px;text-align:center;color:GrayText;border:1px dashed GrayText;border-radius:12px}}
