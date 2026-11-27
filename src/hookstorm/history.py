@@ -114,7 +114,10 @@ def _sanitize_result(result: dict[str, Any]) -> dict[str, Any]:
     )
     sanitized = {
         key: result[key]
-        for key in ("schema_version", "tool", "version", "run_id", "scenario", "target", "started_at", "duration_ms")
+        for key in (
+            "schema_version", "tool", "version", "run_id", "scenario",
+            "scenario_fingerprint", "target", "started_at", "duration_ms",
+        )
         if key in result
     }
     sanitized["summary"] = {
@@ -144,6 +147,36 @@ def _sanitize_result(result: dict[str, Any]) -> dict[str, Any]:
     return sanitized
 
 
+def _read_scenario_fingerprint(result: dict[str, Any], label: str) -> str | None:
+    """Validate and return an optional SHA-256 scenario fingerprint."""
+    fingerprint = result.get("scenario_fingerprint")
+    if fingerprint is None:
+        return None
+    if (
+        not isinstance(fingerprint, str)
+        or len(fingerprint) != 64
+        or any(character not in "0123456789abcdef" for character in fingerprint)
+    ):
+        raise HistoryError(f"{label} scenario_fingerprint must be a 64-character lowercase SHA-256 hex digest")
+    return fingerprint
+
+
+def _delivery_index(
+    deliveries: list[dict[str, Any]], label: str
+) -> dict[tuple[str, str, int], dict[str, Any]]:
+    """Index deliveries without silently discarding duplicate identities."""
+    indexed: dict[tuple[str, str, int], dict[str, Any]] = {}
+    for index, item in enumerate(deliveries):
+        key = _delivery_key(item)
+        if key in indexed:
+            raise HistoryError(
+                f"{label} contains duplicate delivery identity at position {index}: "
+                f"{key[0]} / {key[1]} / duplicate {key[2]}"
+            )
+        indexed[key] = item
+    return indexed
+
+
 def save_run(result: dict[str, Any], path: str | Path | None = None) -> str:
     """Persist a sanitized HookStorm result and return its run ID."""
     required = ("run_id", "scenario", "started_at", "target", "summary", "deliveries")
@@ -152,6 +185,7 @@ def save_run(result: dict[str, Any], path: str | Path | None = None) -> str:
         raise HistoryError(f"Cannot save incomplete run result; missing: {', '.join(missing)}")
 
     safe_result = _sanitize_result(result)
+    _read_scenario_fingerprint(safe_result, "Run")
     metrics = result_metrics(safe_result)
     try:
         encoded = json.dumps(
@@ -283,12 +317,23 @@ def compare_results(
     baseline: dict[str, Any],
     *,
     latency_threshold_pct: float = 20.0,
+    allow_config_change: bool = False,
 ) -> dict[str, Any]:
     """Compare two runs and identify failure, coverage, and latency regressions."""
     if isinstance(latency_threshold_pct, bool) or not isinstance(latency_threshold_pct, (int, float)):
         raise HistoryError("Latency threshold must be a number")
     if not 0 <= latency_threshold_pct <= 1000:
         raise HistoryError("Latency threshold must be between 0 and 1000 percent")
+    if not isinstance(allow_config_change, bool):
+        raise HistoryError("allow_config_change must be a boolean")
+
+    current_fingerprint = _read_scenario_fingerprint(current, "Current run")
+    baseline_fingerprint = _read_scenario_fingerprint(baseline, "Baseline")
+    same_configuration = (
+        None
+        if current_fingerprint is None or baseline_fingerprint is None
+        else current_fingerprint == baseline_fingerprint
+    )
 
     current_metrics = result_metrics(current)
     baseline_metrics = result_metrics(baseline)
@@ -296,8 +341,15 @@ def compare_results(
     improvements: list[dict[str, Any]] = []
     changes: list[dict[str, Any]] = []
 
-    previous = {_delivery_key(item): item for item in baseline.get("deliveries", [])}
-    latest = {_delivery_key(item): item for item in current.get("deliveries", [])}
+    previous = _delivery_index(baseline.get("deliveries", []), "Baseline")
+    latest = _delivery_index(current.get("deliveries", []), "Current run")
+
+    if same_configuration is False and not allow_config_change:
+        regressions.append({
+            "reason": "scenario configuration changed",
+            "baseline_fingerprint": baseline_fingerprint,
+            "current_fingerprint": current_fingerprint,
+        })
     for key in sorted(set(previous) | set(latest)):
         old = previous.get(key)
         new = latest.get(key)
@@ -409,6 +461,8 @@ def compare_results(
         "baseline_scenario": baseline.get("scenario"),
         "current_scenario": current.get("scenario"),
         "same_scenario": baseline.get("scenario") == current.get("scenario"),
+        "same_configuration": same_configuration,
+        "allow_config_change": allow_config_change,
         "latency_threshold_pct": float(latency_threshold_pct),
         "baseline": baseline_metrics,
         "current": current_metrics,
@@ -433,6 +487,7 @@ def compare_history_runs(
     current_run_id: str = "latest",
     path: str | Path | None = None,
     latency_threshold_pct: float = 20.0,
+    allow_config_change: bool = False,
 ) -> dict[str, Any]:
     """Load and compare two records from the local history database."""
     baseline = get_run(baseline_run_id, path)
@@ -451,6 +506,7 @@ def compare_history_runs(
         current,
         baseline,
         latency_threshold_pct=latency_threshold_pct,
+        allow_config_change=allow_config_change,
     )
 
 
@@ -528,6 +584,7 @@ def load_history_export(source: str | Path) -> dict[str, Any]:
         raise HistoryError("Baseline run summary must be a JSON object")
     if not isinstance(result.get("deliveries"), list):
         raise HistoryError("Baseline run deliveries must be a JSON array")
+    _read_scenario_fingerprint(result, "Baseline")
     for index, delivery in enumerate(result["deliveries"]):
         if not isinstance(delivery, dict) or not isinstance(delivery.get("attempts", []), list):
             raise HistoryError(f"Baseline delivery {index} has an invalid structure")
@@ -551,6 +608,7 @@ def compare_history_file(
     current_run_id: str = "latest",
     path: str | Path | None = None,
     latency_threshold_pct: float = 20.0,
+    allow_config_change: bool = False,
 ) -> dict[str, Any]:
     """Compare the latest local run against a sanitized JSON baseline file."""
     baseline = load_history_export(baseline_file)
@@ -565,4 +623,5 @@ def compare_history_file(
         current,
         baseline,
         latency_threshold_pct=latency_threshold_pct,
+        allow_config_change=allow_config_change,
     )
