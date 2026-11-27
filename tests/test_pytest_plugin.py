@@ -50,6 +50,9 @@ def test_target_resolution_prefers_explicit_url_and_ignores_blank_values() -> No
             "HOOKSTORM_TARGET": "http://127.0.0.1:8000/webhook",
         }
     ) == "https://staging.example.test/webhook"
+    assert _target_from_environment(
+        {"HOOKSTORM_TARGET_URL": "  ", "HOOKSTORM_TARGET": "http://127.0.0.1:8000"}
+    ) == "http://127.0.0.1:8000"
     assert _target_from_environment({"HOOKSTORM_TARGET_URL": "  "}) is None
     assert _target_from_environment({"HOOKSTORM_TARGET": "http://127.0.0.1:8000"}) == (
         "http://127.0.0.1:8000"
