@@ -246,6 +246,7 @@ def _validate_verify_auth(value: Any) -> dict[str, str] | None:
     ):
         raise ScenarioError("verify.auth.header must be a valid HTTP header name")
     reserved_headers = {
+        "accept-encoding",
         "authorization",
         "connection",
         "content-length",
@@ -413,7 +414,7 @@ def validate_scenario(data: Any) -> dict[str, Any]:
                     f"{where}.headers contains an invalid HTTP header name or non-ASCII/control value"
                 )
             if key.lower() in {
-                "host", "content-length", "transfer-encoding",
+                "host", "content-length", "transfer-encoding", "accept-encoding",
                 "x-hookstorm-run", "x-event-id", "x-event-type",
                 "x-hookstorm-attempt", "x-hookstorm-duplicate-index",
                 "x-hookstorm-signature", "stripe-signature",
