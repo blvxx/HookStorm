@@ -36,6 +36,16 @@ class CaptureError(ValueError):
     """Raised when a request cannot be represented as a safe scenario event."""
 
 
+def _unique_json_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+    """Build a JSON object while rejecting ambiguous duplicate member names."""
+    result: dict[str, Any] = {}
+    for key, value in pairs:
+        if key in result:
+            raise CaptureError(f"JSON object contains duplicate key: {key!r}")
+        result[key] = value
+    return result
+
+
 class CaptureStore:
     """Collect JSON webhook requests and atomically persist a version 1 scenario."""
 
@@ -123,7 +133,10 @@ class CaptureStore:
         if self.total_body_bytes + len(body) > MAX_CAPTURE_SCENARIO_BYTES:
             raise CaptureError("captured scenario would exceed the 8 MiB total body limit")
         try:
-            payload = json.loads(body.decode("utf-8"))
+            payload = json.loads(
+                body.decode("utf-8"),
+                object_pairs_hook=_unique_json_object,
+            )
         except (UnicodeDecodeError, json.JSONDecodeError) as exc:
             raise CaptureError("capture accepts UTF-8 JSON request bodies only") from exc
 
