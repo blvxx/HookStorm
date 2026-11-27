@@ -124,7 +124,7 @@ def _parser() -> argparse.ArgumentParser:
 
     fuzz = subparsers.add_parser(
         "fuzz",
-        help="run seeded JSON payload mutations against an authorized test endpoint",
+        help="run seeded webhook payload and optional delivery mutations against an authorized test endpoint",
     )
     fuzz.add_argument("scenario", help="base version 1 YAML scenario")
     fuzz.add_argument("--target", required=True, help="webhook URL; loopback only unless opted in")
