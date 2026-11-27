@@ -1,0 +1,6 @@
+version: 1
+name: Standard Webhooks provider profile
+description: Synthetic standard_webhooks request profile for an isolated local or staging receiver.
+provider: standard_webhooks
+events:
+  - expect_status: [200, 201, 202, 204]

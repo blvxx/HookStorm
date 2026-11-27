@@ -17,6 +17,10 @@ _PROFILE_TEMPLATES: dict[str, dict[str, Any]] = {
             "object": "event",
             "type": "payment_intent.succeeded",
             "livemode": False,
+            "api_version": "2024-06-20",
+            "created": 1704067200,
+            "pending_webhooks": 1,
+            "request": {"id": "req_hookstorm_001", "idempotency_key": None},
             "data": {
                 "object": {
                     "id": "pi_hookstorm_001",
@@ -47,6 +51,10 @@ _PROFILE_TEMPLATES: dict[str, dict[str, Any]] = {
         "event_id_prefix": "evt_hookstorm_shopify",
         "payload": {
             "id": 1000001,
+            "name": "#1001",
+            "order_number": 1001,
+            "created_at": "2024-01-01T00:00:00Z",
+            "updated_at": "2024-01-01T00:00:00Z",
             "currency": "USD",
             "total_price": "12.50",
             "financial_status": "paid",
@@ -59,7 +67,9 @@ _PROFILE_TEMPLATES: dict[str, dict[str, Any]] = {
         "event_type": "order.created",
         "event_id_prefix": "evt_hookstorm_standard",
         "payload": {
+            "id": "evt_hookstorm_standard_001",
             "type": "order.created",
+            "created_at": "2024-01-01T00:00:00Z",
             "data": {"object": {"id": "ord_hookstorm_001", "status": "created"}},
         },
     },
@@ -86,7 +96,12 @@ def provider_event(
     if provider == "stripe":
         payload["id"] = resolved_event_id
         payload["type"] = resolved_event_type
+    elif provider == "github":
+        _, separator, action = resolved_event_type.partition(".")
+        if separator and action:
+            payload["action"] = action
     elif provider == "standard_webhooks":
+        payload["id"] = resolved_event_id
         payload["type"] = resolved_event_type
 
     return {

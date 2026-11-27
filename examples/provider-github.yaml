@@ -1,0 +1,6 @@
+version: 1
+name: GitHub provider profile
+description: Synthetic github request profile for an isolated local or staging receiver.
+provider: github
+events:
+  - expect_status: [200, 201, 202, 204]

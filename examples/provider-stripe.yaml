@@ -1,0 +1,6 @@
+version: 1
+name: Stripe provider profile
+description: Synthetic stripe request profile for an isolated local or staging receiver.
+provider: stripe
+events:
+  - expect_status: [200, 201, 202, 204]

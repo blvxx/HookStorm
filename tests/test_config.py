@@ -633,3 +633,51 @@ def test_provider_profile_fingerprint_is_behavior_defining_but_legacy_fingerprin
 
     assert scenario_fingerprint(legacy) != scenario_fingerprint(profiled)
     assert "provider" not in legacy
+
+
+
+def test_github_profile_keeps_payload_action_and_headers_in_sync() -> None:
+    data = valid_scenario()
+    data["provider"] = "github"
+    data["events"] = [{}]
+
+    normalized = validate_scenario(data)
+    event = normalized["events"][0]
+
+    assert event["id"] == "issues.opened"
+    assert event["payload"]["action"] == "opened"
+    assert event["headers"]["X-GitHub-Event"] == "issues"
+    assert event["headers"]["X-GitHub-Delivery"]
+
+
+def test_github_profile_updates_action_when_event_type_is_overridden() -> None:
+    data = valid_scenario()
+    data["provider"] = "github"
+    data["events"] = [{"id": "issues.closed"}]
+
+    event = validate_scenario(data)["events"][0]
+
+    assert event["payload"]["action"] == "closed"
+    assert event["headers"]["X-GitHub-Event"] == "issues"
+
+
+def test_standard_webhooks_profile_has_standard_event_envelope() -> None:
+    data = valid_scenario()
+    data["provider"] = "standard_webhooks"
+    data["events"] = [{}]
+
+    event = validate_scenario(data)["events"][0]
+
+    assert event["payload"]["id"] == event["event_id"]
+    assert event["payload"]["type"] == "order.created"
+    assert event["payload"]["created_at"].endswith("Z")
+    assert "data" in event["payload"]
+
+
+def test_provider_managed_headers_cannot_be_overridden() -> None:
+    data = valid_scenario()
+    data["provider"] = "shopify"
+    data["events"][0]["headers"] = {"X-Shopify-Webhook-Id": "forged"}
+
+    with pytest.raises(ScenarioError, match="may not override"):
+        validate_scenario(data)

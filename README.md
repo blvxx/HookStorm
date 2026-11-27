@@ -36,7 +36,7 @@ The demo receiver binds to `127.0.0.1` only. The command writes a self-contained
 | Assertions | HTTP status, nested JSON, and optional read-only business-state verification |
 | Reports and regression checks | HTML, JSON, JUnit, local SQLite history, portable baselines |
 
-Scenarios use the backwards-compatible `version: 1` YAML format. Provider profiles for Stripe, GitHub, Shopify, and Standard Webhooks supply realistic synthetic event shapes and provider headers (`hookstorm run --provider github`, or `hookstorm init --provider stripe`). See the [scenario reference](docs/scenario-format.md) for fields, limits, signatures, and examples.
+Scenarios use the backwards-compatible `version: 1` YAML format. Provider profiles for Stripe, GitHub, Shopify, and Standard Webhooks supply synthetic event shapes and provider headers (`hookstorm run --provider github`, or `hookstorm init --provider stripe`). See the [scenario reference](docs/scenario-format.md) and [provider guide](docs/provider-profiles.md) for fields, limits, signatures, and examples.
 
 ## How is HookStorm different?
 
@@ -66,6 +66,7 @@ Read [SECURITY.md](SECURITY.md) and the [architecture notes](docs/architecture.m
 ## Documentation
 
 - [Scenario format and behavior](docs/scenario-format.md)
+- [Provider profiles and retry-policy notes](docs/provider-profiles.md)
 - [Ambiguous acknowledgements and idempotency](docs/ambiguous-acknowledgements.md)
 - [Architecture and current limitations](docs/architecture.md)
 - [CI integration for application repositories](docs/ci-integration.md)
@@ -75,15 +76,15 @@ Read [SECURITY.md](SECURITY.md) and the [architecture notes](docs/architecture.m
 
 Planned work, in priority order:
 
-1. Provider event profiles and provider-specific retry presets, including profile-aware `hookstorm init`.
-2. Seeded randomized fuzz runs with reproducible, minimized failure scenarios.
-3. A loopback-only `hookstorm capture` receiver that creates scenarios and redacts sensitive headers by default.
-4. Additional request fault injection: malformed JSON, content types, compression, chunking, partial uploads, content-length mismatches, slow bodies, secret rotation, and large payloads.
-5. A reusable composite GitHub Action with SHA-pinned dependencies.
-6. A structured pytest integration API and small FastAPI / Flask helpers.
-7. JSON Schema output for editor completion.
-8. A minimal non-root Docker image and `uvx` / `pipx` installation guides.
-9. A published MkDocs documentation site.
+1. Seeded randomized fuzz runs with reproducible, minimized failure scenarios.
+2. A loopback-only `hookstorm capture` receiver that creates scenarios and redacts sensitive headers by default.
+3. Additional request fault injection: malformed JSON, content types, compression, chunking, partial uploads, content-length mismatches, slow bodies, secret rotation, and large payloads.
+4. A reusable composite GitHub Action with SHA-pinned dependencies.
+5. A structured pytest integration API and small FastAPI / Flask helpers.
+6. JSON Schema output for editor completion.
+7. A minimal non-root Docker image and `uvx` / `pipx` installation guides.
+8. A published MkDocs documentation site.
+9. Provider retry schedule presets after explicit per-attempt schedule support and longer safe run-time budgets are designed.
 
 ## Development
 
