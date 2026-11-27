@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Require a separate explicit `--allow-insecure-http` opt-in for non-loopback HTTP targets, including generated pytest and staging workflow integrations.
+- Stream webhook and verification responses with a 2 MiB decoded-body cap to bound memory use on untrusted endpoints.
+
 ## 0.1.0a1 — First public alpha preview
 
 - Add bounded concurrent delivery for independent events (1–50 workers; sequential by default).

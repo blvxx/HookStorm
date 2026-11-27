@@ -133,6 +133,40 @@ def _scenario_uses_standard_webhooks(scenario: dict) -> bool:
     return False
 
 
+def _verification_target_check(
+    scenario: dict | None,
+    *,
+    allow_insecure_http: bool,
+) -> DoctorCheck:
+    """Validate verification endpoint transport policy without contacting it."""
+    if scenario is None:
+        return DoctorCheck(
+            "INFO",
+            "Verification target",
+            "skipped because the scenario could not be validated",
+        )
+    verify_config = scenario.get("verify")
+    if verify_config is None:
+        return DoctorCheck(
+            "PASS",
+            "Verification target",
+            "not required (no business-state verification probe configured)",
+        )
+    try:
+        validate_target(
+            verify_config["url"],
+            allow_remote=True,
+            allow_insecure_http=allow_insecure_http,
+        )
+    except ValueError as exc:
+        return DoctorCheck("FAIL", "Verification target", str(exc))
+    return DoctorCheck(
+        "PASS",
+        "Verification target",
+        "URL and transport policy are valid (no HTTP request was sent)",
+    )
+
+
 def _verification_auth_check(
     scenario: dict | None,
     environment: Mapping[str, str],
@@ -183,9 +217,13 @@ def _verification_auth_check(
     )
 
 
-def _parse_target(target: str) -> tuple[str, SplitResult]:
+def _parse_target(
+    target: str, *, allow_insecure_http: bool = False
+) -> tuple[str, SplitResult]:
     """Validate an HTTP(S) URL without resolving or contacting its host."""
-    validated = validate_target(target, allow_remote=True)
+    validated = validate_target(
+        target, allow_remote=True, allow_insecure_http=allow_insecure_http
+    )
     parsed = urlsplit(validated)
     port = parsed.port  # Accessing this property also rejects malformed / out-of-range ports.
     if not parsed.hostname or any(char.isspace() for char in parsed.hostname):
@@ -358,6 +396,7 @@ def run_preflight(
     connect: bool = False,
     verbose: bool = False,
     timeout: float = 5.0,
+    allow_insecure_http: bool = False,
 ) -> list[DoctorCheck]:
     """Check scenario, endpoint configuration, credentials, and optional socket reachability."""
     env = os.environ if environment is None else environment
@@ -389,7 +428,9 @@ def run_preflight(
         )
     else:
         try:
-            _, parsed_target = _parse_target(configured_target)
+            _, parsed_target = _parse_target(
+                configured_target, allow_insecure_http=allow_insecure_http
+            )
         except ValueError as exc:
             checks.append(DoctorCheck("FAIL", "Target", str(exc)))
         else:
@@ -454,6 +495,11 @@ def run_preflight(
             )
         )
 
+    checks.append(
+        _verification_target_check(
+            scenario, allow_insecure_http=allow_insecure_http
+        )
+    )
     checks.append(_verification_auth_check(scenario, env))
 
     if not connect:

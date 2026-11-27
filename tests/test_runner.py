@@ -8,7 +8,7 @@ import pytest
 
 from hookstorm.config import ScenarioError, validate_scenario
 from hookstorm.report import render_html, render_json, render_junit
-from hookstorm.runner import run_scenario
+from hookstorm.runner import MAX_RESPONSE_BODY_BYTES, run_scenario
 
 
 def scenario(*, delivery=None, retry=None, event=None):
@@ -113,6 +113,46 @@ def test_missing_signature_is_sent_as_absence_and_can_be_expected(receiver) -> N
         f"{base}/signature",
     ))
     assert result["summary"]["success"] is True
+
+
+def test_oversized_webhook_response_fails_without_buffering_unbounded_body(receiver) -> None:
+    base, _ = receiver
+    result = asyncio.run(
+        run_scenario(
+            scenario(event={"expect_json": {"ok": True}}),
+            f"{base}/large",
+        )
+    )
+
+    attempt = result["deliveries"][0]["attempts"][0]
+    assert result["summary"]["success"] is False
+    assert attempt["status_code"] == 200
+    assert attempt["expected_json"] is False
+    assert attempt["error"] == (
+        f"response body exceeds the {MAX_RESPONSE_BODY_BYTES // (1024 * 1024)} MiB safety limit"
+    )
+
+
+def test_oversized_business_verification_response_fails(receiver) -> None:
+    base, _ = receiver
+    data = {
+        "version": 1,
+        "name": "oversized verification response",
+        "events": [{"id": "ping", "event_id": "evt_large_verify", "payload": {}}],
+        "verify": {
+            "url": f"{base}/state-large",
+            "expect_json": {"processed_events": 1},
+        },
+    }
+    result = asyncio.run(run_scenario(validate_scenario(data), base))
+
+    assert result["summary"]["success"] is False
+    assert result["verification"]["status_code"] == 200
+    assert result["verification"]["expected_json"] is False
+    assert result["verification"]["error"] == (
+        f"verification response body exceeds the "
+        f"{MAX_RESPONSE_BODY_BYTES // (1024 * 1024)} MiB safety limit"
+    )
 
 
 def test_query_parameters_are_not_written_to_report_target(receiver) -> None:

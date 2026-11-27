@@ -80,13 +80,14 @@ Add the following values to that environment:
 | Name | Type | Purpose |
 |---|---|---|
 | `HOOKSTORM_TARGET_URL` | Variable | Full URL of a dedicated staging/test webhook endpoint. Do not include credentials or query-string tokens. |
+| `HOOKSTORM_ALLOW_INSECURE_HTTP` | Optional variable | Set to `1` only when a controlled non-loopback staging endpoint cannot use HTTPS. Defaults to `0`; authenticated remote verification probes still require HTTPS. |
 | `HOOKSTORM_SECRET` | Secret | Signing secret used by signed scenarios (`signature: valid` or `invalid`). Standard Webhooks secrets must be `whsec_` followed by Base64 key material; other providers use their documented raw secret format. Unsigned scenarios do not require it. |
 | `HOOKSTORM_VERIFY_TOKEN` | Optional secret | Example Bearer credential referenced by `verify.auth.token_env`; use the exact variable name from your scenario. |
 | `HOOKSTORM_VERIFY_API_KEY` | Optional secret | Example API key referenced by `verify.auth.key_env`; use the exact variable name from your scenario. |
 | `HOOKSTORM_SCENARIO` | Optional variable | Scenario path. Defaults to `scenarios/webhook.yaml`. |
 | `HOOKSTORM_LATENCY_THRESHOLD_PCT` | Optional variable | Allowed latency increase. Defaults to `20`. |
 
-The target must be a test environment you own or are authorized to exercise. The sample workflow passes `--allow-remote` because a staging URL is normally not loopback; this explicitly opts out of HookStorm's local-only safety default. Do not point it at production payment, billing, or customer-facing webhook endpoints. Use synthetic records and an isolated test account.
+The target must be a test environment you own or are authorized to exercise. The sample workflow passes `--allow-remote` because a staging URL is normally not loopback; remote HTTPS is the expected transport. Non-loopback plaintext HTTP is blocked by default. Only when HTTPS cannot be used for a controlled test endpoint, set the optional `HOOKSTORM_ALLOW_INSECURE_HTTP=1` environment variable; the generated workflow then passes `--allow-insecure-http` to both doctor and run. Authenticated remote verification probes still require HTTPS. Do not point it at production payment, billing, or customer-facing webhook endpoints. Use synthetic records and an isolated test account.
 
 If the application needs to be deployed before testing, add your staging deployment step before **Preflight staging endpoint**. The workflow does not deploy your application or create the target endpoint.
 

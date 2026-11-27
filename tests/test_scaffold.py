@@ -35,13 +35,19 @@ def test_initialize_project_creates_valid_scenario_and_workflow(tmp_path) -> Non
     )
     assert env["HOOKSTORM_TARGET_URL"] == "${{ vars.HOOKSTORM_TARGET_URL }}"
     assert env["HOOKSTORM_SECRET"] == "${{ secrets.HOOKSTORM_SECRET }}"
+    assert env["HOOKSTORM_ALLOW_INSECURE_HTTP"] == (
+        "${{ vars.HOOKSTORM_ALLOW_INSECURE_HTTP || '0' }}"
+    )
     workflow_text = workflow_path.read_text(encoding="utf-8")
     steps = workflow["jobs"]["webhook-regression"]["steps"]
     preflight = next(step for step in steps if step.get("name") == "Preflight staging endpoint")
     assert "hookstorm doctor" in preflight["run"]
     assert "--connect" in preflight["run"]
+    assert "--allow-insecure-http" in preflight["run"]
     assert HOOKSTORM_INSTALL_REF == "7ab9ffb6ab510b4067916a83068bf60f8c010a70"
     assert HOOKSTORM_INSTALL_REF in workflow_text
+    assert "--allow-insecure-http" in workflow_text
+    assert "HOOKSTORM_ALLOW_INSECURE_HTTP" in workflow_text
     assert "8755dc158c732a420e09b83d8bae0e29a10e9206" not in workflow_text
     assert "https://example" not in workflow_text
 

@@ -32,7 +32,8 @@ def receiver() -> Iterator[tuple[str, dict]]:
             return
 
         def do_GET(self) -> None:  # noqa: N802
-            if self.path.split("?", 1)[0] != "/state":
+            path = self.path.split("?", 1)[0]
+            if path not in {"/state", "/state-large"}:
                 self.send_error(404)
                 return
             run_id = self.headers.get("X-HookStorm-Run", "")
@@ -41,16 +42,31 @@ def receiver() -> Iterator[tuple[str, dict]]:
                     {"run_id": run_id, "headers": dict(self.headers)}
                 )
                 processed = sum(1 for current_run, _ in state["effects"] if current_run == run_id)
-            encoded = json.dumps({"processed_events": processed}).encode()
+            payload = {"processed_events": processed}
+            if path == "/state-large":
+                payload["padding"] = "x" * (2 * 1024 * 1024 + 1024)
+            encoded = json.dumps(payload).encode()
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
-            self.send_header("Content-Length", str(len(encoded)))
+            if path == "/state":
+                self.send_header("Content-Length", str(len(encoded)))
             self.end_headers()
             self.wfile.write(encoded)
 
         def do_POST(self) -> None:  # noqa: N802
             length = int(self.headers.get("Content-Length", "0"))
             body = self.rfile.read(length)
+            if self.path == "/large":
+                encoded = json.dumps({
+                    "ok": True,
+                    "padding": "x" * (2 * 1024 * 1024 + 1024),
+                }).encode()
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(encoded)))
+                self.end_headers()
+                self.wfile.write(encoded)
+                return
             event_id = self.headers.get("X-Event-ID", "")
             run_id = self.headers.get("X-HookStorm-Run", "manual")
             delivery_key = (run_id, event_id)

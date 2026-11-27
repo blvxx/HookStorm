@@ -2,7 +2,7 @@
 
 ## Scope
 
-HookStorm sends HTTP requests to a user-configured webhook endpoint. The default policy permits loopback targets only; remote targets require the explicit --allow-remote flag. The project does not operate a hosted relay or collect telemetry.
+HookStorm sends HTTP requests to a user-configured webhook endpoint. The default policy permits loopback targets only. Remote HTTPS requires the explicit `--allow-remote` flag; non-loopback HTTP additionally requires `--allow-insecure-http` so plaintext transport cannot be enabled accidentally. Authenticated remote verification probes always require HTTPS. The project does not operate a hosted relay or collect telemetry.
 
 ## Reporting a vulnerability
 

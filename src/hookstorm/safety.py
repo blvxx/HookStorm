@@ -11,10 +11,28 @@ class UnsafeTargetError(ValueError):
     """Raised when a target is outside the default local-only policy."""
 
 
-def validate_target(target: str, *, allow_remote: bool = False) -> str:
-    """Validate and return an HTTP(S) URL; loopback only unless explicitly opted in."""
+def _is_literal_loopback(hostname: str) -> bool:
+    """Recognize localhost and literal loopback IP addresses without DNS lookups."""
+    normalized = hostname.rstrip(".").lower()
+    if normalized == "localhost":
+        return True
+    try:
+        return ipaddress.ip_address(normalized).is_loopback
+    except ValueError:
+        return False
+
+
+def validate_target(
+    target: str,
+    *,
+    allow_remote: bool = False,
+    allow_insecure_http: bool = False,
+) -> str:
+    """Validate an HTTP(S) URL, requiring a separate opt-in for remote plaintext HTTP."""
     if not isinstance(target, str) or not target.strip():
         raise UnsafeTargetError("Target URL must be a non-empty string")
+    if allow_insecure_http and not allow_remote:
+        raise UnsafeTargetError("--allow-insecure-http requires --allow-remote")
     parsed = urlsplit(target.strip())
     if parsed.scheme not in {"http", "https"} or not parsed.hostname:
         raise UnsafeTargetError("Target must be an absolute http:// or https:// URL")
@@ -22,10 +40,15 @@ def validate_target(target: str, *, allow_remote: bool = False) -> str:
         raise UnsafeTargetError("Target URL must not contain embedded credentials")
     if parsed.fragment:
         raise UnsafeTargetError("Target URL must not contain a fragment")
+    hostname = parsed.hostname.rstrip(".").lower()
     if allow_remote:
+        if parsed.scheme == "http" and not _is_literal_loopback(hostname) and not allow_insecure_http:
+            raise UnsafeTargetError(
+                "Remote HTTP targets are unencrypted; use HTTPS or explicitly pass "
+                "--allow-remote --allow-insecure-http"
+            )
         return target.strip()
 
-    hostname = parsed.hostname.rstrip(".").lower()
     try:
         address = ipaddress.ip_address(hostname)
         if address.is_loopback:
