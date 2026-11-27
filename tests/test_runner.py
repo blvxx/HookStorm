@@ -110,7 +110,7 @@ def test_response_json_parser_enforces_nesting_and_strict_json_numbers() -> None
         with pytest.raises(ValueError, match="bounded UTF-8 JSON"):
             _parse_response_json(body)
 
-    invalid_utf8 = b'{"value":"' + b"\\xff" + b'"}'
+    invalid_utf8 = b'{"value":"' + bytes([0xFF]) + b'"}'
     with pytest.raises(ValueError, match="bounded UTF-8 JSON"):
         _parse_response_json(invalid_utf8)
 
