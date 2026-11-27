@@ -1,0 +1,27 @@
+version: 1
+name: Deterministic transport fault injection
+description: >
+  Fail before the first send, then lose the acknowledgement after the receiver
+  processes the second attempt. The third attempt verifies idempotency.
+retry:
+  max_attempts: 3
+  backoff_ms: 50
+delivery:
+  fault_injection:
+    connect_error_attempts: [1]
+    response_loss_attempts: [2]
+events:
+  - id: order.created
+    event_id: evt_fault_injection_001
+    payload:
+      order_id: order_fault_test_001
+      amount: 12500
+    expect_status: [200]
+    expect_json:
+      duplicate: true
+      effect_applied: false
+verify:
+  url: http://127.0.0.1:8000/__hookstorm/state
+  expect_status: [200]
+  expect_json:
+    processed_events: 1
