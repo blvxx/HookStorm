@@ -18,6 +18,7 @@ def register_endpoint(
     recorder: WebhookRecorder | None = None,
     max_body_bytes: int = 1_048_576,
     max_events: int = 1_000,
+    max_total_body_bytes: int = 8 * 1_048_576,
     include_sensitive_headers: bool = False,
 ) -> WebhookRecorder:
     """Register an opt-in Flask POST route and return its in-memory recorder."""
@@ -36,6 +37,7 @@ def register_endpoint(
     active_recorder = recorder or WebhookRecorder(
         max_body_bytes=max_body_bytes,
         max_events=max_events,
+        max_total_body_bytes=max_total_body_bytes,
         include_sensitive_headers=include_sensitive_headers,
     )
 
