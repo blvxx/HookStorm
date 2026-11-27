@@ -301,7 +301,7 @@ def test_recorder_rejects_invalid_capacity_configuration() -> None:
 
 def test_recorder_bounds_total_body_memory_and_clear_resets_budget() -> None:
     recorder = WebhookRecorder(
-        max_body_bytes=16,
+        max_body_bytes=32,
         max_events=10,
         max_total_body_bytes=50,
     )
