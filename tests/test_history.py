@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import stat
 
@@ -479,3 +480,123 @@ def test_explicit_history_database_file_is_owner_only(tmp_path) -> None:
     save_run(make_result("run_custom_permission2"), database)
 
     assert stat.S_IMODE(database.stat().st_mode) == 0o600
+
+
+
+@pytest.mark.parametrize(
+    "duplicate_index",
+    [True, -1, 101, 1.0, "1", None],
+)
+def test_compare_rejects_invalid_duplicate_indices(duplicate_index: object) -> None:
+    baseline = make_result("run_001")
+    current = make_result("run_002")
+    current["deliveries"][0]["duplicate_index"] = duplicate_index
+
+    with pytest.raises(HistoryError, match="duplicate_index"):
+        compare_results(current, baseline)
+
+
+@pytest.mark.parametrize("field", ["event_type", "event_id"])
+@pytest.mark.parametrize("value", ["", "   ", None, 1, "x" * 257])
+def test_compare_rejects_invalid_delivery_identity_fields(
+    field: str, value: object
+) -> None:
+    baseline = make_result("run_001")
+    current = make_result("run_002")
+    current["deliveries"][0][field] = value
+
+    with pytest.raises(HistoryError, match=field):
+        compare_results(current, baseline)
+
+
+@pytest.mark.parametrize("latency", [math.nan, math.inf, -math.inf, -0.1, True, "12"])
+def test_compare_rejects_invalid_attempt_latency(latency: object) -> None:
+    baseline = make_result("run_001")
+    current = make_result("run_002")
+    current["deliveries"][0]["attempts"][0]["latency_ms"] = latency
+
+    with pytest.raises(HistoryError, match="latency_ms"):
+        compare_results(current, baseline)
+
+
+def test_compare_rejects_summary_counts_inconsistent_with_deliveries() -> None:
+    baseline = make_result("run_001")
+    current = make_result("run_002")
+    current["summary"]["passed"] = 0
+    current["summary"]["failed"] = 1
+
+    with pytest.raises(HistoryError, match="summary.passed"):
+        compare_results(current, baseline)
+
+
+def test_save_run_rejects_summary_attempt_count_inconsistent_with_deliveries(
+    tmp_path,
+) -> None:
+    result = make_result("run_inconsistent")
+    result["summary"]["attempts"] = 2
+
+    with pytest.raises(HistoryError, match="summary.attempts"):
+        save_run(result, tmp_path / "history.sqlite3")
+
+
+@pytest.mark.parametrize("number", ["NaN", "Infinity", "-Infinity"])
+def test_load_history_export_rejects_non_standard_json_numbers(
+    tmp_path, number: str
+) -> None:
+    database = tmp_path / "history.sqlite3"
+    baseline_file = tmp_path / "baseline.json"
+    save_run(make_result("run_jsonstrict"), database)
+    export_history_run("latest", baseline_file, database)
+
+    raw = baseline_file.read_text(encoding="utf-8")
+    raw = raw.replace('"latency_ms":20.0', f'"latency_ms":{number}', 1)
+    baseline_file.write_text(raw, encoding="utf-8")
+
+    with pytest.raises(HistoryError, match="non-standard JSON number"):
+        load_history_export(baseline_file)
+
+
+@pytest.mark.parametrize("duplicate_index", [True, -1, 101, 1.5, "1"])
+def test_load_history_export_rejects_invalid_duplicate_indices(
+    tmp_path, duplicate_index: object
+) -> None:
+    database = tmp_path / "history.sqlite3"
+    baseline_file = tmp_path / "baseline.json"
+    save_run(make_result("run_badindex"), database)
+    export_history_run("latest", baseline_file, database)
+
+    document = json.loads(baseline_file.read_text(encoding="utf-8"))
+    document["run"]["deliveries"][0]["duplicate_index"] = duplicate_index
+    baseline_file.write_text(json.dumps(document), encoding="utf-8")
+
+    with pytest.raises(HistoryError, match="duplicate_index"):
+        load_history_export(baseline_file)
+
+
+def test_load_history_export_rejects_inconsistent_summary_metrics(tmp_path) -> None:
+    database = tmp_path / "history.sqlite3"
+    baseline_file = tmp_path / "baseline.json"
+    save_run(make_result("run_badsummary"), database)
+    export_history_run("latest", baseline_file, database)
+
+    document = json.loads(baseline_file.read_text(encoding="utf-8"))
+    document["run"]["summary"]["total_deliveries"] = 2
+    baseline_file.write_text(json.dumps(document), encoding="utf-8")
+
+    with pytest.raises(HistoryError, match="total_deliveries"):
+        load_history_export(baseline_file)
+
+
+def test_load_history_export_rejects_empty_attempt_history(tmp_path) -> None:
+    database = tmp_path / "history.sqlite3"
+    baseline_file = tmp_path / "baseline.json"
+    save_run(make_result("run_noattempts"), database)
+    export_history_run("latest", baseline_file, database)
+
+    document = json.loads(baseline_file.read_text(encoding="utf-8"))
+    document["run"]["deliveries"][0]["attempts"] = []
+    document["run"]["summary"]["attempts"] = 0
+    baseline_file.write_text(json.dumps(document), encoding="utf-8")
+
+    with pytest.raises(HistoryError, match="attempts must be a non-empty"):
+        load_history_export(baseline_file)
