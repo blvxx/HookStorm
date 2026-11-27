@@ -57,7 +57,11 @@ _NEVER_CAPTURE_HEADERS = {
 
 
 class CaptureError(ValueError):
-    """Raised when a request cannot be represented as a safe scenario event."""
+    """A capture rejection with the HTTP status the local receiver should return."""
+
+    def __init__(self, message: str, *, status_code: int = 400) -> None:
+        super().__init__(message)
+        self.status_code = status_code
 
 
 def _unique_json_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
@@ -151,11 +155,16 @@ class CaptureStore:
     ) -> dict[str, Any]:
         """Validate and append one JSON delivery, then atomically persist it."""
         if len(body) > MAX_CAPTURE_BODY_BYTES:
-            raise CaptureError("request body exceeds the 1 MiB capture limit")
+            raise CaptureError("request body exceeds the 1 MiB capture limit", status_code=413)
         if len(self.events) >= self.max_events:
-            raise CaptureError(f"capture reached its {self.max_events}-event limit")
+            raise CaptureError(
+                f"capture reached its {self.max_events}-event limit", status_code=429
+            )
         if self.total_body_bytes + len(body) > MAX_CAPTURE_SCENARIO_BYTES:
-            raise CaptureError("captured scenario would exceed the 8 MiB total body limit")
+            raise CaptureError(
+                "captured scenario would exceed the 8 MiB total body limit",
+                status_code=413,
+            )
         try:
             payload = json.loads(
                 body.decode("utf-8"),
@@ -237,7 +246,9 @@ class CaptureStore:
             scenario, allow_unicode=True, sort_keys=False, default_flow_style=False
         )
         if len(serialized.encode("utf-8")) > MAX_CAPTURE_SCENARIO_BYTES:
-            raise CaptureError("captured scenario exceeds the 8 MiB file limit")
+            raise CaptureError(
+                "captured scenario exceeds the 8 MiB file limit", status_code=413
+            )
         descriptor, temporary_name = tempfile.mkstemp(
             prefix=f".{self.output.name}.", suffix=".tmp", dir=self.output.parent
         )
@@ -320,17 +331,26 @@ def create_capture_server(
                 return
             try:
                 body = self.rfile.read(length)
-                if len(body) != length:
-                    raise CaptureError(
-                        "request body ended before Content-Length bytes were received"
-                    )
+            except OSError:
+                self._respond(408, "request body could not be read before the connection timed out")
+                return
+            if len(body) != length:
+                self._respond(
+                    400,
+                    "request body ended before Content-Length bytes were received",
+                )
+                return
+            try:
                 event = store.record(
                     dict(self.headers.items()),
                     body,
                     request_path=self.path,
                 )
-            except (CaptureError, OSError) as exc:
-                self._respond(400, str(exc))
+            except CaptureError as exc:
+                self._respond(exc.status_code, str(exc))
+                return
+            except OSError:
+                self._respond(500, "capture could not be persisted")
                 return
             self._respond(202, f"captured {event['event_id']}")
 
