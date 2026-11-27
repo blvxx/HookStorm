@@ -2,7 +2,7 @@
 
 ## Unreleased
 
-_No unreleased changes._
+- Add Python 3.14 to the CI compatibility matrix and package classifiers.
 
 ## 0.1.0a1 — First public alpha preview
 
