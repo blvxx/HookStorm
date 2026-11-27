@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import xml.etree.ElementTree as ET
 
+from hookstorm.config import validate_scenario
 from hookstorm.report import render_html, render_json, render_junit, write_report
 
 
@@ -125,6 +126,17 @@ def test_html_report_escapes_single_quotes_in_aria_attributes() -> None:
             }],
         }],
     }
+
+    accepted = validate_scenario({
+        "version": 1,
+        "name": "quote escaping",
+        "events": [{
+            "id": "invoice.paid",
+            "event_id": result["deliveries"][0]["event_id"],
+            "payload": {},
+        }],
+    })
+    assert accepted["events"][0]["event_id"] == result["deliveries"][0]["event_id"]
 
     html_report = render_html(result)
 
