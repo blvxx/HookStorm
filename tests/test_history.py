@@ -549,7 +549,7 @@ def test_load_history_export_rejects_non_standard_json_numbers(
     export_history_run("latest", baseline_file, database)
 
     raw = baseline_file.read_text(encoding="utf-8")
-    raw = raw.replace('"latency_ms":20.0', f'"latency_ms":{number}', 1)
+    raw = raw.replace('"latency_ms": 20.0', f'"latency_ms": {number}', 1)
     baseline_file.write_text(raw, encoding="utf-8")
 
     with pytest.raises(HistoryError, match="non-standard JSON number"):
@@ -599,4 +599,33 @@ def test_load_history_export_rejects_empty_attempt_history(tmp_path) -> None:
     baseline_file.write_text(json.dumps(document), encoding="utf-8")
 
     with pytest.raises(HistoryError, match="attempts must be a non-empty"):
+        load_history_export(baseline_file)
+
+
+
+def test_save_run_rejects_duplicate_delivery_identities(tmp_path) -> None:
+    result = make_result(
+        "run_duplicate_save",
+        deliveries=[delivery("evt_same"), delivery("evt_same")],
+    )
+
+    with pytest.raises(HistoryError, match="duplicate delivery identity"):
+        save_run(result, tmp_path / "history.sqlite3")
+
+
+def test_load_history_export_rejects_duplicate_delivery_identities(tmp_path) -> None:
+    database = tmp_path / "history.sqlite3"
+    baseline_file = tmp_path / "baseline.json"
+    save_run(make_result("run_duplicate_import"), database)
+    export_history_run("latest", baseline_file, database)
+
+    document = json.loads(baseline_file.read_text(encoding="utf-8"))
+    duplicate = dict(document["run"]["deliveries"][0])
+    document["run"]["deliveries"].append(duplicate)
+    document["run"]["summary"]["total_deliveries"] += 1
+    document["run"]["summary"]["passed"] += 1
+    document["run"]["summary"]["attempts"] += len(duplicate["attempts"])
+    baseline_file.write_text(json.dumps(document), encoding="utf-8")
+
+    with pytest.raises(HistoryError, match="duplicate delivery identity"):
         load_history_export(baseline_file)
