@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import sqlite3
 import stat
 
 import pytest
@@ -440,6 +441,7 @@ def test_business_state_verification_failure_is_a_history_regression() -> None:
         "passed": False,
     }
 
+    current["summary"]["success"] = False
     comparison = compare_results(current, baseline)
 
     assert comparison["has_regressions"] is True
@@ -587,6 +589,41 @@ def test_load_history_export_rejects_inconsistent_summary_metrics(tmp_path) -> N
 
     with pytest.raises(HistoryError, match="total_deliveries"):
         load_history_export(baseline_file)
+
+
+def test_compare_rejects_delivery_pass_flag_that_disagrees_with_final_attempt() -> None:
+    current = make_result("current1")
+    current["deliveries"][0]["passed"] = False
+
+    with pytest.raises(HistoryError, match="does not match its final attempt"):
+        compare_results(current, make_result("baseline1"))
+
+
+def test_compare_rejects_summary_success_flag_that_disagrees_with_outcomes() -> None:
+    current = make_result("current1", deliveries=[delivery("evt_failed", passed=False)])
+    current["summary"]["success"] = True
+
+    with pytest.raises(HistoryError, match="summary.success"):
+        compare_results(current, make_result("baseline1"))
+
+
+def test_history_reads_reject_non_object_corrupt_database_rows(tmp_path) -> None:
+    database = tmp_path / "history.sqlite3"
+    save_run(make_result("run_corrupt"), database)
+    connection = sqlite3.connect(database)
+    try:
+        connection.execute(
+            "UPDATE runs SET result_json = ? WHERE run_id = ?",
+            (json.dumps(["not", "a", "run"]), "run_corrupt"),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    with pytest.raises(HistoryError, match="Stored run must be a JSON object"):
+        get_run("run_corrupt", database)
+    with pytest.raises(HistoryError, match="Stored run must be a JSON object"):
+        list_runs(database)
 
 
 def test_load_history_export_rejects_empty_attempt_history(tmp_path) -> None:
