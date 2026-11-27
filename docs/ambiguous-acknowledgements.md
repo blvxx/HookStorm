@@ -48,4 +48,22 @@ A retry that returns HTTP 200 is not sufficient proof of idempotency. The final 
 
 ## Limits
 
-The included endpoint simulates a connection loss after a SQLite commit; it is a deterministic teaching and regression fixture, not a network proxy and not a proof of distributed transaction correctness. It does not model every proxy, queue, process crash, or database isolation mode. Reproduce the same boundary in your own test receiver to validate your application's actual transaction and idempotency implementation.
+The included endpoint simulates a connection loss after a SQLite commit; it is a deterministic teaching and regression fixture, not a network proxy and not a proof of distributed transaction correctness. HookStorm also supports deterministic client-side `response_loss_attempts` for faster repeatable tests: the receiver still receives and processes the request, but the runner discards the returned response. That mode validates retry/idempotency behavior from the sender's point of view; it is deliberately distinct from the real TCP close provided by `/webhook/commit-then-drop`. It does not model every proxy, queue, process crash, or database isolation mode. Reproduce the same boundary in your own test receiver to validate your application's actual transaction and idempotency implementation.
+
+## Reproduce deterministic sender-side fault plans
+
+The copy-ready `examples/deterministic-fault-injection.yaml` combines two repeatable faults in one run:
+
+- Attempt 1 injects a connection failure before the HTTP request reaches the receiver.
+- Attempt 2 is delivered and processed, but HookStorm discards the response before it observes the acknowledgement.
+- Attempt 3 retries the same event ID, receives the duplicate response, and the verification probe confirms that only one business effect was applied.
+
+Run it against the local receiver:
+
+~~~bash
+hookstorm validate examples/deterministic-fault-injection.yaml
+hookstorm run examples/deterministic-fault-injection.yaml \
+  --target http://127.0.0.1:8000/webhook
+~~~
+
+This is deterministic client-side fault injection. It makes retry and idempotency behavior reproducible without a network proxy. The existing `/webhook/commit-then-drop` endpoint remains the option for testing a real receiver-side TCP close.

@@ -498,3 +498,73 @@ def test_load_scenario_rejects_duplicate_yaml_keys(tmp_path, yaml_text: str) -> 
 
     with pytest.raises(ScenarioError, match="Duplicate YAML key"):
         load_scenario(scenario_file)
+
+
+
+def test_validates_deterministic_fault_injection_attempts() -> None:
+    data = valid_scenario()
+    data["retry"] = {"max_attempts": 3}
+    data["delivery"] = {
+        "fault_injection": {
+            "connect_error_attempts": [1],
+            "response_loss_attempts": [2],
+        }
+    }
+
+    normalized = validate_scenario(data)
+
+    assert normalized["delivery"]["fault_injection"] == {
+        "connect_error_attempts": [1],
+        "response_loss_attempts": [2],
+    }
+
+
+def test_fault_injection_can_be_overridden_per_event() -> None:
+    data = valid_scenario()
+    data["retry"] = {"max_attempts": 3}
+    data["delivery"] = {
+        "fault_injection": {"connect_error_attempts": [1]}
+    }
+    data["events"][0]["delivery"] = {
+        "fault_injection": {"response_loss_attempts": [2]}
+    }
+
+    normalized = validate_scenario(data)
+
+    assert normalized["events"][0]["delivery"]["fault_injection"] == {
+        "connect_error_attempts": [],
+        "response_loss_attempts": [2],
+    }
+
+
+@pytest.mark.parametrize(
+    "fault_plan",
+    [
+        [],
+        {"unknown": [1]},
+        {"connect_error_attempts": 1},
+        {"connect_error_attempts": [True]},
+        {"connect_error_attempts": [0]},
+        {"response_loss_attempts": [11]},
+        {"connect_error_attempts": [1, 1]},
+        {"connect_error_attempts": [2], "response_loss_attempts": [2]},
+    ],
+)
+def test_rejects_invalid_fault_injection_plans(fault_plan: object) -> None:
+    data = valid_scenario()
+    data["retry"] = {"max_attempts": 3}
+    data["delivery"] = {"fault_injection": fault_plan}
+
+    with pytest.raises(ScenarioError, match="fault_injection"):
+        validate_scenario(data)
+
+
+def test_fault_injection_attempts_cannot_exceed_retry_budget() -> None:
+    data = valid_scenario()
+    data["retry"] = {"max_attempts": 2}
+    data["delivery"] = {
+        "fault_injection": {"response_loss_attempts": [3]}
+    }
+
+    with pytest.raises(ScenarioError, match="must not exceed retry.max_attempts=2"):
+        validate_scenario(data)

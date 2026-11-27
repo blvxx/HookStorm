@@ -153,7 +153,7 @@ def _sanitize_result(result: dict[str, Any]) -> dict[str, Any]:
     )
     attempt_keys = (
         "attempt", "elapsed_ms", "status_code", "latency_ms", "error",
-        "expected_status", "expected_json", "passed",
+        "expected_status", "expected_json", "passed", "injected_fault",
     )
     sanitized = {
         key: result[key]
@@ -325,6 +325,13 @@ def _validate_run_result(result: dict[str, Any], label: str) -> None:
                 attempt["error"], str
             ):
                 raise HistoryError(f"{attempt_label}.error must be a string or null")
+            if "injected_fault" in attempt and (
+                not isinstance(attempt["injected_fault"], str)
+                or attempt["injected_fault"] not in {"connect_error", "response_loss"}
+            ):
+                raise HistoryError(
+                    f"{attempt_label}.injected_fault must be connect_error or response_loss"
+                )
 
         if "schedule_after_ms" in item:
             _require_non_negative_integer(

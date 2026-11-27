@@ -232,3 +232,58 @@ def test_business_state_verification_is_in_html_and_junit_reports() -> None:
     assert xml.attrib["tests"] == "2"
     assert xml.attrib["failures"] == "1"
     assert xml.find("./testcase[@classname='hookstorm.verification']/failure") is not None
+
+
+
+def test_html_report_marks_injected_transport_faults() -> None:
+    result = {
+        "scenario": "fault injection",
+        "target": "http://127.0.0.1:8000/webhook",
+        "version": "0.1.0",
+        "duration_ms": 10.0,
+        "summary": {"success": True, "passed": 1, "total_deliveries": 1, "attempts": 3},
+        "deliveries": [{
+            "event_type": "order.created",
+            "event_id": "evt_faults",
+            "duplicate_index": 0,
+            "passed": True,
+            "attempts": [
+                {
+                    "attempt": 1,
+                    "elapsed_ms": 0.0,
+                    "status_code": None,
+                    "latency_ms": 0.1,
+                    "error": "injected connection failure before request reached the endpoint",
+                    "injected_fault": "connect_error",
+                },
+                {
+                    "attempt": 2,
+                    "elapsed_ms": 1.0,
+                    "status_code": None,
+                    "latency_ms": 0.2,
+                    "error": "injected acknowledgement loss after the endpoint processed the request",
+                    "injected_fault": "response_loss",
+                },
+                {
+                    "attempt": 3,
+                    "elapsed_ms": 2.0,
+                    "status_code": 200,
+                    "latency_ms": 0.3,
+                    "error": None,
+                },
+            ],
+        }],
+    }
+
+    html_report = render_html(result)
+
+    assert "Connect fault" in html_report
+    assert "ACK loss" in html_report
+    assert html_report.count("class='attempt ") == 3
+    assert "Injected faults" in html_report
+    assert "data-has-fault='true'" in html_report
+    assert 'id="fault-filter"' in html_report
+    assert 'id="sort-filter"' in html_report
+    assert "Highest total latency" in html_report
+    assert "sortCards" in html_report
+    assert "injected" in html_report

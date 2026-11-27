@@ -6,7 +6,7 @@ import time
 
 import pytest
 
-from hookstorm.config import ScenarioError, validate_scenario
+from hookstorm.config import ScenarioError, load_scenario, validate_scenario
 from hookstorm.report import render_html, render_json, render_junit
 from hookstorm.runner import MAX_RESPONSE_BODY_BYTES, run_scenario
 
@@ -37,6 +37,55 @@ def test_retries_transient_server_error(receiver) -> None:
     assert [x["status_code"] for x in result["deliveries"][0]["attempts"]] == [503, 200]
     run_id = state["requests"][0]["run_id"]
     assert state["attempts"][(run_id, "evt_test_1")] == 2
+
+
+def test_injected_connect_error_fails_before_request_reaches_receiver(receiver) -> None:
+    base, state = receiver
+    result = asyncio.run(run_scenario(
+        scenario(
+            delivery={
+                "fault_injection": {"connect_error_attempts": [1]}
+            },
+            retry={"max_attempts": 2, "backoff_ms": 1},
+        ),
+        base,
+    ))
+
+    attempts = result["deliveries"][0]["attempts"]
+    assert result["summary"]["success"] is True
+    assert len(attempts) == 2
+    assert attempts[0]["injected_fault"] == "connect_error"
+    assert attempts[0]["status_code"] is None
+    assert "before request reached the endpoint" in attempts[0]["error"]
+    assert attempts[1]["status_code"] == 200
+    assert len(state["requests"]) == 1
+
+
+def test_injected_response_loss_retries_after_receiver_applies_effect(receiver) -> None:
+    base, state = receiver
+    result = asyncio.run(run_scenario(
+        scenario(
+            delivery={
+                "fault_injection": {"response_loss_attempts": [1]}
+            },
+            retry={"max_attempts": 2, "backoff_ms": 1},
+            event={
+                "expect_json": {"duplicate": True},
+            },
+        ),
+        base,
+    ))
+
+    attempts = result["deliveries"][0]["attempts"]
+    assert result["summary"]["success"] is True
+    assert len(attempts) == 2
+    assert attempts[0]["injected_fault"] == "response_loss"
+    assert attempts[0]["status_code"] is None
+    assert "after the endpoint processed the request" in attempts[0]["error"]
+    assert attempts[1]["status_code"] == 200
+    assert len(state["requests"]) == 2
+    assert state["requests"][0]["event_id"] == state["requests"][1]["event_id"]
+    assert len(state["effects"]) == 1
 
 
 def test_detects_duplicate_idempotency_response(receiver) -> None:
@@ -709,3 +758,38 @@ def test_run_timeout_cancels_in_flight_response_processing(receiver, monkeypatch
 
     with pytest.raises(ValueError, match="exceeded run_timeout_ms=1000"):
         asyncio.run(run_scenario(data, base))
+
+
+def test_deterministic_fault_injection_example_proves_single_effect(receiver) -> None:
+    from pathlib import Path
+
+    base, state = receiver
+    example_path = (
+        Path(__file__).resolve().parents[1]
+        / "examples"
+        / "deterministic-fault-injection.yaml"
+    )
+    data = load_scenario(example_path)
+    data["verify"]["url"] = base + "/state"
+
+    result = asyncio.run(run_scenario(data, base))
+
+    attempts = result["deliveries"][0]["attempts"]
+    assert result["summary"]["success"] is True, {
+        "summary": result["summary"],
+        "attempts": attempts,
+        "verification": result["verification"],
+        "receiver_requests": state["requests"],
+        "effects": state["effects"],
+    }
+    assert [attempt.get("injected_fault") for attempt in attempts] == [
+        "connect_error",
+        "response_loss",
+        None,
+    ]
+    assert [request["event_id"] for request in state["requests"]] == [
+        "evt_fault_injection_001",
+        "evt_fault_injection_001",
+    ]
+    assert len(state["effects"]) == 1
+    assert result["verification"]["passed"] is True

@@ -77,6 +77,33 @@ def _matches_subset(actual: Any, expected: dict[str, Any]) -> tuple[bool, str | 
     return _match_json_value(actual, expected, "")
 
 
+class _FaultInjectingTransport(httpx.AsyncBaseTransport):
+    """Apply deterministic client-side transport faults to selected request attempts."""
+
+    def __init__(self) -> None:
+        self._transport = httpx.AsyncHTTPTransport(trust_env=False)
+
+    async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
+        fault = request.extensions.get("hookstorm_fault_injection")
+        if fault == "connect_error":
+            raise httpx.ConnectError(
+                "injected connection failure before request reached the endpoint",
+                request=request,
+            )
+
+        response = await self._transport.handle_async_request(request)
+        if fault == "response_loss":
+            await response.aclose()
+            raise httpx.ReadError(
+                "injected acknowledgement loss after the endpoint processed the request",
+                request=request,
+            )
+        return response
+
+    async def aclose(self) -> None:
+        await self._transport.aclose()
+
+
 MAX_RESPONSE_BODY_BYTES = 2 * 1024 * 1024
 
 
@@ -207,6 +234,10 @@ async def run_scenario(
         "signature_provider": "generic",
         "signature_timestamp_offset_seconds": 0,
         "concurrency": 1,
+        "fault_injection": {
+            "connect_error_attempts": [],
+            "response_loss_attempts": [],
+        },
     }
     retry = scenario["retry"]
     concurrency = scenario["delivery"].get("concurrency", 1)
@@ -286,6 +317,20 @@ async def run_scenario(
                         )
                     )
                     started_attempt = time.perf_counter()
+                    fault_plan = delivery_config.get(
+                        "fault_injection",
+                        {
+                            "connect_error_attempts": [],
+                            "response_loss_attempts": [],
+                        },
+                    )
+                    injected_fault = (
+                        "connect_error"
+                        if attempt in fault_plan.get("connect_error_attempts", [])
+                        else "response_loss"
+                        if attempt in fault_plan.get("response_loss_attempts", [])
+                        else None
+                    )
                     outcome = {
                         "attempt": attempt,
                         "elapsed_ms": round((started_attempt - monotonic_started) * 1000, 2),
@@ -296,6 +341,8 @@ async def run_scenario(
                         "expected_json": expected_json is None,
                         "passed": False,
                     }
+                    if injected_fault is not None:
+                        outcome["injected_fault"] = injected_fault
                     try:
                         async with client.stream(
                             "POST",
@@ -303,6 +350,11 @@ async def run_scenario(
                             content=event_body,
                             headers=headers,
                             timeout=delivery_config["timeout_ms"] / 1000,
+                            extensions=(
+                                {"hookstorm_fault_injection": injected_fault}
+                                if injected_fault is not None
+                                else None
+                            ),
                         ) as response:
                             outcome["status_code"] = response.status_code
                             response_body = await _read_limited_response_body(response)
@@ -344,7 +396,16 @@ async def run_scenario(
                         outcome["latency_ms"] = round(
                             (time.perf_counter() - started_attempt) * 1000, 2
                         )
-                        outcome["error"] = f"request error: {type(exc).__name__}"
+                        if injected_fault == "connect_error":
+                            outcome["error"] = (
+                                "injected connection failure before request reached the endpoint"
+                            )
+                        elif injected_fault == "response_loss":
+                            outcome["error"] = (
+                                "injected acknowledgement loss after the endpoint processed the request"
+                            )
+                        else:
+                            outcome["error"] = f"request error: {type(exc).__name__}"
                         retryable = True
                     attempts.append(outcome)
                     if not retryable or attempt >= retry["max_attempts"]:
@@ -373,6 +434,7 @@ async def run_scenario(
             async with httpx.AsyncClient(
                 follow_redirects=False,
                 trust_env=False,
+                transport=_FaultInjectingTransport(),
                 timeout=httpx.Timeout(30.0, connect=5.0),
             ) as client:
                 # Start the earliest scheduled events first, even if setup overhead means

@@ -178,7 +178,11 @@ def receiver() -> Iterator[tuple[str, dict]]:
                 duplicate = delivery_key in state["seen"]
                 state["seen"].add(delivery_key)
                 state["effects"].add(delivery_key)
-                status, payload = 200, {"ok": True, "duplicate": duplicate}
+                status, payload = 200, {
+                    "ok": True,
+                    "duplicate": duplicate,
+                    "effect_applied": not duplicate,
+                }
 
             encoded = json.dumps(payload).encode()
             self.send_response(status)
