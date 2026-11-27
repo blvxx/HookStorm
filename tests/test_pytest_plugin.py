@@ -103,6 +103,35 @@ def test_async_runner_validates_and_passes_only_configured_secret(monkeypatch) -
     assert observed["secret"] == "test-only-secret"
 
 
+def test_async_runner_does_not_fall_back_when_selected_secret_is_missing(
+    monkeypatch,
+) -> None:
+    observed: dict[str, object] = {}
+
+    async def fake_run(
+        loaded: dict,
+        target: str,
+        *,
+        allow_remote: bool,
+        allow_insecure_http: bool,
+        secret: str | None,
+    ) -> dict:
+        observed["secret"] = secret
+        return {"summary": {"success": True}}
+
+    monkeypatch.setenv("HOOKSTORM_SECRET", "must-not-be-used")
+    monkeypatch.setattr("hookstorm.pytest_plugin.run_scenario", fake_run)
+    runner = HookStormRunner(
+        target="http://127.0.0.1:8000/webhook",
+        secret_env="CUSTOM_HOOK_SECRET",
+        environ={},
+    )
+
+    asyncio.run(runner.run(scenario()))
+
+    assert observed["secret"] == ""
+
+
 def test_sync_runner_executes_outside_event_loop(monkeypatch) -> None:
     async def fake_run(
         loaded: dict,
