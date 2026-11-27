@@ -2,6 +2,7 @@
 
 ## Unreleased
 
+- Add a shared-clock waterfall view to the interactive HTML report, reusing search, result/fault filters, and sort controls across both timeline layouts.
 - Show deterministic transport fault markers in terminal run summaries and `history show`, including the affected attempt and event.
 - Expand `hookstorm init` into an interactive scenario wizard for event identity, signature provider, retries, and duplicate deliveries; expose the same options as non-interactive flags.
 - Refresh generated and copy-ready staging workflow installer pins to the current CI-validated main commit.
