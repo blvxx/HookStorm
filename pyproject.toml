@@ -4,7 +4,7 @@ build-backend = "setuptools.build_meta"
 
 [project]
 name = "hookstorm"
-version = "0.1.0"
+version = "0.1.0a1"
 description = "A local-first webhook reliability and idempotency chaos-testing CLI."
 readme = "README.md"
 requires-python = ">=3.11"
@@ -34,6 +34,8 @@ hookstorm = "hookstorm.cli:main"
 Homepage = "https://github.com/blvxx/HookStorm"
 Repository = "https://github.com/blvxx/HookStorm"
 Issues = "https://github.com/blvxx/HookStorm/issues"
+Changelog = "https://github.com/blvxx/HookStorm/blob/main/CHANGELOG.md"
+PyPI = "https://pypi.org/project/hookstorm/"
 
 [tool.setuptools.packages.find]
 where = ["src"]
