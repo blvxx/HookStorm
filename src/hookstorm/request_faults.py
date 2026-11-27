@@ -5,8 +5,8 @@ from __future__ import annotations
 import contextvars
 import gzip
 import zlib
-from contextlib import contextmanager
 from collections.abc import Iterator
+from contextlib import contextmanager
 from typing import Any
 
 import httpcore
