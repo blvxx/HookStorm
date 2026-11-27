@@ -9,7 +9,11 @@ import pytest
 
 from hookstorm.config import ScenarioError, load_scenario, validate_scenario
 from hookstorm.report import render_html, render_json, render_junit
-from hookstorm.runner import MAX_RESPONSE_BODY_BYTES, run_scenario
+from hookstorm.runner import (
+    MAX_RESPONSE_BODY_BYTES,
+    _PinnedNetworkBackend,
+    run_scenario,
+)
 
 
 def scenario(*, delivery=None, retry=None, event=None):
@@ -908,3 +912,42 @@ def test_reverse_order_preserves_sequential_duplicates_per_event(receiver) -> No
         ("evt_first", 0),
         ("evt_first", 1),
     ]
+
+
+
+def test_pinned_backend_refuses_unvalidated_host_without_dns_fallback() -> None:
+    import httpcore
+
+    class Backend:
+        async def connect_tcp(self, *args, **kwargs):
+            raise AssertionError("unpinned hosts must never reach the resolver")
+
+    backend = _PinnedNetworkBackend(
+        Backend(),
+        {"xn--bcher-kva.de": ("203.0.113.10",)},
+    )
+
+    with pytest.raises(httpcore.ConnectError, match="not prevalidated"):
+        asyncio.run(backend.connect_tcp("unlisted.example", 443))
+
+
+def test_pinned_backend_matches_httpx_idna_ascii_host() -> None:
+    class Stream:
+        pass
+
+    class Backend:
+        calls: list[str] = []
+
+        async def connect_tcp(self, host, port, **kwargs):
+            self.calls.append(host)
+            return Stream()
+
+    backend_impl = Backend()
+    backend = _PinnedNetworkBackend(
+        backend_impl,
+        {"xn--bcher-kva.de": ("203.0.113.10",)},
+    )
+    stream = asyncio.run(backend.connect_tcp("XN--BCHER-KVA.DE", 443))
+
+    assert isinstance(stream, Stream)
+    assert backend_impl.calls == ["203.0.113.10"]
