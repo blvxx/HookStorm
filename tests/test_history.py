@@ -626,6 +626,44 @@ def test_history_reads_reject_non_object_corrupt_database_rows(tmp_path) -> None
         list_runs(database)
 
 
+def test_history_reads_reject_sqlite_scenario_column_mismatch(tmp_path) -> None:
+    database = tmp_path / "history.sqlite3"
+    save_run(make_result("run_meta7"), database)
+    connection = sqlite3.connect(database)
+    try:
+        connection.execute(
+            "UPDATE runs SET scenario = ? WHERE run_id = ?",
+            ("tampered scenario", "run_meta7"),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    with pytest.raises(HistoryError, match="database scenario does not match"):
+        get_run("run_meta7", database)
+    with pytest.raises(HistoryError, match="database scenario does not match"):
+        list_runs(database)
+
+
+def test_history_reads_reject_sqlite_success_column_mismatch(tmp_path) -> None:
+    database = tmp_path / "history.sqlite3"
+    save_run(make_result("run_meta8"), database)
+    connection = sqlite3.connect(database)
+    try:
+        connection.execute(
+            "UPDATE runs SET success = ? WHERE run_id = ?",
+            (0, "run_meta8"),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    with pytest.raises(HistoryError, match="database success does not match"):
+        get_run("run_meta8", database)
+    with pytest.raises(HistoryError, match="database success does not match"):
+        list_runs(database)
+
+
 def test_load_history_export_rejects_empty_attempt_history(tmp_path) -> None:
     database = tmp_path / "history.sqlite3"
     baseline_file = tmp_path / "baseline.json"
