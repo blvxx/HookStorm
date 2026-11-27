@@ -35,6 +35,8 @@ The same deadline is enforced while the run is active. If it expires, HookStorm 
 | signature | none | none, valid, invalid, or missing. |
 | signature_provider | generic | generic, stripe, github, shopify, or standard_webhooks. |
 | signature_timestamp_offset_seconds | 0 | Stripe and Standard Webhooks; shifts the signed attempt timestamp by -86,400 to +86,400 seconds for replay-window tests. |
+| fault_injection.connect_error_attempts | [] | Attempt numbers (1–10) where HookStorm injects a connection error before the request reaches the receiver. |
+| fault_injection.response_loss_attempts | [] | Attempt numbers (1–10) where HookStorm suppresses the receiver's response after the receiver has processed the request, simulating an ambiguous acknowledgement. |
 
 Delivery settings may be global or defined per event. Per-event settings override global settings. The `concurrency` setting is global only. Retries and duplicate deliveries belonging to one event stay sequential; independent events may overlap. Each event's `schedule_after_ms` is measured from the beginning of the run, not from the previous event or from the completion of another request. A scheduled event waits before acquiring a concurrency slot, so a later event with an earlier offset is not blocked by it. The separate `delay_ms` setting remains a wait before every HTTP attempt. The report keeps events in scenario order even when requests finish out of order.
 
@@ -61,7 +63,7 @@ For `standard_webhooks`, `HOOKSTORM_SECRET` must use the Standard Webhooks `whse
 | backoff_ms | 0 | Base exponential backoff, 0–60,000 ms; each actual wait is capped at 60 seconds. |
 | retry_on | [408, 429, 500, 502, 503, 504] | HTTP statuses that trigger another attempt. Timeouts and transport errors are retried while attempts remain. |
 
-Backoff grows exponentially as backoff_ms * 2^(attempt - 1), capped at 60 seconds per wait. Retries preserve the event ID and request body. For timestamped signing formats (Stripe and Standard Webhooks), HookStorm regenerates the timestamp and signature for each attempt. HookStorm rejects scenarios whose worst-case delivery attempts exceed 20,000.
+Backoff grows exponentially as backoff_ms * 2^(attempt - 1), capped at 60 seconds per wait. Retries preserve the event ID and request body. `delivery.fault_injection` is an optional deterministic test plan: `connect_error_attempts` fails locally before an HTTP request is sent; `response_loss_attempts` sends the HTTP request to the receiver, lets it process and respond, then discards the response before HookStorm observes it. Each list accepts unique attempt numbers from 1 through `retry.max_attempts`; the two fault types cannot target the same attempt. A per-event `fault_injection` object replaces the global fault plan for that event. This is a client-side simulation for repeatable tests, not a network proxy or proof of a real packet drop; use the `/webhook/commit-then-drop` demo route to exercise a real receiver-side TCP close. For timestamped signing formats (Stripe and Standard Webhooks), HookStorm regenerates the timestamp and signature for each attempt. HookStorm rejects scenarios whose worst-case delivery attempts exceed 20,000.
 
 ## Business-state verification
 
