@@ -37,6 +37,7 @@ def test_hookstorm_scenario() -> None:
             SCENARIO,
             target,
             allow_remote=os.getenv("HOOKSTORM_ALLOW_REMOTE") == "1",
+            allow_insecure_http=os.getenv("HOOKSTORM_ALLOW_INSECURE_HTTP") == "1",
             secret=os.getenv("HOOKSTORM_SECRET"),
         )
     )
