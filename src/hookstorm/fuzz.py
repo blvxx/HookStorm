@@ -12,6 +12,7 @@ from urllib.parse import urlsplit, urlunsplit
 
 import yaml
 
+from hookstorm.config import validate_scenario
 from hookstorm.provider_profiles import provider_headers
 from hookstorm.runner import run_scenario
 
@@ -260,12 +261,109 @@ def _safe_target(target: str) -> str:
     return urlunsplit((parts.scheme, parts.netloc, parts.path, "", ""))
 
 
-def _estimated_http_attempts_per_run(scenario: dict[str, Any]) -> int:
+_FAULT_ATTEMPT_FIELDS = (
+    "connect_error_attempts",
+    "response_loss_attempts",
+    "response_body_error_attempts",
+)
+
+
+def _mutate_delivery(
+    scenario: dict[str, Any],
+    rng: random.Random,
+    *,
+    vary_order: bool,
+    vary_duplicates: bool,
+    max_duplicates: int,
+    vary_delay: bool,
+    max_delay_ms: int,
+    vary_faults: bool,
+) -> list[dict[str, Any]]:
+    """Apply opt-in, deterministic delivery mutations to a trial scenario."""
+    mutations: list[dict[str, Any]] = []
+    events = scenario["events"]
+
+    if vary_order:
+        order = rng.choice(("in_order", "reverse"))
+        scenario.setdefault("delivery", {})["order"] = order
+        mutations.append({"dimension": "order", "value": order})
+
+    if vary_duplicates:
+        event_index = rng.randrange(len(events))
+        duplicate_count = rng.randint(0, max_duplicates)
+        events[event_index].setdefault("delivery", {})[
+            "duplicate_count"
+        ] = duplicate_count
+        mutations.append({
+            "dimension": "duplicate_count",
+            "event_index": event_index,
+            "value": duplicate_count,
+        })
+
+    if vary_delay:
+        event_index = rng.randrange(len(events))
+        delay_ms = rng.randint(0, max_delay_ms)
+        events[event_index].setdefault("delivery", {})["delay_ms"] = delay_ms
+        mutations.append({
+            "dimension": "delay_ms",
+            "event_index": event_index,
+            "value": delay_ms,
+        })
+
+    if vary_faults:
+        event_index = rng.randrange(len(events))
+        event = events[event_index]
+        effective_delivery = {**scenario.get("delivery", {}), **event.get("delivery", {})}
+        existing_plan = effective_delivery.get("fault_injection", {})
+        fault_plan = {
+            field: list(existing_plan.get(field, []))
+            for field in _FAULT_ATTEMPT_FIELDS
+        }
+        occupied_attempts = {
+            attempt for attempts in fault_plan.values() for attempt in attempts
+        }
+        retry_attempts = scenario["retry"]["max_attempts"]
+        available_attempts = [
+            attempt
+            for attempt in range(1, retry_attempts + 1)
+            if attempt not in occupied_attempts
+        ]
+        if available_attempts:
+            selected_attempt = rng.choice(available_attempts)
+            selected_fault = rng.choice(_FAULT_ATTEMPT_FIELDS)
+            fault_plan[selected_fault].append(selected_attempt)
+            for attempts in fault_plan.values():
+                attempts.sort()
+            event.setdefault("delivery", {})["fault_injection"] = fault_plan
+            mutations.append({
+                "dimension": "fault_injection",
+                "event_index": event_index,
+                "fault": selected_fault.removesuffix("_attempts"),
+                "attempt": selected_attempt,
+            })
+        else:
+            mutations.append({
+                "dimension": "fault_injection",
+                "event_index": event_index,
+                "skipped": "all retry attempts already have a fault assigned",
+            })
+
+    return mutations
+
+
+def _estimated_http_attempts_per_run(
+    scenario: dict[str, Any],
+    *,
+    max_duplicates: int | None = None,
+) -> int:
     retry_attempts = scenario["retry"]["max_attempts"]
     attempts = 0
     for event in scenario["events"]:
         delivery = {**scenario["delivery"], **event["delivery"]}
-        attempts += (delivery.get("duplicate_count", 0) + 1) * retry_attempts
+        duplicate_count = delivery.get("duplicate_count", 0)
+        if max_duplicates is not None:
+            duplicate_count = max(duplicate_count, max_duplicates)
+        attempts += (duplicate_count + 1) * retry_attempts
     if scenario.get("verify") is not None:
         attempts += 1
     return attempts
@@ -282,9 +380,15 @@ async def run_fuzz(
     secret: str | None = None,
     minimize_budget: int = 0,
     cases_dir: str | Path | None = None,
+    vary_order: bool = False,
+    vary_duplicates: bool = False,
+    max_duplicates: int = 3,
+    vary_delay: bool = False,
+    max_delay_ms: int = 1_000,
+    vary_faults: bool = False,
     runner: RunScenario | None = None,
 ) -> dict[str, Any]:
-    """Run seeded payload mutations and optionally minimize failing payloads."""
+    """Run seeded payload and optional delivery mutations, then minimize failures."""
     if isinstance(seed, bool) or not isinstance(seed, int):
         raise ValueError("Fuzz seed must be an integer")
     if isinstance(iterations, bool) or not isinstance(iterations, int) or not 1 <= iterations <= 500:
@@ -297,8 +401,29 @@ async def run_fuzz(
         raise ValueError("Minimization budget must be an integer between 0 and 100")
     if not scenario.get("events"):
         raise ValueError("Fuzzing requires at least one scenario event")
+    if (
+        isinstance(max_duplicates, bool)
+        or not isinstance(max_duplicates, int)
+        or not 0 <= max_duplicates <= 100
+    ):
+        raise ValueError("Maximum fuzz duplicates must be an integer between 0 and 100")
+    if (
+        isinstance(max_delay_ms, bool)
+        or not isinstance(max_delay_ms, int)
+        or not 0 <= max_delay_ms <= 60_000
+    ):
+        raise ValueError("Maximum fuzz delay must be an integer between 0 and 60000 ms")
 
-    attempts_per_run = _estimated_http_attempts_per_run(scenario)
+    maximum_duplicates = max_duplicates if vary_duplicates else None
+    attempts_per_run = _estimated_http_attempts_per_run(
+        scenario,
+        max_duplicates=maximum_duplicates,
+    )
+    if attempts_per_run > 20_000:
+        raise ValueError(
+            f"A single fuzz trial could issue {attempts_per_run:,} HTTP attempts, "
+            "exceeding HookStorm's 20,000-attempt scenario limit"
+        )
     worst_case_attempts = attempts_per_run * iterations * (minimize_budget + 1)
     if worst_case_attempts > _MAX_FUZZ_HTTP_ATTEMPTS:
         raise ValueError(
@@ -323,6 +448,18 @@ async def run_fuzz(
             event["payload"], rng, nonce=f"{seed:x}_{iteration:04x}"
         )
         event["payload"] = mutated_payload
+        delivery_mutations = _mutate_delivery(
+            candidate_scenario,
+            rng,
+            vary_order=vary_order,
+            vary_duplicates=vary_duplicates,
+            max_duplicates=max_duplicates,
+            vary_delay=vary_delay,
+            max_delay_ms=max_delay_ms,
+            vary_faults=vary_faults,
+        )
+        candidate_scenario = validate_scenario(candidate_scenario)
+        event = candidate_scenario["events"][event_index]
         _apply_trial_event_ids(
             candidate_scenario, seed=seed, iteration=iteration, trial=0
         )
@@ -342,6 +479,7 @@ async def run_fuzz(
             "event_type": event["id"],
             "event_id": event["event_id"],
             "mutation": mutation,
+            "delivery_mutations": delivery_mutations,
             "success": success,
             "run_id": result["run_id"],
             "scenario_fingerprint": result["scenario_fingerprint"],
@@ -418,7 +556,24 @@ async def run_fuzz(
     return {
         "schema_version": 1,
         "tool": "HookStorm",
-        "mode": "seeded-payload-fuzz",
+        "mode": (
+            "seeded-scenario-fuzz"
+            if any((vary_order, vary_duplicates, vary_delay, vary_faults))
+            else "seeded-payload-fuzz"
+        ),
+        "dimensions": [
+            "payload",
+            *(
+                name
+                for name, enabled in (
+                    ("order", vary_order),
+                    ("duplicates", vary_duplicates),
+                    ("delay", vary_delay),
+                    ("transport_faults", vary_faults),
+                )
+                if enabled
+            ),
+        ],
         "scenario": scenario["name"],
         "target": _safe_target(target),
         "seed": seed,
