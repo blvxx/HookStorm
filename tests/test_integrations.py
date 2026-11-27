@@ -132,6 +132,18 @@ def test_recorder_rejects_invalid_json_and_content_types(
     assert error.value.status_code == status
 
 
+def test_recorder_rejects_excessive_json_nesting_without_mutating_state() -> None:
+    recorder = WebhookRecorder()
+    nested = ("[" * 1_100 + "null" + "]" * 1_100).encode("ascii")
+
+    with pytest.raises(WebhookRequestError, match="within parser limits") as error:
+        recorder.record(_headers(), nested)
+
+    assert error.value.status_code == 400
+    assert recorder.events == ()
+    assert recorder.snapshot()["total_events"] == 0
+
+
 def test_recorder_bounds_wire_and_decompressed_body_sizes() -> None:
     recorder = WebhookRecorder(max_body_bytes=32)
     with pytest.raises(WebhookRequestError) as wire_limit:
