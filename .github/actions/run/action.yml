@@ -1,0 +1,142 @@
+name: HookStorm webhook test
+description: Validate and run a HookStorm scenario, with optional connectivity preflight and report output.
+
+inputs:
+  scenario:
+    description: Path to a HookStorm version 1 YAML scenario in the caller's workspace.
+    required: true
+  target-url:
+    description: Target URL. Defaults to HOOKSTORM_TARGET_URL from the caller's environment.
+    required: false
+    default: ""
+  python-version:
+    description: Python version used to install and run HookStorm.
+    required: false
+    default: "3.12"
+  allow-remote:
+    description: Explicitly allow remote HTTPS targets.
+    required: false
+    default: "false"
+  allow-insecure-http:
+    description: Explicitly allow non-loopback plaintext HTTP; also requires allow-remote true.
+    required: false
+    default: "false"
+  connect-preflight:
+    description: Check DNS, TCP, and TLS connectivity without sending an HTTP request.
+    required: false
+    default: "false"
+  secret-env:
+    description: Environment variable name containing the signing secret.
+    required: false
+    default: HOOKSTORM_SECRET
+  format:
+    description: Report format (html, json, or junit).
+    required: false
+    default: html
+  output-path:
+    description: Report path relative to the caller's workspace.
+    required: false
+    default: hookstorm-report.html
+  history-db:
+    description: Optional SQLite path to persist history; omitted by default for CI privacy.
+    required: false
+    default: ""
+
+outputs:
+  report-path:
+    description: Path to the generated HookStorm report.
+    value: ${{ steps.run.outputs.report_path }}
+
+runs:
+  using: composite
+  steps:
+    - name: Set up Python
+      uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
+      with:
+        python-version: ${{ inputs.python-version }}
+
+    - name: Install HookStorm
+      shell: bash
+      env:
+        HOOKSTORM_ACTION_PATH: ${{ github.action_path }}
+      run: |
+        set -euo pipefail
+        python -m pip install --disable-pip-version-check "$HOOKSTORM_ACTION_PATH"
+
+    - name: Validate and run scenario
+      id: run
+      shell: bash
+      env:
+        HOOKSTORM_SCENARIO: ${{ inputs.scenario }}
+        HOOKSTORM_INPUT_TARGET: ${{ inputs.target-url }}
+        HOOKSTORM_ALLOW_REMOTE_INPUT: ${{ inputs.allow-remote }}
+        HOOKSTORM_ALLOW_INSECURE_HTTP_INPUT: ${{ inputs.allow-insecure-http }}
+        HOOKSTORM_CONNECT_PREFLIGHT: ${{ inputs.connect-preflight }}
+        HOOKSTORM_SECRET_ENV_INPUT: ${{ inputs.secret-env }}
+        HOOKSTORM_FORMAT: ${{ inputs.format }}
+        HOOKSTORM_OUTPUT_PATH: ${{ inputs.output-path }}
+        HOOKSTORM_HISTORY_DB_INPUT: ${{ inputs.history-db }}
+      run: |
+        set -euo pipefail
+
+        case "$HOOKSTORM_FORMAT" in
+          html|json|junit) ;;
+          *) echo "::error::format must be html, json, or junit"; exit 2 ;;
+        esac
+
+        if [[ "$HOOKSTORM_ALLOW_INSECURE_HTTP_INPUT" == "true" && "$HOOKSTORM_ALLOW_REMOTE_INPUT" != "true" ]]; then
+          echo "::error::allow-insecure-http requires allow-remote=true"
+          exit 2
+        fi
+
+        target="$HOOKSTORM_INPUT_TARGET"
+        if [[ -z "$target" ]]; then
+          target="${HOOKSTORM_TARGET_URL:-}"
+        fi
+        if [[ -z "$target" ]]; then
+          echo "::error::Set target-url or HOOKSTORM_TARGET_URL"
+          exit 2
+        fi
+        if [[ -z "$HOOKSTORM_SCENARIO" || ! -f "$HOOKSTORM_SCENARIO" ]]; then
+          echo "::error::Scenario file does not exist: $HOOKSTORM_SCENARIO"
+          exit 2
+        fi
+        if [[ -z "$HOOKSTORM_SECRET_ENV_INPUT" ]]; then
+          echo "::error::secret-env must not be empty"
+          exit 2
+        fi
+        if [[ -z "$HOOKSTORM_OUTPUT_PATH" ]]; then
+          echo "::error::output-path must not be empty"
+          exit 2
+        fi
+        if [[ -n "$HOOKSTORM_HISTORY_DB_INPUT" ]]; then
+          mkdir -p "$(dirname "$HOOKSTORM_HISTORY_DB_INPUT")"
+        fi
+        mkdir -p "$(dirname "$HOOKSTORM_OUTPUT_PATH")"
+
+        hookstorm validate "$HOOKSTORM_SCENARIO"
+
+        doctor_args=(doctor "$HOOKSTORM_SCENARIO" --target "$target" --secret-env "$HOOKSTORM_SECRET_ENV_INPUT")
+        if [[ "$HOOKSTORM_ALLOW_INSECURE_HTTP_INPUT" == "true" ]]; then
+          doctor_args+=(--allow-insecure-http)
+        fi
+        if [[ "$HOOKSTORM_CONNECT_PREFLIGHT" == "true" ]]; then
+          doctor_args+=(--connect)
+        fi
+        hookstorm "${doctor_args[@]}"
+
+        run_args=(run "$HOOKSTORM_SCENARIO" --target "$target" --secret-env "$HOOKSTORM_SECRET_ENV_INPUT" --format "$HOOKSTORM_FORMAT" --output "$HOOKSTORM_OUTPUT_PATH")
+        if [[ "$HOOKSTORM_ALLOW_REMOTE_INPUT" == "true" ]]; then
+          run_args+=(--allow-remote)
+        fi
+        if [[ "$HOOKSTORM_ALLOW_INSECURE_HTTP_INPUT" == "true" ]]; then
+          run_args+=(--allow-insecure-http)
+        fi
+        if [[ -n "$HOOKSTORM_HISTORY_DB_INPUT" ]]; then
+          run_args+=(--history-db "$HOOKSTORM_HISTORY_DB_INPUT")
+        else
+          run_args+=(--no-history)
+        fi
+        hookstorm "${run_args[@]}"
+
+        echo "report_path=$HOOKSTORM_OUTPUT_PATH" >> "$GITHUB_OUTPUT"
