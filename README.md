@@ -47,6 +47,10 @@ After the first public alpha is published, install it directly from PyPI:
 ~~~bash
 python -m pip install --pre hookstorm
 hookstorm --version
+
+# Generate and validate a starter scenario using only the installed package
+hookstorm init --no-workflow
+hookstorm validate scenarios/webhook.yaml
 ~~~
 
 To work from source or contribute, clone the repository:
@@ -99,6 +103,8 @@ Export a scenario as a pytest integration test:
 ~~~bash
 hookstorm export-pytest examples/payment-retry.yaml --output tests/test_payment_webhook.py
 ~~~
+
+The PyPI installation path is self-contained: `hookstorm init --no-workflow` creates a starter scenario and `hookstorm validate` checks it without files from the source repository. The demo receiver and named example scenarios below are maintained in the GitHub source checkout.
 
 The generated test reads its target from `HOOKSTORM_TARGET` and the optional HMAC secret from `HOOKSTORM_SECRET`. It does not embed an endpoint or secret. Remote HTTPS requires `HOOKSTORM_ALLOW_REMOTE=1`; remote plaintext HTTP additionally requires `HOOKSTORM_ALLOW_INSECURE_HTTP=1`.
 
