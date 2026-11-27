@@ -2,7 +2,7 @@ from __future__ import annotations
 
 import pytest
 
-from hookstorm.config import ScenarioError, validate_scenario
+from hookstorm.config import ScenarioError, scenario_fingerprint, validate_scenario
 
 
 def valid_scenario() -> dict:
@@ -11,6 +11,23 @@ def valid_scenario() -> dict:
         "name": "basic",
         "events": [{"id": "ping", "event_id": "evt_1", "payload": {"ok": True}}],
     }
+
+
+def test_scenario_fingerprint_is_stable_and_ignores_display_metadata() -> None:
+    first = validate_scenario(valid_scenario())
+    second = validate_scenario({**valid_scenario(), "name": "renamed", "description": "new notes"})
+
+    assert scenario_fingerprint(first) == scenario_fingerprint(second)
+    assert len(scenario_fingerprint(first)) == 64
+
+
+def test_scenario_fingerprint_changes_with_behavior_configuration() -> None:
+    first = validate_scenario(valid_scenario())
+    changed_data = valid_scenario()
+    changed_data["events"][0]["payload"] = {"ok": False}
+    second = validate_scenario(changed_data)
+
+    assert scenario_fingerprint(first) != scenario_fingerprint(second)
 
 
 def test_valid_scenario_gets_defaults() -> None:
