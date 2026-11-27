@@ -6,10 +6,14 @@ import json
 import math
 import os
 import sqlite3
+import threading
 from pathlib import Path
 from typing import Any
 
 _DEFAULT_DB = Path.home() / ".hookstorm" / "history.sqlite3"
+_MEMORY_DB_URI = "file:hookstorm_history?mode=memory&cache=shared"
+_MEMORY_DB_KEEPER: sqlite3.Connection | None = None
+_MEMORY_DB_LOCK = threading.Lock()
 
 
 class HistoryError(RuntimeError):
@@ -30,7 +34,20 @@ def _connect(path: str | Path | None = None) -> sqlite3.Connection:
     location = resolve_history_db(path)
     is_default_location = path is None and not os.getenv("HOOKSTORM_HISTORY_DB")
     try:
-        if location != ":memory:":
+        if location == ":memory:":
+            global _MEMORY_DB_KEEPER
+            with _MEMORY_DB_LOCK:
+                if _MEMORY_DB_KEEPER is None:
+                    keeper = sqlite3.connect(
+                        _MEMORY_DB_URI,
+                        uri=True,
+                        timeout=10,
+                        check_same_thread=False,
+                    )
+                    keeper.execute("PRAGMA busy_timeout = 10000")
+                    _MEMORY_DB_KEEPER = keeper
+            connection = sqlite3.connect(_MEMORY_DB_URI, uri=True, timeout=10)
+        else:
             database_path = Path(location)
             database_path.parent.mkdir(
                 parents=True,
@@ -51,8 +68,7 @@ def _connect(path: str | Path | None = None) -> sqlite3.Connection:
                     os.fchmod(descriptor, 0o600)
                 finally:
                     os.close(descriptor)
-
-        connection = sqlite3.connect(location, timeout=10)
+            connection = sqlite3.connect(location, timeout=10)
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA busy_timeout = 10000")
         return connection
