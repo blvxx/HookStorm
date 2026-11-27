@@ -462,7 +462,7 @@ def test_default_history_and_exported_baseline_use_owner_only_permissions(
     database = tmp_path / ".hookstorm" / "history.sqlite3"
     monkeypatch.setattr(history_module, "_DEFAULT_DB", database)
 
-    save_run(make_result("run_private_permissions"))
+    save_run(make_result("run_private_permission1"))
 
     assert stat.S_IMODE(database.parent.stat().st_mode) == 0o700
     assert stat.S_IMODE(database.stat().st_mode) == 0o600
@@ -477,6 +477,6 @@ def test_default_history_and_exported_baseline_use_owner_only_permissions(
 def test_explicit_history_database_file_is_owner_only(tmp_path) -> None:
     database = tmp_path / "custom" / "history.sqlite3"
 
-    save_run(make_result("run_custom_permissions"), database)
+    save_run(make_result("run_custom_permission2"), database)
 
     assert stat.S_IMODE(database.stat().st_mode) == 0o600
