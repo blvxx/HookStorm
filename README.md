@@ -86,14 +86,17 @@ Read [SECURITY.md](SECURITY.md) and the [architecture notes](docs/architecture.m
 - [Alpha release readiness review](docs/alpha-release-review.md)
 - [Release and PyPI publishing checklist](docs/release-checklist.md)
 
-## Next
+## Help validate the alpha
 
-Planned work, in priority order:
+HookStorm now has a broad set of deterministic webhook failure scenarios. The next priority is not adding more fault types — it is finding out whether backend teams will use the existing workflows against their own test endpoints.
 
-1. Add slow request-body streaming, controlled secret rotation, and bounded large-payload transport profiles.
-2. Evaluate HTTP/2 fault coverage and reduce reliance on HTTPX private transport internals.
-3. Confirm GitHub Pages settings and verify the first main-branch Zensical deployment.
-4. Add provider retry schedule presets only after explicit per-attempt schedule support and longer safe run-time budgets are designed.
+The most useful first test is the **committed side effect with a lost acknowledgement**: the receiver saves an event, its response disappears, and the retry must not apply the business effect twice.
+
+- [Run the first demo and test your own isolated endpoint](docs/user-validation.md)
+- [Understand the ambiguous acknowledgement scenario](docs/ambiguous-acknowledgements.md)
+- [Report a reproducible issue or adoption blocker](https://github.com/blvxx/HookStorm/issues)
+
+The alpha's technical scope and limitations are documented. Further protocol breadth, hosted services, and monetization should follow evidence from independent users, not precede it.
 
 ## Development
 
