@@ -7,7 +7,6 @@
 - Expand `hookstorm init` into an interactive scenario wizard for event identity, signature provider, retries, and duplicate deliveries; expose the same options as non-interactive flags.
 - Refresh generated and copy-ready staging workflow installer pins to the current CI-validated main commit.
 - Add deterministic per-attempt client-side fault injection for pre-send connection errors and post-processing acknowledgement loss; preserve markers in history and add fault-aware filtering and sorting to the interactive HTML timeline.
-- Refresh generated and copy-ready staging workflow installer pins to the CI-validated main commit.
 - Validate history run metrics and delivery identities before storage or baseline comparison; reject non-finite JSON numbers in imported baselines.
 - Add Python 3.14 to the CI compatibility matrix and package classifiers.
 - Restrict local history databases and exported baseline files to owner-only POSIX permissions.

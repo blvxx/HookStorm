@@ -343,7 +343,7 @@ hookstorm run examples/payment-retry.yaml --target http://127.0.0.1:8000/webhook
 
 JUnit output creates one testcase per event delivery (including duplicates), records assertion failures separately from transport errors, and omits payloads, secrets, and URL query strings. GitHub Actions runs the built-in webhook scenarios and uploads JUnit XML reports as workflow artifacts.
 
-Reports include event IDs, delivery/attempt counts, elapsed attempt timing, status codes, latency, and pass/fail checks. The self-contained HTML report adds a searchable and filterable delivery timeline, attempt expansion, and pass/fail filters. Reports intentionally omit request payloads, request headers, response bodies, and secrets.
+Reports include event IDs, delivery/attempt counts, elapsed attempt timing, status codes, latency, and pass/fail checks. The self-contained HTML report offers two views: attempt cards for detailed inspection and a cross-event waterfall that places attempts on one shared run clock, making concurrency and retry gaps visible. Both views reuse event search, pass/fail and injected-fault filters, and sorting by first observed time, total latency, or attempt count. Reports intentionally omit request payloads, request headers, response bodies, and secrets.
 
 ## Run history and regression detection
 
@@ -456,8 +456,10 @@ For release gates and artifact checks, see [the release checklist](docs/release-
 - [x] Local SQLite run history and baseline comparison
 - [x] Pass-rate, delivery-coverage, and latency regression detection
 - [x] Per-event scheduling with run-relative event offsets
+- [x] Deterministic pre-send connection faults and post-processing acknowledgement-loss simulation
+- [x] CLI and history diagnostics for injected transport faults
 - [x] Export scenarios as pytest tests
-- [ ] Interactive run timeline / optional local dashboard
+- [x] Interactive HTML run timeline with detailed attempt cards, injected-fault filters, and shared-clock waterfall view
 - [x] Stripe, GitHub, Shopify, and Standard Webhooks v1 signature adapters
 
 ## Contributing
