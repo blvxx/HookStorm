@@ -27,15 +27,57 @@ def resolve_history_db(path: str | Path | None = None) -> str:
 
 def _connect(path: str | Path | None = None) -> sqlite3.Connection:
     location = resolve_history_db(path)
+    is_default_location = path is None and not os.getenv("HOOKSTORM_HISTORY_DB")
     try:
         if location != ":memory:":
-            Path(location).parent.mkdir(parents=True, exist_ok=True)
+            database_path = Path(location)
+            database_path.parent.mkdir(
+                parents=True,
+                exist_ok=True,
+                mode=0o700 if is_default_location else 0o777,
+            )
+            if os.name == "posix":
+                if is_default_location:
+                    os.chmod(database_path.parent, 0o700)
+                # Pre-create the file privately so the default umask cannot expose
+                # run metadata between SQLite creation and a later chmod.
+                descriptor = os.open(
+                    database_path,
+                    os.O_CREAT | os.O_RDWR,
+                    0o600,
+                )
+                try:
+                    os.fchmod(descriptor, 0o600)
+                finally:
+                    os.close(descriptor)
+
         connection = sqlite3.connect(location, timeout=10)
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA busy_timeout = 10000")
         return connection
     except (OSError, sqlite3.Error) as exc:
         raise HistoryError(f"Cannot open HookStorm history database: {exc}") from exc
+
+
+def _write_private_text(path: Path, content: str) -> None:
+    """Write an owner-only text file on POSIX and a normal text file elsewhere."""
+    if os.name != "posix":
+        path.write_text(content, encoding="utf-8")
+        return
+
+    descriptor = os.open(
+        path,
+        os.O_WRONLY | os.O_CREAT | os.O_TRUNC,
+        0o600,
+    )
+    try:
+        os.fchmod(descriptor, 0o600)
+        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+            descriptor = -1
+            stream.write(content)
+    finally:
+        if descriptor >= 0:
+            os.close(descriptor)
 
 
 def _initialize(connection: sqlite3.Connection) -> None:
@@ -543,7 +585,7 @@ def export_history_run(
         encoded = json.dumps(
             document, ensure_ascii=False, indent=2, allow_nan=False
         )
-        destination.write_text(encoded, encoding="utf-8")
+        _write_private_text(destination, encoded)
     except (OSError, TypeError, ValueError) as exc:
         raise HistoryError(f"Cannot export run '{resolved_id}': {exc}") from exc
     return str(destination.resolve())
