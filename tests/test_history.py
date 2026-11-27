@@ -654,6 +654,26 @@ def test_history_reads_reject_sqlite_scenario_column_mismatch(tmp_path) -> None:
         list_runs(database)
 
 
+def test_history_reads_reject_sqlite_metric_column_mismatch(tmp_path) -> None:
+    database = tmp_path / "history.sqlite3"
+    save_run(make_result("run_meta9"), database)
+    connection = sqlite3.connect(database)
+    try:
+        connection.execute(
+            "UPDATE runs SET attempts = ? WHERE run_id = ?",
+            (99, "run_meta9"),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    with pytest.raises(HistoryError, match="database attempts does not match"):
+        get_run("run_meta9", database)
+    with pytest.raises(HistoryError, match="database attempts does not match"):
+        list_runs(database)
+
+
+
 def test_history_reads_reject_sqlite_success_column_mismatch(tmp_path) -> None:
     database = tmp_path / "history.sqlite3"
     save_run(make_result("run_meta8"), database)
