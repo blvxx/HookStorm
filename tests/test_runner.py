@@ -770,7 +770,7 @@ def test_deterministic_fault_injection_example_proves_single_effect(receiver) ->
         / "deterministic-fault-injection.yaml"
     )
     data = load_scenario(example_path)
-    data["verify"]["url"] = f"${base}/state"
+    data["verify"]["url"] = base + "/state"
 
     result = asyncio.run(run_scenario(data, base))
 
