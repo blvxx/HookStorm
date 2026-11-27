@@ -60,4 +60,6 @@ Upload the output with your usual artifact action, using the report-path output.
 - History persistence is disabled unless history-db is provided.
 - The action does not deploy your application, start your receiver, or provision secrets. Prepare the dedicated staging endpoint in your normal deployment workflow.
 
+The repository also runs a local composite-action smoke workflow. It starts the demo receiver, invokes the checked-out action against the retry example, and uploads the generated JUnit report. This validates the action's installation path and execution separately from the static metadata tests.
+
 The action uses actions/setup-python pinned to a reviewed full commit SHA. Pin the HookStorm action itself to a full commit SHA in consumer workflows; do not reference a mutable branch or tag for supply-chain-sensitive CI.
