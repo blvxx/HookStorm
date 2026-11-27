@@ -1,5 +1,8 @@
 from __future__ import annotations
 
+import hashlib
+import json
+
 import pytest
 
 from hookstorm.config import (
@@ -437,6 +440,23 @@ def test_rejects_invalid_per_event_schedule_offset(offset: object) -> None:
     with pytest.raises(ScenarioError, match="schedule_after_ms"):
         validate_scenario(data)
 
+
+
+def test_default_run_timeout_preserves_legacy_fingerprint_shape() -> None:
+    scenario = validate_scenario(valid_scenario())
+    legacy_behavior = {
+        key: scenario.get(key)
+        for key in ("version", "delivery", "retry", "events", "verify")
+    }
+    canonical = json.dumps(
+        legacy_behavior,
+        sort_keys=True,
+        ensure_ascii=False,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")
+
+    assert scenario_fingerprint(scenario) == hashlib.sha256(canonical).hexdigest()
 
 
 def test_run_timeout_defaults_and_is_included_in_fingerprint() -> None:
