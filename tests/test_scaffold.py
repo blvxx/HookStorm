@@ -50,6 +50,7 @@ def test_initialize_project_creates_valid_scenario_and_workflow(tmp_path) -> Non
     assert "hookstorm doctor" in preflight["run"]
     assert "--connect" in preflight["run"]
     assert "--allow-insecure-http" in preflight["run"]
+    assert HOOKSTORM_INSTALL_REF == "cb29c9aaeefcfa4e885ef78b511ec28e0c010946"
     assert len(HOOKSTORM_INSTALL_REF) == 40
     assert all(character in "0123456789abcdef" for character in HOOKSTORM_INSTALL_REF)
     assert f"git+https://github.com/blvxx/HookStorm.git@{HOOKSTORM_INSTALL_REF}" in workflow_text
