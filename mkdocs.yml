@@ -42,4 +42,4 @@ nav:
       - Release review: alpha-release-review.md
       - Release checklist: release-checklist.md
       - PyPI publishing: pypi-publishing.md
-      - Changelog: ../CHANGELOG.md
+      - Changelog: https://github.com/blvxx/HookStorm/blob/main/CHANGELOG.md
