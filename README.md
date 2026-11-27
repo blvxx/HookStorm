@@ -332,7 +332,7 @@ Every `hookstorm run` is saved to a local SQLite database by default:
 - Windows: `%USERPROFILE%\\.hookstorm\\history.sqlite3`
 - Linux / macOS: `~/.hookstorm/history.sqlite3`
 
-The history stores run metadata and assertion outcomes only. Payloads, request headers, response bodies, and secrets are not persisted. Event IDs and the target URL path are retained for comparison; query strings are stripped by the runner. Keep the database local and review identifiers / URL paths before sharing it.
+The history stores run metadata and assertion outcomes only. Payloads, request headers, response bodies, and secrets are not persisted. Event IDs, the target URL path, and an opaque scenario configuration fingerprint are retained for comparison; query strings are stripped by the runner. Keep the database local and review identifiers / URL paths before sharing it.
 
 List recent runs:
 
@@ -352,6 +352,17 @@ Compare a new run with a saved baseline:
 ~~~bash
 hookstorm history compare BASELINE_RUN_ID
 ~~~
+
+HookStorm stores a SHA-256 fingerprint of the behavior-defining scenario configuration (delivery policy, retries, events, and verification expectations). The fingerprint does not expose the underlying payload or credentials. If the current configuration differs from the baseline, comparison reports a configuration regression instead of presenting the result as a clean pass. Legacy baselines created before fingerprints were introduced remain readable, but the CLI warns that their configuration cannot be verified.
+
+When you intentionally change a scenario and want to compare the new outcomes while accepting that contract change, pass `--allow-config-change`:
+
+~~~bash
+hookstorm history compare BASELINE_RUN_ID --allow-config-change
+hookstorm history compare-file .hookstorm-baselines/payment.json --allow-config-change
+~~~
+
+Use the override only as part of an intentional baseline refresh. Duplicate delivery identities in a history run or imported baseline are rejected rather than silently overwritten during comparison.
 
 The current run defaults to the latest recorded run. You can select it explicitly and adjust the latency threshold:
 
