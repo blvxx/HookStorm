@@ -76,3 +76,68 @@ def validate_target(
     if not addresses or any(not ipaddress.ip_address(address).is_loopback for address in addresses):
         raise UnsafeTargetError("localhost resolved to a non-loopback address; refusing the request")
     return target.strip()
+
+from dataclasses import dataclass
+
+
+@dataclass(frozen=True)
+class TargetResolution:
+    """A validated target and the IP addresses approved for its connection."""
+
+    url: str
+    hostname: str
+    addresses: tuple[str, ...]
+
+
+def resolve_target(
+    target: str,
+    *,
+    allow_remote: bool = False,
+    allow_insecure_http: bool = False,
+) -> TargetResolution:
+    """Validate a target and freeze its DNS answers for the subsequent connection.
+
+    ``validate_target`` remains the public policy helper used by diagnostics.
+    The runner connects only to one of the addresses returned here.
+    """
+    validated = validate_target(
+        target,
+        allow_remote=allow_remote,
+        allow_insecure_http=allow_insecure_http,
+    )
+    parsed = urlsplit(validated)
+    hostname = (parsed.hostname or "").rstrip(".").lower()
+    try:
+        literal = ipaddress.ip_address(hostname)
+    except ValueError:
+        literal = None
+
+    if literal is not None:
+        return TargetResolution(validated, hostname, (hostname,))
+
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    try:
+        resolved = socket.getaddrinfo(hostname, port, type=socket.SOCK_STREAM)
+    except OSError as exc:
+        raise UnsafeTargetError(
+            f"Could not resolve target host before connecting: {type(exc).__name__}"
+        ) from exc
+
+    addresses = tuple(dict.fromkeys(item[4][0] for item in resolved))
+    if not addresses:
+        raise UnsafeTargetError("Target host resolved to no usable IP addresses")
+
+    if not allow_remote:
+        for address in addresses:
+            try:
+                parsed_address = ipaddress.ip_address(address.split("%", 1)[0])
+            except ValueError as exc:
+                raise UnsafeTargetError(
+                    "Target host resolved to an invalid IP address"
+                ) from exc
+            if not parsed_address.is_loopback:
+                raise UnsafeTargetError(
+                    "localhost resolved to a non-loopback address; refusing the request"
+                )
+
+    return TargetResolution(validated, hostname, addresses)

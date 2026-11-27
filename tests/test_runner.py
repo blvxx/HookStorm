@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import socket
 import time
 
 import pytest
@@ -793,3 +794,34 @@ def test_deterministic_fault_injection_example_proves_single_effect(receiver) ->
     ]
     assert len(state["effects"]) == 1
     assert result["verification"]["passed"] is True
+
+
+
+def test_runner_connects_only_to_the_prevalidated_dns_addresses(receiver, monkeypatch) -> None:
+    base, state = receiver
+    port = int(base.rsplit(":", 1)[1])
+    original_getaddrinfo = socket.getaddrinfo
+    hostname_lookups = 0
+
+    def rebinding_getaddrinfo(host, service, *args, **kwargs):
+        nonlocal hostname_lookups
+        if host == "localhost":
+            hostname_lookups += 1
+            # The two checked lookups remain loopback. Any connection-time
+            # resolution would receive an address outside the local network.
+            address = "127.0.0.1" if hostname_lookups <= 2 else "192.0.2.1"
+            return original_getaddrinfo(address, service, *args, **kwargs)
+        return original_getaddrinfo(host, service, *args, **kwargs)
+
+    monkeypatch.setattr(socket, "getaddrinfo", rebinding_getaddrinfo)
+
+    result = asyncio.run(
+        run_scenario(
+            scenario(),
+            f"http://localhost:{port}/webhook",
+        )
+    )
+
+    assert result["summary"]["success"] is True
+    assert hostname_lookups == 2
+    assert state["requests"][0]["headers"]["Host"] == f"localhost:{port}"
