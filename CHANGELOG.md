@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+- Cancel and await sibling delivery workers if one concurrent worker exits with an unexpected exception, preventing requests from outliving the run's HTTP client.
+
 - Enforce absolute per-attempt and verification request deadlines so slow-drip responses cannot evade `timeout_ms`.
 - Request identity-encoded responses and reject unexpected compression before decompression, preventing compressed responses from bypassing the 2 MiB memory limit.
 - Preserve source scenario order in reports when deliveries are intentionally executed in reverse.
