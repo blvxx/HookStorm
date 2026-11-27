@@ -77,6 +77,23 @@ def _matches_subset(actual: Any, expected: dict[str, Any]) -> tuple[bool, str | 
     return _match_json_value(actual, expected, "")
 
 
+MAX_RESPONSE_BODY_BYTES = 2 * 1024 * 1024
+
+
+async def _read_limited_response_body(response: httpx.Response) -> bytes | None:
+    """Read a decompressed response body up to the fixed memory-safety limit.
+
+    Return None when the body exceeds the limit. Streaming is used so an oversized
+    response is closed as soon as the limit is crossed instead of being buffered in full.
+    """
+    body = bytearray()
+    async for chunk in response.aiter_bytes():
+        if len(body) + len(chunk) > MAX_RESPONSE_BODY_BYTES:
+            return None
+        body.extend(chunk)
+    return bytes(body)
+
+
 _SIGNATURE_HEADERS = {
     "generic": "X-HookStorm-Signature",
     "stripe": "Stripe-Signature",
@@ -137,20 +154,31 @@ async def run_scenario(
     target: str,
     *,
     allow_remote: bool = False,
+    allow_insecure_http: bool = False,
     secret: str | None = None,
 ) -> dict[str, Any]:
     """Execute a validated scenario and return a privacy-conscious result document."""
-    target = validate_target(target, allow_remote=allow_remote)
+    target = validate_target(
+        target,
+        allow_remote=allow_remote,
+        allow_insecure_http=allow_insecure_http,
+    )
     config_fingerprint = scenario_fingerprint(scenario)
     verify_config = scenario.get("verify")
+    verification_auth_config = verify_config.get("auth") if verify_config else None
+    if verify_config is not None and verification_auth_config is not None:
+        validate_verification_auth_transport(
+            verify_config["url"], verification_auth_config
+        )
     verification_url = (
-        validate_target(verify_config["url"], allow_remote=allow_remote)
+        validate_target(
+            verify_config["url"],
+            allow_remote=allow_remote,
+            allow_insecure_http=allow_insecure_http,
+        )
         if verify_config is not None
         else None
     )
-    verification_auth_config = verify_config.get("auth") if verify_config else None
-    if verification_url is not None:
-        validate_verification_auth_transport(verification_url, verification_auth_config)
     # Resolve verification credentials before any webhook event is sent.
     verification_auth_headers = resolve_verification_auth_headers(verification_auth_config)
     secret = secret if secret is not None else os.getenv("HOOKSTORM_SECRET")
@@ -269,29 +297,43 @@ async def run_scenario(
                         "passed": False,
                     }
                     try:
-                        response = await client.post(
+                        async with client.stream(
+                            "POST",
                             target,
                             content=event_body,
                             headers=headers,
                             timeout=delivery_config["timeout_ms"] / 1000,
-                        )
-                        outcome["status_code"] = response.status_code
-                        outcome["latency_ms"] = round(
-                            (time.perf_counter() - started_attempt) * 1000, 2
-                        )
-                        outcome["expected_status"] = response.status_code in event["expect_status"]
-                        if expected_json is not None:
-                            try:
-                                matched, mismatch = _matches_subset(response.json(), expected_json)
-                            except ValueError:
-                                matched, mismatch = False, "response body is not valid JSON"
-                            outcome["expected_json"] = matched
-                            if mismatch:
-                                outcome["error"] = mismatch
-                        outcome["passed"] = (
-                            outcome["expected_status"] and outcome["expected_json"]
-                        )
-                        retryable = response.status_code in retry["retry_on"]
+                        ) as response:
+                            outcome["status_code"] = response.status_code
+                            response_body = await _read_limited_response_body(response)
+                            outcome["latency_ms"] = round(
+                                (time.perf_counter() - started_attempt) * 1000, 2
+                            )
+                            outcome["expected_status"] = (
+                                response.status_code in event["expect_status"]
+                            )
+                            if response_body is None:
+                                outcome["expected_json"] = False
+                                outcome["error"] = (
+                                    "response body exceeds the 2 MiB safety limit"
+                                )
+                            elif expected_json is not None:
+                                try:
+                                    matched, mismatch = _matches_subset(
+                                        json.loads(response_body), expected_json
+                                    )
+                                except ValueError:
+                                    matched, mismatch = (
+                                        False,
+                                        "response body is not valid JSON",
+                                    )
+                                outcome["expected_json"] = matched
+                                if mismatch:
+                                    outcome["error"] = mismatch
+                            outcome["passed"] = (
+                                outcome["expected_status"] and outcome["expected_json"]
+                            )
+                            retryable = response.status_code in retry["retry_on"]
                     except httpx.TimeoutException:
                         outcome["latency_ms"] = round(
                             (time.perf_counter() - started_attempt) * 1000, 2
@@ -364,7 +406,8 @@ async def run_scenario(
                 "passed": False,
             }
             try:
-                response = await client.get(
+                async with client.stream(
+                    "GET",
                     verification_url,
                     headers={
                         "User-Agent": f"HookStorm/{__version__} (+https://github.com/blvxx/HookStorm)",
@@ -372,20 +415,30 @@ async def run_scenario(
                         **verification_auth_headers,
                     },
                     timeout=verify_config["timeout_ms"] / 1000,
-                )
-                verification["status_code"] = response.status_code
-                verification["latency_ms"] = round(
-                    (time.perf_counter() - verify_started) * 1000, 2
-                )
-                verification["expected_status"] = (
-                    response.status_code in verify_config["expect_status"]
-                )
-                try:
-                    matched, mismatch = _matches_subset(
-                        response.json(), verify_config["expect_json"]
+                ) as response:
+                    verification["status_code"] = response.status_code
+                    response_body = await _read_limited_response_body(response)
+                    verification["latency_ms"] = round(
+                        (time.perf_counter() - verify_started) * 1000, 2
                     )
-                except ValueError:
-                    matched, mismatch = False, "verification response body is not valid JSON"
+                    verification["expected_status"] = (
+                        response.status_code in verify_config["expect_status"]
+                    )
+                    if response_body is None:
+                        matched, mismatch = (
+                            False,
+                            "verification response body exceeds the 2 MiB safety limit",
+                        )
+                    else:
+                        try:
+                            matched, mismatch = _matches_subset(
+                                json.loads(response_body), verify_config["expect_json"]
+                            )
+                        except ValueError:
+                            matched, mismatch = (
+                                False,
+                                "verification response body is not valid JSON",
+                            )
                 verification["expected_json"] = matched
                 if mismatch:
                     verification["error"] = mismatch
