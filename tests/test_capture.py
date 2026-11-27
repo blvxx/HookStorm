@@ -362,6 +362,22 @@ def test_captured_scenario_can_later_select_provider_profile(tmp_path) -> None:
     assert profiled["delivery"]["signature"] == "valid"
     assert profiled["delivery"]["signature_provider"] == "stripe"
 
+def test_capture_rejects_malformed_request_path_without_mutating_store(tmp_path) -> None:
+    store = CaptureStore(tmp_path / "invalid-path.yaml")
+
+    with pytest.raises(CaptureError, match="request target path is invalid"):
+        store.record(
+            {"Content-Type": "application/json"},
+            b'{"ok":true}',
+            request_path="//[",
+        )
+
+    assert store.events == []
+    assert store.capture_events == []
+    assert store.total_body_bytes == 0
+    assert not store.output.exists()
+
+
 def test_capture_rejects_duplicate_json_keys_at_any_depth(tmp_path) -> None:
     store = CaptureStore(tmp_path / "duplicate-keys.yaml")
 
