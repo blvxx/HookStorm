@@ -344,13 +344,16 @@ footer{{margin-top:32px;color:GrayText;font-size:.8rem}}
   const expandButton = document.getElementById("expand-all");
   const waterfallView = document.getElementById("waterfall-view");
   const waterfallRows = Array.from(document.querySelectorAll(".waterfall-row"));
-  const originalOrder = new Map(cards.map((card, index) => [card, index]));
+  const originalCardOrder = new Map(cards.map((card, index) => [card, index]));
+  const originalWaterfallOrder = new Map(
+    waterfallRows.map((row, index) => [row, index])
+  );
   const valueFor = (node, mode) => {{
     if (mode === "latency") return Number(node.dataset.totalLatencyMs);
     if (mode === "attempts") return Number(node.dataset.attempts);
     return Number(node.dataset.startMs);
   }};
-  const sortNodes = (nodes, container, mode) => {{
+  const sortNodes = (nodes, container, originalOrder, mode) => {{
     const direction = mode === "time" ? 1 : -1;
     const ordered = [...nodes].sort((left, right) => {{
       const difference = valueFor(left, mode) - valueFor(right, mode);
@@ -362,8 +365,13 @@ footer{{margin-top:32px;color:GrayText;font-size:.8rem}}
   }};
   const sortCards = () => {{
     const mode = sortFilter.value;
-    sortNodes(cards, document.getElementById("timeline"), mode);
-    sortNodes(waterfallRows, document.getElementById("waterfall-rows"), mode);
+    sortNodes(cards, document.getElementById("timeline"), originalCardOrder, mode);
+    sortNodes(
+      waterfallRows,
+      document.getElementById("waterfall-rows"),
+      originalWaterfallOrder,
+      mode
+    );
   }};
   const setView = () => {{
     const waterfall = viewFilter.value === "waterfall";
