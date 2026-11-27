@@ -12,6 +12,12 @@ The project is an **alpha candidate** from an engineering perspective, but this 
 
 After the PR is reviewed and merged, the final release commit must pass the release gates again. Re-run this review against that exact commit before tagging.
 
+## Product validation is a separate gate
+
+Engineering readiness does not establish that independent teams need or will repeatedly use HookStorm. At the time of this review, no independent user runs, repeat usage, CI adoption, or willingness to pay have been established. Do not interpret green CI, repository size, or feature coverage as evidence of product-market fit.
+
+The next product step is a small, hands-on validation experiment described in [User validation plan](user-validation.md): start with Python backend teams that own inbound payment/order webhooks, have them run the committed-side-effect/lost-acknowledgement scenario against an isolated endpoint, and record whether they adapt it to their own service or add it to CI. Avoid further feature expansion or hosted/paid infrastructure until independent use provides a concrete reason.
+
 ## Evidence already present in the repository
 
 | Area | Evidence | Assessment |
@@ -29,7 +35,7 @@ After the PR is reviewed and merged, the final release commit must pass the rele
 
 ## Latest validation evidence
 
-The current PR head `5981904934214c4bb740b8ea7f927302e3513669` was validated on 2026-11-27. The six-environment CI run, documentation build, webhook integration, and Composite Action E2E all completed successfully on this head.
+The last complete validation of the source, README, user-validation guide, and repository hygiene checks was on PR commit `83d45e467e06c19d0e871b04f05352fa25286f23` (2026-11-27). Its six-environment CI matrix plus Docker smoke, documentation build, webhook integration, and Composite Action E2E all completed successfully. This review-file refresh is documentation-only; the final PR head must pass the same gates before merge.
 
 | Check | Result |
 |---|---|
