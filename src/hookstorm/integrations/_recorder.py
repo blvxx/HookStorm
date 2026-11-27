@@ -11,6 +11,8 @@ import threading
 import typing
 import zlib
 
+from hookstorm.json_limits import ensure_json_text_depth
+
 
 _DEFAULT_MAX_BODY_BYTES = 1_048_576
 _DEFAULT_MAX_TOTAL_BODY_BYTES = 8 * 1_048_576
@@ -261,8 +263,10 @@ class WebhookRecorder:
 
         decoded = self._decode_body(headers, raw_body)
         try:
+            source_text = decoded.decode("utf-8")
+            ensure_json_text_depth(source_text)
             payload = json.loads(
-                decoded.decode("utf-8"),
+                source_text,
                 object_pairs_hook=self._reject_duplicate_keys,
             )
         except (UnicodeDecodeError, ValueError, RecursionError) as exc:
