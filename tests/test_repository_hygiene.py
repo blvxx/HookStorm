@@ -128,3 +128,29 @@ def test_zensical_documentation_config_and_build_workflow_exist() -> None:
     steps = workflow["jobs"]["build"]["steps"]
     assert any("zensical build" == step.get("run") for step in steps)
     assert any(".[docs]" in step.get("run", "") for step in steps)
+
+def test_pages_deployment_is_main_only_and_uses_least_privilege_jobs() -> None:
+    workflow = yaml.safe_load(
+        (ROOT / ".github/workflows/pages.yml").read_text(encoding="utf-8")
+    )
+    assert workflow["on"]["push"]["branches"] == ["main"]
+    assert "pull_request" not in workflow["on"]
+    assert workflow["permissions"] == {"contents": "read"}
+    assert workflow["jobs"]["build"]["permissions"] == {"contents": "read"}
+    assert workflow["jobs"]["deploy"]["needs"] == "build"
+    assert workflow["jobs"]["deploy"]["permissions"] == {
+        "pages": "write",
+        "id-token": "write",
+    }
+    assert workflow["jobs"]["deploy"]["environment"]["name"] == "github-pages"
+
+    actions = [
+        step["uses"]
+        for job in workflow["jobs"].values()
+        for step in job["steps"]
+        if "uses" in step
+    ]
+    assert "actions/configure-pages@45bfe0192ca1faeb007ade9deae92b16b8254a0d" in actions
+    assert "actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9" in actions
+    assert "actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346" in actions
+    assert any(step.get("run") == "zensical build" for step in workflow["jobs"]["build"]["steps"])
