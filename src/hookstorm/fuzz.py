@@ -252,11 +252,14 @@ def _write_case(directory: Path, name: str, scenario: dict[str, Any]) -> str:
     """Write a replay case exclusively with owner-only permissions on POSIX."""
     directory.mkdir(parents=True, exist_ok=True)
     path = directory / name
-    descriptor = os.open(
-        path,
-        os.O_WRONLY | os.O_CREAT | os.O_EXCL,
-        0o600,
-    )
+    try:
+        descriptor = os.open(
+            path,
+            os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+            0o600,
+        )
+    except FileExistsError as exc:
+        raise FileExistsError(f"Refusing to overwrite fuzz case: {path}") from exc
     try:
         if os.name == "posix":
             os.fchmod(descriptor, 0o600)
