@@ -194,7 +194,8 @@ class CaptureStore:
             raise
         except (UnicodeDecodeError, ValueError, RecursionError) as exc:
             raise CaptureError(
-                "capture accepts valid UTF-8 JSON request bodies within parser limits"
+                "capture accepts valid UTF-8 JSON request bodies within parser limits: "
+                f"{exc}"
             ) from exc
 
         normalized_headers: dict[str, str] = {}
