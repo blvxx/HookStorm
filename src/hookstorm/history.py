@@ -248,6 +248,8 @@ def _require_finite_non_negative_number(value: Any, label: str) -> float:
 
 def _validate_run_result(result: dict[str, Any], label: str) -> None:
     """Validate the metrics and delivery identities used by history comparisons."""
+    if not isinstance(result, dict):
+        raise HistoryError(f"{label} must be a JSON object")
     for key in ("run_id", "scenario", "started_at", "target"):
         value = result.get(key)
         if not isinstance(value, str) or not value.strip():
@@ -333,6 +335,15 @@ def _validate_run_result(result: dict[str, Any], label: str) -> None:
                     f"{attempt_label}.injected_fault must be connect_error or response_loss"
                 )
 
+        final_attempt_passed = attempts[-1].get("passed")
+        if (
+            final_attempt_passed is not None
+            and final_attempt_passed is not item["passed"]
+        ):
+            raise HistoryError(
+                f"{label} delivery {index}.passed does not match its final attempt"
+            )
+
         if "schedule_after_ms" in item:
             _require_non_negative_integer(
                 item["schedule_after_ms"],
@@ -367,6 +378,13 @@ def _validate_run_result(result: dict[str, Any], label: str) -> None:
                 raise HistoryError(
                     f"{label} verification.status_code must be null or an HTTP status code"
                 )
+
+    verification_passed = verification is None or verification.get("passed") is True
+    expected_success = actual_passed == len(deliveries) and verification_passed
+    if summary["success"] is not expected_success:
+        raise HistoryError(
+            f"{label} summary.success does not match delivery and verification outcomes"
+        )
 
 
 def save_run(result: dict[str, Any], path: str | Path | None = None) -> str:
@@ -454,6 +472,7 @@ def list_runs(
         for row in rows:
             item = dict(row)
             result = json.loads(item.pop("result_json"))
+            _validate_run_result(result, "Stored run")
             item["success"] = bool(item["success"])
             item.update(result_metrics(result))
             output.append(item)
@@ -478,6 +497,7 @@ def get_run(run_id: str, path: str | Path | None = None) -> dict[str, Any]:
         if row is None:
             raise HistoryError(f"Run '{run_id}' was not found in local history")
         result = json.loads(row["result_json"])
+        _validate_run_result(result, "Stored run")
         result["history"] = {
             "success": bool(row["success"]),
             "database_run_id": row["run_id"],
