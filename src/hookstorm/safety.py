@@ -7,9 +7,28 @@ import socket
 from dataclasses import dataclass
 from urllib.parse import urlsplit
 
+import idna
+
 
 class UnsafeTargetError(ValueError):
     """Raised when a target is outside the default local-only policy."""
+
+
+def canonicalize_hostname(hostname: str) -> str:
+    """Return the canonical host spelling used by HTTPX/httpcore for DNS pin keys.
+
+    HTTPX converts IDNs to IDNA ASCII before passing the host to httpcore. Pin
+    maps must use the same form or a Unicode hostname could miss the pin and
+    fall back to a fresh DNS lookup.
+    """
+    normalized = hostname.rstrip(".").lower()
+    try:
+        return ipaddress.ip_address(normalized).compressed.lower()
+    except ValueError:
+        try:
+            return idna.encode(normalized).decode("ascii").lower()
+        except idna.IDNAError as exc:
+            raise UnsafeTargetError("Target hostname is not a valid IDNA hostname") from exc
 
 
 def _is_literal_loopback(hostname: str) -> bool:
@@ -104,9 +123,10 @@ def resolve_target(
         allow_insecure_http=allow_insecure_http,
     )
     parsed = urlsplit(validated)
-    hostname = (parsed.hostname or "").rstrip(".").lower()
+    raw_hostname = parsed.hostname or ""
+    hostname = canonicalize_hostname(raw_hostname)
     try:
-        literal = ipaddress.ip_address(hostname)
+        literal = ipaddress.ip_address(raw_hostname)
     except ValueError:
         literal = None
 
@@ -115,6 +135,7 @@ def resolve_target(
 
     port = parsed.port or (443 if parsed.scheme == "https" else 80)
     try:
+        # Resolve exactly the ASCII IDNA form that HTTPX will pass to httpcore.
         resolved = socket.getaddrinfo(hostname, port, type=socket.SOCK_STREAM)
     except OSError as exc:
         raise UnsafeTargetError(
