@@ -26,7 +26,7 @@ def canonicalize_hostname(hostname: str) -> str:
         return ipaddress.ip_address(normalized).compressed.lower()
     except ValueError:
         try:
-            return idna.encode(normalized).decode("ascii").lower()
+            return idna.encode(normalized, uts46=True).decode("ascii").lower()
         except idna.IDNAError as exc:
             raise UnsafeTargetError("Target hostname is not a valid IDNA hostname") from exc
 
@@ -64,6 +64,9 @@ def validate_target(
         raise UnsafeTargetError("Target URL port must be between 1 and 65535")
     if any(character.isspace() for character in parsed.hostname):
         raise UnsafeTargetError("Target URL hostname must not contain whitespace")
+    # Fail before network access if the hostname cannot be normalized to
+    # the same IDNA ASCII representation HTTPX/httpcore will use.
+    canonicalize_hostname(parsed.hostname)
     if parsed.username or parsed.password:
         raise UnsafeTargetError("Target URL must not contain embedded credentials")
     if parsed.fragment:
