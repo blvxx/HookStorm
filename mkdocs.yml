@@ -1,0 +1,45 @@
+site_name: HookStorm
+site_description: Local-first webhook reliability and idempotency testing
+site_url: https://blvxx.github.io/HookStorm/
+repo_url: https://github.com/blvxx/HookStorm
+edit_uri: edit/main/docs/
+docs_dir: docs
+site_dir: site
+use_directory_urls: true
+
+theme:
+  variant: classic
+
+markdown_extensions:
+  - admonition
+  - attr_list
+  - def_list
+  - tables
+  - toc:
+      permalink: true
+  - pymdownx.details
+  - pymdownx.superfences
+
+nav:
+  - Home: index.md
+  - Getting started:
+      - Installation: installation.md
+      - Scenario format: scenario-format.md
+      - Provider profiles: provider-profiles.md
+  - Integrations:
+      - FastAPI and Flask: framework-integrations.md
+      - Pytest: pytest-integration.md
+      - GitHub Actions: github-action.md
+      - CI workflows: ci-integration.md
+  - Testing capabilities:
+      - Ambiguous acknowledgements: ambiguous-acknowledgements.md
+      - Request fault injection: fault-injection.md
+      - Fuzzing: fuzzing.md
+      - Capture: capture.md
+      - JSON Schema: json-schema.md
+  - Project:
+      - Architecture: architecture.md
+      - Release review: alpha-release-review.md
+      - Release checklist: release-checklist.md
+      - PyPI publishing: pypi-publishing.md
+      - Changelog: ../CHANGELOG.md
