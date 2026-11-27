@@ -77,9 +77,18 @@ def test_release_workflow_smoke_tests_wheel_and_source_distribution() -> None:
         if step.get("name") == "Smoke-test wheel and source distribution"
     )
     script = smoke_test["run"]
-    assert "dist/*.whl" in script
-    assert "dist/*.tar.gz" in script
-    assert script.count("hookstorm validate examples/standard-webhooks.yaml") == 2
+    assert script.count("python scripts/smoke_wheel.py dist/*.whl") == 1
+    assert script.count("python scripts/smoke_wheel.py dist/*.tar.gz") == 1
+    assert "examples/" not in script
+
+    package_smoke = (
+        Path(__file__).resolve().parents[1] / "scripts" / "smoke_wheel.py"
+    ).read_text(encoding="utf-8")
+    assert '"init"' in package_smoke
+    assert '"--no-workflow"' in package_smoke
+    assert '"validate"' in package_smoke
+    assert "smoke-scenario.yaml" in package_smoke
+    assert "examples/" not in package_smoke
 
     smoke_test_index = steps.index(smoke_test)
     upload_index = next(
