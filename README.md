@@ -99,7 +99,7 @@ Export a scenario as a pytest integration test:
 hookstorm export-pytest examples/payment-retry.yaml --output tests/test_payment_webhook.py
 ~~~
 
-The generated test reads its target from `HOOKSTORM_TARGET` and the optional HMAC secret from `HOOKSTORM_SECRET`. It does not embed an endpoint or secret. Remote targets remain blocked unless `HOOKSTORM_ALLOW_REMOTE=1` is explicitly set.
+The generated test reads its target from `HOOKSTORM_TARGET` and the optional HMAC secret from `HOOKSTORM_SECRET`. It does not embed an endpoint or secret. Remote HTTPS requires `HOOKSTORM_ALLOW_REMOTE=1`; remote plaintext HTTP additionally requires `HOOKSTORM_ALLOW_INSECURE_HTTP=1`.
 
 ~~~bash
 # Linux / macOS
@@ -151,9 +151,9 @@ hookstorm init --signature-provider github \\
   --event-type issues.opened --event-id evt_issues_opened_001
 ~~~
 
-Edit the generated scenario to match your actual payload and response. Then configure the GitHub `staging` Environment with `HOOKSTORM_TARGET_URL` as a variable and `HOOKSTORM_SECRET` as a secret. The wizard never writes endpoint URLs or signing secrets into generated files. Existing files are preserved; use `--force` only when you intentionally want to replace both generated files. Use `--no-workflow` to generate only the scenario.
+Edit the generated scenario to match your actual payload and response. Then configure the GitHub `staging` Environment with `HOOKSTORM_TARGET_URL` as a variable and `HOOKSTORM_SECRET` as a secret. The optional `HOOKSTORM_ALLOW_INSECURE_HTTP` variable defaults to `0` and should be set to `1` only for a controlled non-loopback staging endpoint that cannot use HTTPS. The wizard never writes endpoint URLs or signing secrets into generated files. Existing files are preserved; use `--force` only when you intentionally want to replace both generated files. Use `--no-workflow` to generate only the scenario.
 
-The generated workflow targets a dedicated staging endpoint with the explicit `--allow-remote` opt-in, skips fork-originated PRs, and updates the baseline only from trusted successful runs on `main`. Before sending any webhook event, its preflight step validates the scenario, checks that the required environment variables are present, and verifies staging DNS/TCP/TLS connectivity. Protect the staging Environment with required reviewers before enabling it for same-repository pull requests. See [CI integration for application repositories](docs/ci-integration.md) for the complete setup.
+The generated workflow targets a dedicated staging endpoint with the explicit `--allow-remote` opt-in, skips fork-originated PRs, and updates the baseline only from trusted successful runs on `main`. HTTPS is expected; non-loopback HTTP is blocked unless the optional `HOOKSTORM_ALLOW_INSECURE_HTTP=1` environment variable is explicitly set. Before sending any webhook event, its preflight step validates the scenario, checks that the required environment variables are present, and verifies staging DNS/TCP/TLS connectivity. Protect the staging Environment with required reviewers before enabling it for same-repository pull requests. See [CI integration for application repositories](docs/ci-integration.md) for the complete setup.
 
 Run the same checks locally before the first integration run. Set the endpoint and, for signed scenarios, the HMAC secret:
 
@@ -254,7 +254,7 @@ hookstorm run examples/idempotency-verification.yaml \
 
 The included receiver uses SQLite with a unique (run_id, event_id) key to simulate an idempotent business write. It exposes the run-scoped count at GET /__hookstorm/state. The scenario sends one event three times and verifies that only one row was created.
 
-Verification URLs follow the same local-only default as webhook targets. Use --allow-remote only for an authorized test environment. HookStorm stores only the probe URL path (not query parameters), status, timing, and assertion outcome; it never stores the response body or authentication values.
+Verification URLs follow the same local-only default as webhook targets. Use `--allow-remote` for an authorized remote HTTPS test environment; non-loopback HTTP also requires `--allow-insecure-http`. Authenticated remote verification probes still require HTTPS. HookStorm stores only the probe URL path (not query parameters), status, timing, and assertion outcome; it never stores the response body or authentication values.
 
 Private verification endpoints can use environment-backed authentication. The scenario stores only the environment variable name, never the credential itself:
 
@@ -406,7 +406,7 @@ A copy-ready GitHub Actions workflow and matching staging scenario are available
 
 ## Safety and privacy
 
-- **Local-only by default.** Targets must resolve to loopback. A remote URL requires the explicit --allow-remote switch.
+- **Local-only by default.** Targets must resolve to loopback. Remote HTTPS requires `--allow-remote`; non-loopback HTTP additionally requires the explicit `--allow-insecure-http` opt-in.
 - Only send tests to systems you own or are authorized to test. Do not point chaos scenarios at a production payment endpoint.
 - Redirects are not followed. Credentials embedded in target URLs are rejected.
 - HMAC secrets are read from HOOKSTORM_SECRET (or a custom --secret-env variable), not from the scenario file.
@@ -425,6 +425,8 @@ pytest
 ~~~
 
 CI tests Python 3.11, 3.12, and 3.13 on Linux, plus Python 3.12 on Windows and macOS. Every matrix job runs lint, tests, builds the wheel, and smoke-tests the installed wheel in a clean virtual environment.
+
+Webhook responses and business-state verification responses are streamed with a 2 MiB decoded-body limit. Larger responses fail the corresponding assertion rather than being buffered without a bound.
 
 For release gates and artifact checks, see [the release checklist](docs/release-checklist.md) and [PyPI Trusted Publishing guide](docs/pypi-publishing.md).
 
