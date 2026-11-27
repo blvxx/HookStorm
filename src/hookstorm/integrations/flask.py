@@ -40,8 +40,13 @@ def register_endpoint(
     )
 
     def receive_webhook():
-        raw_body = request.get_data(cache=False, as_text=False)
         try:
+            raw_body = request.stream.read(active_recorder.max_body_bytes + 1)
+            if len(raw_body) > active_recorder.max_body_bytes:
+                raise WebhookRequestError(
+                    f"request body exceeds the {active_recorder.max_body_bytes}-byte limit",
+                    status_code=413,
+                )
             event = active_recorder.record(request.headers, raw_body)
         except WebhookRequestError as exc:
             return jsonify({"ok": False, "error": str(exc)}), exc.status_code
