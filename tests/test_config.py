@@ -272,6 +272,19 @@ def test_standard_webhooks_event_id_rejects_period_delimiter() -> None:
         validate_scenario(data)
 
 
+def test_standard_webhooks_event_id_may_contain_period_when_unsigned() -> None:
+    data = valid_scenario()
+    data["delivery"] = {
+        "signature_provider": "standard_webhooks",
+        "signature": "none",
+    }
+    data["events"][0]["event_id"] = "evt.with.periods"
+
+    normalized = validate_scenario(data)
+
+    assert normalized["events"][0]["event_id"] == "evt.with.periods"
+
+
 def test_rejects_standard_webhooks_managed_headers() -> None:
     data = valid_scenario()
     data["events"][0]["headers"] = {"webhook-signature": "attacker"}
