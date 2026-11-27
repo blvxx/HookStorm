@@ -34,7 +34,6 @@ The demo receiver binds to `127.0.0.1` only. The command writes a self-contained
 | Ambiguous acknowledgements | Deterministic pre-send errors, dropped acknowledgements, and truncated response bodies after processing |
 | Signatures | Generic HMAC, Stripe, GitHub, Shopify, Standard Webhooks v1 |
 | Assertions | HTTP status, nested JSON, and optional read-only business-state verification |
-| Seeded fuzzing | Reproducible JSON payload mutations, bounded failure minimization, and replayable YAML cases |
 | Capture | Loopback-only JSON webhook receiver, header redaction, and atomic scenario export |
 | Fuzzing | Seeded JSON payload mutations, replayable failing cases, and bounded failure minimization |
 | Reports and regression checks | HTML, JSON, JUnit, local SQLite history, portable baselines |
@@ -74,7 +73,6 @@ Read [SECURITY.md](SECURITY.md) and the [architecture notes](docs/architecture.m
 - [Pytest integration API](docs/pytest-integration.md)
 - [Loopback webhook capture](docs/capture.md)
 - [Provider profiles and retry-policy notes](docs/provider-profiles.md)
-- [Seeded fuzzing and failure minimization](docs/fuzzing.md)
 - [Ambiguous acknowledgements and idempotency](docs/ambiguous-acknowledgements.md)
 - [Architecture and current limitations](docs/architecture.md)
 - [CI integration for application repositories](docs/ci-integration.md)
@@ -84,8 +82,7 @@ Read [SECURITY.md](SECURITY.md) and the [architecture notes](docs/architecture.m
 
 Planned work, in priority order:
 
-1. Extend seeded payload fuzzing to vary event order, duplicate deliveries, delays, and controlled failure injection.
-2. Expand fuzzing to vary event order, duplicate deliveries, delays, and controlled transport failures.
+1. Extend seeded payload fuzzing to vary event order, duplicate deliveries, delays, and controlled transport failures.
 3. Expand request fault injection for malformed JSON, content types, compression, chunking, partial uploads, content-length mismatches, slow bodies, secret rotation, and large payloads.
 4. A reusable composite GitHub Action with SHA-pinned dependencies.
 5. Small FastAPI / Flask helpers that keep framework adapters optional.
