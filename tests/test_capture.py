@@ -202,10 +202,19 @@ def test_capture_http_statuses_distinguish_quota_size_and_storage_errors(
     def fail_replace(_source, _destination):
         raise OSError("simulated disk error")
 
+    unexpected_closes: list[int] = []
+    real_close = capture_module.os.close
+
+    def track_close(descriptor: int) -> None:
+        unexpected_closes.append(descriptor)
+        real_close(descriptor)
+
     monkeypatch.setattr(capture_module.os, "replace", fail_replace)
+    monkeypatch.setattr(capture_module.os, "close", track_close)
     try:
         status, body = _send_json(storage_server.server_address[1], {"stored": False})
         assert status == 500
+        assert unexpected_closes == []
         assert body["message"] == "capture could not be persisted"
         assert storage_store.events == []
         assert storage_store.capture_events == []
