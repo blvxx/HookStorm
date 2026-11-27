@@ -19,6 +19,8 @@
 
 ### Release hardening
 
+- Attach the validated wheel and source distribution to the published GitHub Release from a separate least-privilege job.
+
 - Reject malformed, zero, and out-of-range target URL ports before opening a connection.
 - Reject duplicate YAML mapping keys instead of silently accepting the last value.
 - Add a configurable scenario-wide runtime budget with worst-case preflight estimation and hard cancellation; preserve existing baseline fingerprints for the default budget.
