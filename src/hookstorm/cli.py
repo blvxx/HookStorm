@@ -170,6 +170,31 @@ def _parser() -> argparse.ArgumentParser:
     return parser
 
 
+def _injected_fault_label(fault: str) -> str:
+    return {
+        "connect_error": "Connect fault",
+        "response_loss": "ACK loss",
+    }.get(fault, fault)
+
+
+def _injected_attempts(result: dict) -> list[tuple[dict, dict]]:
+    return [
+        (delivery, attempt)
+        for delivery in result.get("deliveries", [])
+        for attempt in delivery.get("attempts", [])
+        if attempt.get("injected_fault") is not None
+    ]
+
+
+def _print_injected_fault(delivery: dict, attempt: dict, index: int) -> None:
+    fault = _injected_fault_label(attempt["injected_fault"])
+    attempt_number = attempt.get("attempt", index)
+    detail = attempt.get("error") or "No HTTP acknowledgement was observed"
+    print(
+        f"   attempt {attempt_number}: {fault} · {delivery['event_id']} · {detail}"
+    )
+
+
 def _print_summary(result: dict) -> None:
     summary = result["summary"]
     state = "PASS" if summary["success"] else "FAIL"
@@ -179,6 +204,9 @@ def _print_summary(result: dict) -> None:
         f"Deliveries: {summary['passed']}/{summary['total_deliveries']} passed  |  "
         f"Attempts: {summary['attempts']}  |  Duration: {result['duration_ms']:.0f} ms"
     )
+    injected_attempts = _injected_attempts(result)
+    if injected_attempts:
+        print(f"Injected faults: {len(injected_attempts)}")
     for delivery in result["deliveries"]:
         latest = delivery["attempts"][-1]
         mark = "✓" if delivery["passed"] else "✗"
@@ -188,7 +216,10 @@ def _print_summary(result: dict) -> None:
             f"duplicate={delivery['duplicate_index']} attempts={len(delivery['attempts'])} "
             f"status={status}"
         )
-        if latest["error"]:
+        for index, attempt in enumerate(delivery["attempts"], start=1):
+            if attempt.get("injected_fault") is not None:
+                _print_injected_fault(delivery, attempt, index)
+        if latest["error"] and latest.get("injected_fault") is None:
             print(f"   {latest['error']}")
     verification = result.get("verification")
     if verification is not None:
@@ -240,6 +271,9 @@ def _history_show_command(args: argparse.Namespace) -> int:
         f"p50: {metrics['p50_latency_ms']:.2f} ms · "
         f"p95: {metrics['p95_latency_ms']:.2f} ms"
     )
+    injected_attempts = _injected_attempts(result)
+    if injected_attempts:
+        print(f"Injected faults: {len(injected_attempts)}")
     for delivery in result.get("deliveries", []):
         attempts = delivery.get("attempts", [])
         latest = attempts[-1] if attempts else {}
@@ -250,6 +284,9 @@ def _history_show_command(args: argparse.Namespace) -> int:
             f"[{delivery.get('event_id')}] duplicate={delivery.get('duplicate_index', 0)} "
             f"attempts={len(attempts)} HTTP={status if status is not None else 'ERR'}"
         )
+        for index, attempt in enumerate(attempts, start=1):
+            if attempt.get("injected_fault") is not None:
+                _print_injected_fault(delivery, attempt, index)
     return 0
 
 

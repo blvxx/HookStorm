@@ -396,3 +396,49 @@ def test_init_flags_support_noninteractive_scenario_configuration(
     assert scenario["events"][0]["id"] == "order.updated"
     assert scenario["events"][0]["event_id"] == "evt_order_updated_001"
     capsys.readouterr()
+
+
+def test_run_and_history_show_preserve_injected_fault_diagnostics(
+    receiver, tmp_path, capsys
+) -> None:
+    base, _state = receiver
+    scenario = tmp_path / "fault-diagnostics.yaml"
+    scenario.write_text(
+        """version: 1
+name: CLI injected fault diagnostics
+retry:
+  max_attempts: 2
+  backoff_ms: 1
+delivery:
+  fault_injection:
+    connect_error_attempts: [1]
+events:
+  - id: ping
+    event_id: evt_cli_fault
+    payload: {}
+""",
+        encoding="utf-8",
+    )
+    database = tmp_path / "history.sqlite3"
+
+    assert main([
+        "run",
+        str(scenario),
+        "--target",
+        base,
+        "--history-db",
+        str(database),
+        "--output",
+        str(tmp_path / "fault-report.html"),
+    ]) == 0
+
+    output = capsys.readouterr().out
+    assert "Injected faults: 1" in output
+    assert "Connect fault" in output
+    run_id = list_runs(database)[0]["run_id"]
+
+    assert main(["history", "show", run_id, "--db", str(database)]) == 0
+    details = capsys.readouterr().out
+    assert "Injected faults: 1" in details
+    assert "Connect fault" in details
+    assert "before request reached the endpoint" in details
