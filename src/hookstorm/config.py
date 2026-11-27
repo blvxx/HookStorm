@@ -48,7 +48,7 @@ _ALLOWED_TOP_LEVEL = {
 }
 _ALLOWED_DELIVERY = {
     "order", "duplicate_count", "delay_ms", "timeout_ms", "signature", "concurrency",
-    "signature_provider", "signature_timestamp_offset_seconds",
+    "signature_provider", "signature_timestamp_offset_seconds", "fault_injection",
 }
 _ALLOWED_RETRY = {"max_attempts", "backoff_ms", "retry_on"}
 _ALLOWED_EVENT = {
@@ -121,6 +121,37 @@ def _is_safe_header_value(value: str, *, allow_horizontal_tab: bool = True) -> b
     return True
 
 
+def _validate_fault_injection(value: Any, where: str) -> dict[str, list[int]]:
+    """Validate deterministic per-attempt client-side transport fault plans."""
+    if not isinstance(value, dict):
+        raise ScenarioError(f"{where} must be a mapping")
+    allowed = {"connect_error_attempts", "response_loss_attempts"}
+    _unknown_keys(value, allowed, where)
+
+    normalized: dict[str, list[int]] = {}
+    for field in sorted(allowed):
+        attempts = value.get(field, [])
+        if not isinstance(attempts, list):
+            raise ScenarioError(f"{where}.{field} must be a list of attempt numbers")
+        parsed = [
+            _integer(attempt, f"{where}.{field} entry", minimum=1, maximum=10)
+            for attempt in attempts
+        ]
+        if len(parsed) != len(set(parsed)):
+            raise ScenarioError(f"{where}.{field} must not contain duplicate attempt numbers")
+        normalized[field] = sorted(parsed)
+
+    overlap = set(normalized["connect_error_attempts"]) & set(
+        normalized["response_loss_attempts"]
+    )
+    if overlap:
+        numbers = ", ".join(str(number) for number in sorted(overlap))
+        raise ScenarioError(
+            f"{where} cannot inject more than one fault on the same attempt ({numbers})"
+        )
+    return normalized
+
+
 def _validate_delivery(value: Any, where: str, *, allow_order: bool = True) -> dict[str, Any]:
     if value is None:
         return {}
@@ -158,6 +189,10 @@ def _validate_delivery(value: Any, where: str, *, allow_order: bool = True) -> d
         or result["signature"] not in {"none", "valid", "invalid", "missing"}
     ):
         raise ScenarioError(f"{where}.signature must be none, valid, invalid, or missing")
+    if "fault_injection" in result:
+        result["fault_injection"] = _validate_fault_injection(
+            result["fault_injection"], f"{where}.fault_injection"
+        )
     return result
 
 
@@ -435,6 +470,18 @@ def validate_scenario(data: Any) -> dict[str, Any]:
 
     for event in normalized_events:
         effective_delivery = {**delivery, **event["delivery"]}
+        fault_plan = effective_delivery.get("fault_injection", {})
+        for field in ("connect_error_attempts", "response_loss_attempts"):
+            invalid_attempts = [
+                number
+                for number in fault_plan.get(field, [])
+                if number > retry["max_attempts"]
+            ]
+            if invalid_attempts:
+                raise ScenarioError(
+                    f"events[].delivery.fault_injection.{field} entries must not exceed "
+                    f"retry.max_attempts={retry['max_attempts']}"
+                )
         signature_provider = effective_delivery.get("signature_provider", "generic")
         timestamp_offset = effective_delivery.get("signature_timestamp_offset_seconds", 0)
         if timestamp_offset and signature_provider not in {"stripe", "standard_webhooks"}:
