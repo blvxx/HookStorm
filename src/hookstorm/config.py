@@ -394,7 +394,7 @@ def _validate_verify(value: Any) -> dict[str, Any] | None:
     }
 
 
-def validate_scenario(data: Any) -> dict[str, Any]:
+def _validate_scenario(data: Any) -> dict[str, Any]:
     """Validate and normalize a parsed scenario mapping."""
     if not isinstance(data, dict):
         raise ScenarioError("Scenario root must be a YAML mapping")
@@ -713,6 +713,16 @@ def validate_scenario(data: Any) -> dict[str, Any]:
     if capture is not None:
         normalized_scenario["capture"] = capture
     return normalized_scenario
+
+
+def validate_scenario(data: Any) -> dict[str, Any]:
+    """Validate a scenario and normalize pathological nesting into a domain error."""
+    try:
+        return _validate_scenario(data)
+    except RecursionError as exc:
+        raise ScenarioError(
+            "Scenario nesting exceeds supported validation depth"
+        ) from exc
 
 
 def scenario_fingerprint(scenario: dict[str, Any]) -> str:
