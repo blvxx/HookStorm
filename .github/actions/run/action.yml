@@ -58,10 +58,10 @@ runs:
     - name: Install HookStorm
       shell: bash
       env:
-        HOOKSTORM_ACTION_PATH: ${{ github.action_path }}
+        HOOKSTORM_PROJECT_PATH: ${{ github.action_path }}/../../..
       run: |
         set -euo pipefail
-        python -m pip install --disable-pip-version-check "$HOOKSTORM_ACTION_PATH"
+        python -m pip install --disable-pip-version-check "$HOOKSTORM_PROJECT_PATH"
 
     - name: Validate and run scenario
       id: run
