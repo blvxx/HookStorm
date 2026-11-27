@@ -2,7 +2,7 @@
 
 HookStorm can run against a staging webhook endpoint and compare each run with a baseline recorded by a successful run on your default branch. This is useful for checking webhook contract behavior and detecting delivery or latency regressions before a change is released.
 
-The copy-ready example is in [examples/ci/webhook-regression.yml](../examples/ci/webhook-regression.yml). The matching scenario example is [examples/ci/webhook-regression.yaml](../examples/ci/webhook-regression.yaml).
+The copy-ready example is in [examples/ci/webhook-regression.yml](https://github.com/blvxx/HookStorm/blob/main/examples/ci/webhook-regression.yml). The matching scenario example is [examples/ci/webhook-regression.yaml](https://github.com/blvxx/HookStorm/blob/main/examples/ci/webhook-regression.yaml).
 
 ## Quick setup with the CLI
 
@@ -94,7 +94,7 @@ If the application needs to be deployed before testing, add your staging deploym
 
 ## 3. Copy the workflow
 
-Copy [examples/ci/webhook-regression.yml](../examples/ci/webhook-regression.yml) into your application repository at:
+Copy [examples/ci/webhook-regression.yml](https://github.com/blvxx/HookStorm/blob/main/examples/ci/webhook-regression.yml) into your application repository at:
 
 ```text
 .github/workflows/webhook-regression.yml
@@ -144,4 +144,4 @@ hookstorm history compare-file .hookstorm-baselines/webhook.json \
   --db .hookstorm/history.sqlite3 --latency-threshold-pct 20 --latency-min-delta-ms 25
 ```
 
-For the full scenario schema, see [scenario-format.md](scenario-format.md). For portable baseline format and CLI semantics, see the run history section in the [README](../README.md).
+For the full scenario schema, see [scenario-format.md](scenario-format.md). For portable baseline format and CLI semantics, see the run history section in the [README](https://github.com/blvxx/HookStorm/blob/main/README.md).
