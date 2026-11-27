@@ -143,11 +143,36 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
+  validate-scenario:
+    # Pull requests validate only the YAML contract; this job has no staging environment or secrets.
+    if: github.event_name == 'pull_request'
+    runs-on: ubuntu-latest
+    env:
+      HOOKSTORM_SCENARIO: {scenario}
+    steps:
+      - name: Check out application
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1
+        with:
+          persist-credentials: false
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0
+        with:
+          python-version: "3.12"
+
+      - name: Install HookStorm
+        run: >-
+          python -m pip install
+          "{install}"
+
+      - name: Validate scenario without staging access
+        run: hookstorm validate "$HOOKSTORM_SCENARIO"
+
   webhook-regression:
-    # Fork PRs never receive staging secrets or call the staging endpoint.
+    # Only trusted main-branch pushes and manual runs on main may access staging secrets.
     if: >-
-      github.event_name != 'pull_request' ||
-      github.event.pull_request.head.repo.full_name == github.repository
+      github.event_name == 'push' ||
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
     runs-on: ubuntu-latest
     environment: staging
     env:
