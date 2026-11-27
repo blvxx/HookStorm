@@ -29,7 +29,7 @@ jobs:
 
       - name: Run HookStorm scenario
         id: hookstorm
-        uses: blvxx/HookStorm/.github/actions/run@19e90aa400a06e6bf625108ce5ae6fb1a8d74e5d
+        uses: blvxx/HookStorm/.github/actions/run@7a1006aa943afdb4afb8eb67b10393a51f2319cb
         with:
           scenario: scenarios/webhook.yaml
           target-url: ${{ vars.HOOKSTORM_TARGET_URL }}
