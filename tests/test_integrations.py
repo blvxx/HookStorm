@@ -299,7 +299,7 @@ def test_recorder_bounds_total_body_memory_and_clear_resets_budget() -> None:
     recorder = WebhookRecorder(
         max_body_bytes=16,
         max_events=10,
-        max_total_body_bytes=20,
+        max_total_body_bytes=50,
     )
     recorder.record(_headers(), b'{"x":"123"}')
     with pytest.raises(WebhookRequestError) as full:
