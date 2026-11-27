@@ -1,5 +1,6 @@
 """Framework-independent recorder used by optional webhook test endpoints."""
 
+# ruff: noqa: I001 -- keep module-qualified stdlib imports explicit in this adapter.
 from __future__ import annotations
 
 import collections.abc
