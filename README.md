@@ -84,6 +84,7 @@ Read [SECURITY.md](SECURITY.md) and the [architecture notes](docs/architecture.m
 - [Architecture and current limitations](docs/architecture.md)
 - [CI integration for application repositories](docs/ci-integration.md)
 - [Alpha release readiness review](docs/alpha-release-review.md)
+- [Security and robustness audit](docs/security-audit.md)
 - [Release and PyPI publishing checklist](docs/release-checklist.md)
 
 ## Help validate the alpha
