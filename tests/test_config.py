@@ -468,8 +468,8 @@ def test_rejects_scenarios_whose_worst_case_exceeds_run_timeout() -> None:
 @pytest.mark.parametrize(
     "yaml_text",
     [
-        "version: 1\\nversion: 1\\nname: duplicate\\nevents: [{id: ping, event_id: evt_1}]\\n",
-        "version: 1\\nname: duplicate\\ndelivery:\\n  timeout_ms: 100\\n  timeout_ms: 200\\nevents: [{id: ping, event_id: evt_1}]\\n",
+        "version: 1\nversion: 1\nname: duplicate\nevents: [{id: ping, event_id: evt_1}]\n",
+        "version: 1\nname: duplicate\ndelivery:\n  timeout_ms: 100\n  timeout_ms: 200\nevents: [{id: ping, event_id: evt_1}]\n",
     ],
 )
 def test_load_scenario_rejects_duplicate_yaml_keys(tmp_path, yaml_text: str) -> None:
