@@ -265,6 +265,16 @@ _FAULT_ATTEMPT_FIELDS = (
     "connect_error_attempts",
     "response_loss_attempts",
     "response_body_error_attempts",
+    "malformed_json_attempts",
+    "wrong_content_type_attempts",
+    "gzip_body_attempts",
+    "deflate_body_attempts",
+    "invalid_gzip_attempts",
+    "invalid_deflate_attempts",
+    "chunked_transfer_attempts",
+    "malformed_chunked_attempts",
+    "partial_upload_attempts",
+    "content_length_mismatch_attempts",
 )
 
 
