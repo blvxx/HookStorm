@@ -4,6 +4,7 @@
 
 - Add Python 3.14 to the CI compatibility matrix and package classifiers.
 - Restrict local history databases and exported baseline files to owner-only POSIX permissions.
+- Smoke-test installed wheel and source distributions using only the generated scenario and the installed CLI.
 
 ## 0.1.0a1 — First public alpha preview
 
