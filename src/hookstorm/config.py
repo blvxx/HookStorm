@@ -12,6 +12,7 @@ from urllib.parse import urlsplit
 import yaml
 from yaml.events import AliasEvent
 
+from hookstorm.json_limits import ensure_value_depth
 from hookstorm.provider_profiles import PROVIDER_NAMES, provider_event, provider_headers
 from hookstorm.safety import validate_target
 
@@ -728,6 +729,10 @@ def _validate_scenario(data: Any) -> dict[str, Any]:
 
 def validate_scenario(data: Any) -> dict[str, Any]:
     """Validate a scenario and normalize pathological nesting into a domain error."""
+    try:
+        ensure_value_depth(data)
+    except ValueError as exc:
+        raise ScenarioError(str(exc)) from exc
     try:
         return _validate_scenario(data)
     except RecursionError as exc:
