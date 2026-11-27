@@ -823,7 +823,7 @@ def test_validate_scenario_rejects_excessive_json_nesting() -> None:
         payload = [payload]
     data["events"][0]["payload"] = payload
 
-    with pytest.raises(ScenarioError, match="nesting exceeds supported validation depth"):
+    with pytest.raises(ScenarioError, match="JSON nesting exceeds the 100-level safety limit"):
         validate_scenario(data)
 
 
