@@ -345,6 +345,7 @@
       "allOf": [
         {
           "not": {
+            "type": "object",
             "anyOf": [
               {
                 "required": [
