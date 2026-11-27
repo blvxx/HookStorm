@@ -116,6 +116,9 @@ def test_injected_partial_response_body_error_retries_after_receiver_commit(rece
     assert len(state["requests"]) == 2
     assert state["requests"][0]["event_id"] == state["requests"][1]["event_id"]
     assert len(state["effects"]) == 1
+    html_report = render_html(result)
+    assert "Body read error" in html_report
+    assert "partial response-body read error" in html_report
 
 
 def test_detects_duplicate_idempotency_response(receiver) -> None:
