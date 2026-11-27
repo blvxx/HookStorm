@@ -69,6 +69,8 @@ def render_html(result: dict[str, Any]) -> str:
     )
 
     cards: list[str] = []
+    waterfall_rows: list[str] = []
+    run_duration_ms = max(1.0, float(result.get("duration_ms", 0.0)))
     for delivery in deliveries:
         attempts = delivery.get("attempts", [])
         if not attempts:
@@ -96,6 +98,57 @@ def render_html(result: dict[str, Any]) -> str:
                 passed=passed,
             )
             for index, attempt in enumerate(attempts, start=1)
+        )
+        waterfall_attempts: list[str] = []
+        for index, attempt in enumerate(attempts, start=1):
+            elapsed_ms = max(0.0, float(attempt.get("elapsed_ms", 0.0)))
+            latency_ms = max(0.0, float(attempt.get("latency_ms", 0.0)))
+            left_pct = min(100.0, elapsed_ms / run_duration_ms * 100)
+            width_pct = min(
+                max(0.0, 100.0 - left_pct),
+                max(0.35, latency_ms / run_duration_ms * 100),
+            )
+            attempt_state = (
+                "pass"
+                if index == len(attempts) and passed
+                else "fail"
+                if index == len(attempts)
+                else "retry"
+            )
+            injected_fault = attempt.get("injected_fault")
+            fault_class = " injected" if injected_fault else ""
+            status_code = (
+                str(attempt["status_code"])
+                if attempt.get("status_code") is not None
+                else "ERR"
+            )
+            description = (
+                f"Attempt {index}: HTTP {status_code}; {latency_ms:.2f} ms; "
+                f"starts at +{elapsed_ms:.2f} ms"
+            )
+            if injected_fault == "connect_error":
+                description += "; injected connection fault"
+            elif injected_fault == "response_loss":
+                description += "; injected acknowledgement loss"
+            title = html.escape(description, quote=True)
+            waterfall_attempts.append(
+                f"<span class='waterfall-attempt {attempt_state}{fault_class}' "
+                f"style='left:{left_pct:.3f}%;width:{width_pct:.3f}%' "
+                f"title='{title}' aria-label='{title}'></span>"
+            )
+        waterfall_markers = "".join(waterfall_attempts)
+        waterfall_rows.append(
+            f"<article class='waterfall-row {state}' data-state='{state}' "
+            f"data-search='{searchable}' data-start-ms='{first_elapsed_ms:.2f}' "
+            f"data-total-latency-ms='{total_latency_ms:.2f}' "
+            f"data-attempts='{len(attempts)}' "
+            f"data-has-fault='{'true' if has_injected_fault else 'false'}'>"
+            "<div class='waterfall-identity'>"
+            f"<span class='event-type'>{event_type}</span>"
+            f"<code>{event_id}</code>"
+            "</div>"
+            f"<div class='waterfall-track' aria-label='Attempt timing for {event_id}'>"
+            f"{waterfall_markers}</div></article>"
         )
         final_attempt = attempts[-1]
         final_status = (
@@ -135,6 +188,15 @@ def render_html(result: dict[str, Any]) -> str:
     target = html.escape(str(result["target"]))
     version = html.escape(str(result["version"]))
     timeline_content = "".join(cards) if cards else '<p class="empty">No delivery attempts were recorded.</p>'
+    waterfall_content = (
+        "".join(waterfall_rows)
+        if waterfall_rows
+        else '<p class="empty">No delivery attempts were recorded.</p>'
+    )
+    axis_labels = "".join(
+        f"<span style='left:{percentage}%'>{run_duration_ms * percentage / 100:.0f} ms</span>"
+        for percentage in (0, 25, 50, 75, 100)
+    )
     verification = result.get("verification")
     verification_markup = ""
     if verification is not None:
@@ -190,7 +252,23 @@ input{{min-width:min(280px,70vw)}}button{{cursor:pointer;font-weight:650}}button
 .fault-chip{{display:inline-block;width:max-content;padding:2px 6px;border-radius:5px;background:#5b21b6;color:#f5f3ff;font-size:.66rem;font-weight:800}}
 .attempt-index,.attempt small{{color:GrayText;font-size:.7rem}}.attempt strong{{font-size:1.03rem}}.attempt em{{font-size:.72rem;font-style:normal;color:#dc6b6b;overflow-wrap:anywhere}}
 .attempt-details summary{{cursor:pointer;display:inline-block;color:GrayText;font-size:.8rem;padding:4px 0}}
-.attempt-notes{{font-size:.82rem;color:GrayText;overflow-wrap:anywhere}}.empty{{padding:26px;text-align:center;color:GrayText;border:1px dashed GrayText;border-radius:12px}}
+.attempt-notes{{font-size:.82rem;color:GrayText;overflow-wrap:anywhere}}
+.waterfall-scroll{{overflow-x:auto;border:1px solid color-mix(in srgb,CanvasText 18%,transparent);border-radius:14px;padding:12px}}
+.waterfall-axis,.waterfall-row{{display:grid;grid-template-columns:minmax(150px,220px) minmax(450px,1fr);gap:12px;align-items:center;min-width:700px}}
+.waterfall-axis{{padding:2px 0 9px;border-bottom:1px solid color-mix(in srgb,CanvasText 18%,transparent);margin-bottom:6px}}
+.waterfall-axis-labels{{position:relative;height:20px;font-size:.68rem;color:GrayText}}
+.waterfall-axis-labels span{{position:absolute;transform:translateX(-50%);white-space:nowrap}}
+.waterfall-axis-labels span:first-child{{transform:none}}
+.waterfall-axis-labels span:last-child{{transform:translateX(-100%)}}
+.waterfall-row{{padding:7px 0;border-bottom:1px solid color-mix(in srgb,CanvasText 10%,transparent)}}
+.waterfall-row:last-child{{border-bottom:0}}
+.waterfall-identity{{display:grid;gap:3px;min-width:0}}
+.waterfall-identity code{{font-size:.72rem;color:GrayText;overflow-wrap:anywhere}}
+.waterfall-track{{position:relative;height:30px;border-radius:6px;overflow:visible;background:repeating-linear-gradient(to right,transparent 0,transparent calc(25% - 1px),color-mix(in srgb,CanvasText 12%,transparent) calc(25% - 1px),color-mix(in srgb,CanvasText 12%,transparent) 25%)}}
+.waterfall-attempt{{position:absolute;top:5px;height:20px;min-width:3px;border-radius:5px;background:#d97706;box-shadow:0 0 0 1px color-mix(in srgb,Canvas 70%,transparent)}}
+.waterfall-attempt.pass{{background:#16a34a}}.waterfall-attempt.fail{{background:#dc2626}}
+.waterfall-attempt.injected{{background:#7c3aed;border:1px dashed #ede9fe}}
+.empty{{padding:26px;text-align:center;color:GrayText;border:1px dashed GrayText;border-radius:12px}}
 footer{{margin-top:32px;color:GrayText;font-size:.8rem}}
 @media(max-width:700px){{main{{margin:26px auto;padding:0 14px 36px}}.grid{{grid-template-columns:repeat(2,minmax(0,1fr))}}.delivery-card{{padding:13px}}.delivery-top{{display:grid}}#result-count{{width:100%;margin:0}}}}
 @media(prefers-reduced-motion:no-preference){{.delivery-card{{transition:opacity .15s ease}}}}
@@ -232,11 +310,25 @@ footer{{margin-top:32px;color:GrayText;font-size:.8rem}}
 <option value="latency">Highest total latency</option>
 <option value="attempts">Most attempts</option>
 </select></label>
+<label class="field">View
+<select id="timeline-view">
+<option value="cards">Attempt cards</option>
+<option value="waterfall">Waterfall</option>
+</select></label>
 <button id="expand-all" type="button">Expand all attempts</button>
 <span id="result-count" aria-live="polite"></span>
 </div>
 <section class="timeline" id="timeline" aria-label="Webhook event delivery attempts">
 {timeline_content}
+</section>
+<section class="waterfall-scroll" id="waterfall-view" aria-label="Cross-event attempt waterfall" hidden>
+<div class="waterfall-axis">
+<span class="muted">Event / delivery</span>
+<div class="waterfall-axis-labels">{axis_labels}</div>
+</div>
+<div class="waterfall-rows" id="waterfall-rows">
+{waterfall_content}
+</div>
 </section>
 <footer>Generated by HookStorm {version} · Attempts are ordered by elapsed run time. Payloads, request headers and secrets are not included.</footer>
 </main>
@@ -247,25 +339,37 @@ footer{{margin-top:32px;color:GrayText;font-size:.8rem}}
   const searchInput = document.getElementById("event-search");
   const faultFilter = document.getElementById("fault-filter");
   const sortFilter = document.getElementById("sort-filter");
+  const viewFilter = document.getElementById("timeline-view");
   const count = document.getElementById("result-count");
   const expandButton = document.getElementById("expand-all");
+  const waterfallView = document.getElementById("waterfall-view");
+  const waterfallRows = Array.from(document.querySelectorAll(".waterfall-row"));
   const originalOrder = new Map(cards.map((card, index) => [card, index]));
-  const sortCards = () => {{
-    const mode = sortFilter.value;
-    const valueFor = (card) => {{
-      if (mode === "latency") return Number(card.dataset.totalLatencyMs);
-      if (mode === "attempts") return Number(card.dataset.attempts);
-      return Number(card.dataset.startMs);
-    }};
+  const valueFor = (node, mode) => {{
+    if (mode === "latency") return Number(node.dataset.totalLatencyMs);
+    if (mode === "attempts") return Number(node.dataset.attempts);
+    return Number(node.dataset.startMs);
+  }};
+  const sortNodes = (nodes, container, mode) => {{
     const direction = mode === "time" ? 1 : -1;
-    const ordered = [...cards].sort((left, right) => {{
-      const difference = valueFor(left) - valueFor(right);
+    const ordered = [...nodes].sort((left, right) => {{
+      const difference = valueFor(left, mode) - valueFor(right, mode);
       return difference === 0
         ? originalOrder.get(left) - originalOrder.get(right)
         : difference * direction;
     }});
-    const timeline = document.getElementById("timeline");
-    ordered.forEach(card => timeline.appendChild(card));
+    ordered.forEach(node => container.appendChild(node));
+  }};
+  const sortCards = () => {{
+    const mode = sortFilter.value;
+    sortNodes(cards, document.getElementById("timeline"), mode);
+    sortNodes(waterfallRows, document.getElementById("waterfall-rows"), mode);
+  }};
+  const setView = () => {{
+    const waterfall = viewFilter.value === "waterfall";
+    document.getElementById("timeline").hidden = waterfall;
+    waterfallView.hidden = !waterfall;
+    expandButton.hidden = waterfall;
   }};
   const applyFilters = () => {{
     const state = statusFilter.value;
@@ -281,6 +385,14 @@ footer{{margin-top:32px;color:GrayText;font-size:.8rem}}
       card.hidden = !(stateMatches && queryMatches && faultMatches);
       if (!card.hidden) visible += 1;
     }}
+    for (const row of waterfallRows) {{
+      const stateMatches = state === "all" || row.dataset.state === state;
+      const queryMatches = !query || row.dataset.search.includes(query);
+      const faultMatches = faultMode === "all"
+        || (faultMode === "injected" && row.dataset.hasFault === "true")
+        || (faultMode === "none" && row.dataset.hasFault === "false");
+      row.hidden = !(stateMatches && queryMatches && faultMatches);
+    }}
     count.textContent = visible + " of " + cards.length + " deliveries";
   }};
   statusFilter.addEventListener("change", applyFilters);
@@ -289,6 +401,7 @@ footer{{margin-top:32px;color:GrayText;font-size:.8rem}}
     sortCards();
     applyFilters();
   }});
+  viewFilter.addEventListener("change", setView);
   searchInput.addEventListener("input", applyFilters);
   expandButton.addEventListener("click", () => {{
     const details = cards.filter(card => !card.hidden).map(card => card.querySelector("details"));
@@ -296,6 +409,8 @@ footer{{margin-top:32px;color:GrayText;font-size:.8rem}}
     details.forEach(detail => {{ detail.open = expand; }});
     expandButton.textContent = expand ? "Collapse all attempts" : "Expand all attempts";
   }});
+  setView();
+  sortCards();
   applyFilters();
 }})();
 </script>
