@@ -7,6 +7,7 @@ import threading
 from pathlib import Path
 
 import pytest
+import yaml
 
 from hookstorm.capture import (
     MAX_CAPTURE_BODY_BYTES,
