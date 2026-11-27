@@ -29,7 +29,7 @@ HookStorm is a test runner for webhook consumers. It is not a hosted inbox, even
 
 Loopback targets are the default. Remote HTTPS requires an explicit opt-in; non-loopback plaintext HTTP requires a second opt-in. Secrets are read from environment variables. Reports and history omit payloads, request/response headers, response bodies, and credentials.
 
-Read the [security policy](../SECURITY.md), [architecture notes](architecture.md), and [release checklist](release-checklist.md) before using the tool against a remote environment.
+Read the [security policy](https://github.com/blvxx/HookStorm/blob/main/SECURITY.md), [architecture notes](architecture.md), and [release checklist](release-checklist.md) before using the tool against a remote environment.
 
 ## Project status
 
