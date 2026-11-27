@@ -362,7 +362,7 @@ def _validate_run_result(result: dict[str, Any], label: str) -> None:
     if verification is not None:
         if not isinstance(verification, dict):
             raise HistoryError(f"{label} verification must be a JSON object or null")
-        if "passed" in verification and not isinstance(verification["passed"], bool):
+        if not isinstance(verification.get("passed"), bool):
             raise HistoryError(f"{label} verification.passed must be a boolean")
         if "latency_ms" in verification:
             _require_finite_non_negative_number(
