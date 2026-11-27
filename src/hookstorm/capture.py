@@ -253,17 +253,16 @@ class CaptureStore:
             prefix=f".{self.output.name}.", suffix=".tmp", dir=self.output.parent
         )
         try:
-            if os.name == "posix":
-                fchmod = getattr(os, "fchmod", None)
-                if callable(fchmod):
-                    fchmod(descriptor, 0o600)
+            # mkstemp creates a private file on POSIX. Apply the explicit mode
+            # before replacement so a permission error cannot occur after the
+            # destination has already been atomically replaced.
             with os.fdopen(descriptor, "w", encoding="utf-8", newline="\n") as stream:
                 stream.write(serialized)
                 stream.flush()
                 os.fsync(stream.fileno())
-            os.replace(temporary_name, self.output)
             if os.name == "posix":
-                os.chmod(self.output, 0o600)
+                os.chmod(temporary_name, 0o600)
+            os.replace(temporary_name, self.output)
         except Exception:
             try:
                 os.close(descriptor)
