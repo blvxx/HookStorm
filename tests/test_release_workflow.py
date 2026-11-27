@@ -117,6 +117,7 @@ def test_ci_builds_and_smoke_tests_wheel_and_source_distribution() -> None:
     assert smoke["run"] == "python scripts/smoke_wheel.py --all"
     assert steps.index(build) < steps.index(smoke)
 
+
 def test_all_repository_workflow_actions_are_pinned_to_full_commit_shas() -> None:
     import re
 
