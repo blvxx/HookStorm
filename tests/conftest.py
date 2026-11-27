@@ -74,6 +74,17 @@ def receiver() -> Iterator[tuple[str, dict]]:
                 {"run_id": run_id, "event_id": event_id, "headers": dict(self.headers), "body": body}
             )
             state["attempts"][delivery_key] += 1
+            if self.path == "/slow-drip":
+                encoded = b'{"ok":true}'
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(encoded)))
+                self.end_headers()
+                for chunk in (encoded[:3], encoded[3:6], encoded[6:9], encoded[9:]):
+                    self.wfile.write(chunk)
+                    self.wfile.flush()
+                    time.sleep(0.06)
+                return
             if self.path == "/slow":
                 with state_lock:
                     state["active"] += 1
