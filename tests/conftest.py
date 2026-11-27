@@ -80,10 +80,13 @@ def receiver() -> Iterator[tuple[str, dict]]:
                 self.send_header("Content-Type", "application/json")
                 self.send_header("Content-Length", str(len(encoded)))
                 self.end_headers()
-                for chunk in (encoded[:3], encoded[3:6], encoded[6:9], encoded[9:]):
-                    self.wfile.write(chunk)
-                    self.wfile.flush()
-                    time.sleep(0.06)
+                try:
+                    for chunk in (encoded[:3], encoded[3:6], encoded[6:9], encoded[9:]):
+                        self.wfile.write(chunk)
+                        self.wfile.flush()
+                        time.sleep(0.06)
+                except (BrokenPipeError, ConnectionResetError):
+                    pass
                 return
             if self.path == "/slow":
                 with state_lock:
