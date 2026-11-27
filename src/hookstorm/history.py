@@ -325,9 +325,10 @@ def _validate_run_result(result: dict[str, Any], label: str) -> None:
                 attempt["error"], str
             ):
                 raise HistoryError(f"{attempt_label}.error must be a string or null")
-            if "injected_fault" in attempt and attempt["injected_fault"] not in {
-                "connect_error", "response_loss"
-            }:
+            if "injected_fault" in attempt and (
+                not isinstance(attempt["injected_fault"], str)
+                or attempt["injected_fault"] not in {"connect_error", "response_loss"}
+            ):
                 raise HistoryError(
                     f"{attempt_label}.injected_fault must be connect_error or response_loss"
                 )
