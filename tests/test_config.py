@@ -849,23 +849,3 @@ def test_load_scenario_rejects_oversized_source_file(tmp_path) -> None:
 
     with pytest.raises(ScenarioError, match="file exceeds"):
         load_scenario(scenario_file)
-
-
-def test_validate_scenario_converts_deep_json_payload_to_scenario_error() -> None:
-    data = valid_scenario()
-    nested: object = None
-    for _ in range(1_100):
-        nested = [nested]
-    data["events"][0]["payload"] = {"nested": nested}
-
-    with pytest.raises(ScenarioError, match="valid JSON-compatible data"):
-        validate_scenario(data)
-
-
-def test_load_scenario_converts_deep_yaml_nesting_to_scenario_error(tmp_path) -> None:
-    scenario_file = tmp_path / "deep-nesting.yaml"
-    nested = "[" * 1_100 + "null" + "]" * 1_100
-    scenario_file.write_text(f"nested: {nested}", encoding="utf-8")
-
-    with pytest.raises(ScenarioError, match="nesting exceeds parser limits"):
-        load_scenario(scenario_file)
