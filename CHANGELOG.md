@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+- Enforce absolute per-attempt and verification request deadlines so slow-drip responses cannot evade `timeout_ms`.
+- Preserve source scenario order in reports when deliveries are intentionally executed in reverse.
+
 ## 0.1.0a1 — First public alpha preview
 
 ### Delivery, diagnostics, and integration improvements
