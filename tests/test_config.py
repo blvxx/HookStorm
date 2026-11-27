@@ -792,6 +792,30 @@ def test_request_fault_plans_are_validated_and_cannot_overlap() -> None:
         validate_scenario(conflict)
 
 
+def test_validate_scenario_rejects_excessive_json_nesting() -> None:
+    data = valid_scenario()
+    payload: object = None
+    for _ in range(1_200):
+        payload = [payload]
+    data["events"][0]["payload"] = payload
+
+    with pytest.raises(ScenarioError, match="nesting exceeds supported validation depth"):
+        validate_scenario(data)
+
+
+def test_load_scenario_rejects_excessive_yaml_nesting(tmp_path) -> None:
+    scenario_file = tmp_path / "deep.yaml"
+    nested = "[" * 1_200 + "null" + "]" * 1_200
+    scenario_file.write_text(
+        "version: 1\nname: deep\nevents:\n  - id: ping\n    event_id: evt_deep\n    payload: "
+        + nested,
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ScenarioError, match="nesting exceeds parser limits"):
+        load_scenario(scenario_file)
+
+
 def test_load_scenario_rejects_excessive_yaml_aliases(tmp_path) -> None:
     lines = ["base: &base [one, two]"]
     lines.extend(f"alias_{index}: *base" for index in range(17))
