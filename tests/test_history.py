@@ -675,3 +675,22 @@ def test_load_history_export_rejects_duplicate_json_keys(tmp_path) -> None:
 
     with pytest.raises(HistoryError, match="duplicate JSON key"):
         load_history_export(baseline_file)
+
+
+
+def test_history_preserves_validated_injected_fault_markers(tmp_path) -> None:
+    result = make_result("run_fault_history")
+    result["deliveries"][0]["attempts"][0]["injected_fault"] = "response_loss"
+
+    save_run(result, tmp_path / "history.sqlite3")
+
+    stored = get_run("run_fault_history", tmp_path / "history.sqlite3")
+    assert stored["deliveries"][0]["attempts"][0]["injected_fault"] == "response_loss"
+
+
+def test_history_rejects_unknown_injected_fault_markers(tmp_path) -> None:
+    result = make_result("run_invalid_fault")
+    result["deliveries"][0]["attempts"][0]["injected_fault"] = "random_packet_loss"
+
+    with pytest.raises(HistoryError, match="injected_fault"):
+        save_run(result, tmp_path / "history.sqlite3")
