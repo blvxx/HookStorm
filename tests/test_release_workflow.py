@@ -53,6 +53,9 @@ def test_release_commit_must_be_reachable_from_main() -> None:
 
     checkout = steps[0]
     assert checkout["with"]["fetch-depth"] == "0"
+    assert checkout["with"]["ref"] == (
+        "${{ github.event_name == 'release' && github.event.release.tag_name || github.ref }}"
+    )
 
     ancestry_check = next(
         step for step in steps
