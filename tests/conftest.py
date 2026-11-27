@@ -1,12 +1,14 @@
 from __future__ import annotations
 
 import base64
+import gzip
 import hashlib
 import hmac
 import json
 import socket
 import threading
 import time
+import zlib
 from collections import defaultdict
 from collections.abc import Iterator
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
@@ -56,14 +58,31 @@ def receiver() -> Iterator[tuple[str, dict]]:
         def do_POST(self) -> None:  # noqa: N802
             length = int(self.headers.get("Content-Length", "0"))
             body = self.rfile.read(length)
-            if self.path == "/large":
-                encoded = json.dumps({
-                    "ok": True,
-                    "padding": "x" * (2 * 1024 * 1024 + 1024),
-                }).encode()
+            if self.path in {"/large", "/large-gzip", "/large-deflate", "/false-length"}:
+                if self.path == "/false-length":
+                    encoded = json.dumps({"ok": True}).encode()
+                    content_length = len(encoded) + 128
+                    content_encoding = None
+                else:
+                    decoded = json.dumps({
+                        "ok": True,
+                        "padding": "x" * (2 * 1024 * 1024 + 1024),
+                    }).encode()
+                    content_encoding = None
+                    if self.path == "/large-gzip":
+                        encoded = gzip.compress(decoded)
+                        content_encoding = "gzip"
+                    elif self.path == "/large-deflate":
+                        encoded = zlib.compress(decoded)
+                        content_encoding = "deflate"
+                    else:
+                        encoded = decoded
+                    content_length = len(encoded)
                 self.send_response(200)
                 self.send_header("Content-Type", "application/json")
-                self.send_header("Content-Length", str(len(encoded)))
+                self.send_header("Content-Length", str(content_length))
+                if content_encoding:
+                    self.send_header("Content-Encoding", content_encoding)
                 self.end_headers()
                 self.wfile.write(encoded)
                 return
