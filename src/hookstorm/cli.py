@@ -11,8 +11,8 @@ from collections.abc import Sequence
 from pathlib import Path
 
 from hookstorm import __version__
-from hookstorm.config import load_scenario
 from hookstorm.capture import create_capture_server
+from hookstorm.config import load_scenario
 from hookstorm.doctor import build_preflight_document, run_preflight
 from hookstorm.fuzz import run_fuzz
 from hookstorm.history import (
