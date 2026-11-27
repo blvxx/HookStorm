@@ -28,6 +28,14 @@ def test_external_workflow_template_has_safe_triggers_and_permissions() -> None:
     assert "github.event.pull_request.head.repo.full_name == github.repository" in job["if"]
     assert job["env"]["HOOKSTORM_TARGET_URL"] == "${{ vars.HOOKSTORM_TARGET_URL }}"
     assert job["env"]["HOOKSTORM_SECRET"] == "${{ secrets.HOOKSTORM_SECRET }}"
+    assert job["env"]["HOOKSTORM_ALLOW_INSECURE_HTTP"] == (
+        "${{ vars.HOOKSTORM_ALLOW_INSECURE_HTTP || '0' }}"
+    )
+    preflight = next(step for step in job["steps"] if step.get("name") == "Preflight staging endpoint")
+    assert "--allow-insecure-http" in preflight["run"]
+    run_step = next(step for step in job["steps"] if step.get("name") == "Run webhook scenario and compare with baseline")
+    assert "--allow-insecure-http" in run_step["run"]
+    assert "7ab9ffb6ab510b4067916a83068bf60f8c010a70" in WORKFLOW_PATH.read_text(encoding="utf-8")
 
     step_uses = [step.get("uses", "") for step in job["steps"]]
     assert any("actions/cache/restore@" in value for value in step_uses)
