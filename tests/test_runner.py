@@ -760,6 +760,9 @@ def test_run_timeout_cancels_in_flight_response_processing(receiver, monkeypatch
         "delivery": {"timeout_ms": 1_000},
         "events": [{"id": "ping", "event_id": "evt_timeout", "payload": {}}],
     })
+    # Bypass the schema budget check to isolate the runner-level hard deadline:
+    # an individual request is deliberately allowed more time than the whole run.
+    data["delivery"]["timeout_ms"] = 2_000
 
     with pytest.raises(ValueError, match="exceeded run_timeout_ms=1000"):
         asyncio.run(run_scenario(data, base))
