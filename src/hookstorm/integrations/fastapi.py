@@ -43,8 +43,7 @@ def create_router(
     )
     router = APIRouter()
 
-    @router.post(path, name="hookstorm_test_webhook")
-    async def receive_webhook(request: Request) -> dict[str, Any]:
+    async def receive_webhook(request: Any) -> dict[str, Any]:
         raw_body = await request.body()
         try:
             event = active_recorder.record(request.headers, raw_body)
@@ -52,4 +51,13 @@ def create_router(
             raise HTTPException(status_code=exc.status_code, detail=str(exc)) from exc
         return event.response()
 
+    # FastAPI must inspect the actual Request class. Resolve it at factory time
+    # without making FastAPI a mandatory import for HookStorm's core package.
+    receive_webhook.__annotations__["request"] = Request
+    router.add_api_route(
+        path,
+        receive_webhook,
+        methods=["POST"],
+        name="hookstorm_test_webhook",
+    )
     return FastAPIWebhookEndpoint(router=router, recorder=active_recorder)
