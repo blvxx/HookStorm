@@ -37,7 +37,7 @@ jobs:
           python-version: ${{ matrix.python-version }}
           cache: pip
       - name: Install
-        run: python -m pip install -e '.[dev]'
+        run: python -m pip install -e '.[dev,fastapi,flask]'
       - name: Lint
         run: ruff check .
       - name: Static type check
@@ -60,3 +60,17 @@ jobs:
         run: python -m build --sdist --wheel --outdir dist
       - name: Smoke-test installed wheel and source distribution
         run: python scripts/smoke_wheel.py --all
+
+  container:
+    name: Docker non-root smoke test
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - name: Build minimal runtime image
+        run: docker build --pull -t hookstorm:ci .
+      - name: Verify non-root runtime user
+        run: docker run --rm --entrypoint python hookstorm:ci -c "import os; assert os.getuid() != 0, 'container must not run as root'; print(os.getuid())"
+      - name: Smoke-test CLI in a read-only container
+        run: docker run --rm --read-only --tmpfs /tmp -v "$GITHUB_WORKSPACE/examples:/examples:ro" hookstorm:ci validate /examples/payment-retry.yaml
