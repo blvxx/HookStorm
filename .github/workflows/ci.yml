@@ -40,10 +40,14 @@ jobs:
         run: python -m pip install -e '.[dev]'
       - name: Lint
         run: ruff check .
+      - name: Static type check
+        run: mypy
       - name: Prepare test result directory
         run: python -c "from pathlib import Path; Path('test-results').mkdir(exist_ok=True)"
       - name: Test
-        run: pytest --junitxml=test-results/pytest.xml
+        run: coverage run -m pytest --junitxml=test-results/pytest.xml
+      - name: Coverage report
+        run: coverage report
       - name: Upload pytest JUnit report
         if: always()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
