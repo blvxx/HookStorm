@@ -290,7 +290,7 @@ def test_html_report_marks_injected_transport_faults() -> None:
     assert 'id="timeline-view"' in html_report
     assert 'id="waterfall-view"' in html_report
     assert 'aria-label="Cross-event attempt waterfall"' in html_report
-    assert "waterfall-attempt injected" in html_report
+    assert "waterfall-attempt retry injected" in html_report
     assert "left:10.000%" in html_report
     assert "First observed" in html_report
 
