@@ -27,6 +27,26 @@ After the PR is reviewed and merged, the final release commit must pass the rele
 | Documentation | Zensical configuration, build workflow, and main-only Pages deployment workflow | Build is validated; Pages configuration and first deployment remain unverified |
 | Secrets | Reports/history use explicit safe fields; integrations redact sensitive headers by default | Review payloads before sharing |
 
+## Latest validation evidence
+
+The current PR head `718e28ef32e4e65801317fabff1ef222fefdc69c` was validated on 2026-11-27:
+
+| Check | Result |
+|---|---|
+| CI matrix | 6/6 environments passed |
+| pytest — Ubuntu Python 3.11 / 3.12 / 3.13 / 3.14 | 492 passed in each environment |
+| pytest — macOS Python 3.12 | 492 passed |
+| pytest — Windows Python 3.12 | 490 passed, 2 platform-specific skips |
+| Coverage | 85–86% |
+| Ruff and mypy | Passed in all six environments |
+| Wheel / sdist build and clean install smoke | Passed in all six environments |
+| Docker non-root/read-only smoke | Passed |
+| Zensical documentation build | Passed |
+| Local webhook scenario integration | Passed |
+| Composite GitHub Action E2E | Passed |
+
+The Pages deployment workflow is checked by repository tests and is intentionally triggered only by pushes to `main`. It has not run from this draft PR, so this evidence does not claim that GitHub Pages is live.
+
 ## Mandatory blockers before publication
 
 1. **Merge and review.** PR #44 is still a draft. Do not tag this feature branch. Merge only after review, then use the resulting commit reachable from `main`.
