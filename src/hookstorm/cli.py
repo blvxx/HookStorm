@@ -29,8 +29,8 @@ from hookstorm.provider_profiles import provider_event
 from hookstorm.pytest_export import write_pytest
 from hookstorm.report import render_json, write_report
 from hookstorm.runner import run_scenario
-from hookstorm.scenario_schema import read_scenario_schema
 from hookstorm.scaffold import initialize_project
+from hookstorm.scenario_schema import read_scenario_schema
 
 
 def _parser() -> argparse.ArgumentParser:
