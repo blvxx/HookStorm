@@ -43,10 +43,10 @@ Explicit event fields (`id`, `event_id`, `payload`) override the generated defau
 
 Run the examples against the local demo receiver or an isolated test endpoint:
 
-- [Stripe profile](../examples/provider-stripe.yaml)
-- [GitHub profile](../examples/provider-github.yaml)
-- [Shopify profile](../examples/provider-shopify.yaml)
-- [Standard Webhooks profile](../examples/provider-standard-webhooks.yaml)
+- [Stripe profile](https://github.com/blvxx/HookStorm/blob/main/examples/provider-stripe.yaml)
+- [GitHub profile](https://github.com/blvxx/HookStorm/blob/main/examples/provider-github.yaml)
+- [Shopify profile](https://github.com/blvxx/HookStorm/blob/main/examples/provider-shopify.yaml)
+- [Standard Webhooks profile](https://github.com/blvxx/HookStorm/blob/main/examples/provider-standard-webhooks.yaml)
 
 The body shapes are intentionally small synthetic fixtures. Replace them with payloads representative of the event variants and API versions your receiver actually supports.
 
