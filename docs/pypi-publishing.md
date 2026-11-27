@@ -27,12 +27,13 @@ A pending publisher does **not** reserve the name before the first successful up
 
 Before the first release, use **Actions → Release → Run workflow** on the reviewed branch to exercise the build and metadata checks. A manual run is build-only; the PyPI publishing job is conditional on a published GitHub Release event.
 
-The workflow checks that the release tag exactly matches the version in `pyproject.toml` and that the GitHub pre-release flag agrees with the PEP 440 version. It then runs lint and tests, builds both wheel and source distribution, validates them with Twine, and uploads the already-built artifacts to PyPI in a separate job.
+The workflow checks that the release tag exactly matches the version in `pyproject.toml` and that the GitHub pre-release flag agrees with the PEP 440 version. It then runs lint and tests, builds both wheel and source distribution, validates them with Twine, and smoke-tests clean installations. After the build succeeds, a separate least-privilege job attaches the validated wheel and source archive to the GitHub Release. The PyPI job downloads those same build artifacts and publishes them through Trusted Publishing.
 
 ## Authentication and workflow security
 
 - PyPI authentication uses Trusted Publishing (GitHub Actions OIDC); no PyPI API token or password is stored in GitHub secrets.
-- The publishing job alone receives `id-token: write`.
+- The PyPI publishing job alone receives `id-token: write`.
+- The GitHub Release asset job receives only `contents: write` to attach the validated distributions.
 - Build and test steps run in a separate job without OIDC publishing permission.
 - The release workflow actions are pinned to reviewed commit SHAs.
 - The `pypi` environment provides a place to apply GitHub deployment protection and manual approval.
