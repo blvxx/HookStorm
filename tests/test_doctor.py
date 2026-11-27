@@ -44,6 +44,39 @@ def _check(checks, label: str, status: str | None = None):
     return matches[0]
 
 
+def test_doctor_preflight_requires_explicit_opt_in_for_remote_http(tmp_path) -> None:
+    scenario = _scenario_file(tmp_path, signature="none")
+    target = "http://staging.example.test/webhook"
+
+    checks = run_preflight(scenario, target=target)
+    assert _check(checks, "Target", "FAIL").message.startswith(
+        "Remote HTTP targets are unencrypted"
+    )
+
+    checks = run_preflight(scenario, target=target, allow_insecure_http=True)
+    assert _check(checks, "Target", "PASS")
+    assert _check(checks, "Verification target", "PASS")
+
+
+def test_doctor_cli_exposes_explicit_remote_http_opt_in(tmp_path, capsys) -> None:
+    scenario = _scenario_file(tmp_path, signature="none")
+    target = "http://staging.example.test/webhook"
+
+    assert main(["doctor", str(scenario), "--target", target]) == 1
+    output = capsys.readouterr().out
+    assert "Remote HTTP targets are unencrypted" in output
+
+    assert main([
+        "doctor",
+        str(scenario),
+        "--target",
+        target,
+        "--allow-insecure-http",
+    ]) == 0
+    output = capsys.readouterr().out
+    assert "Preflight: READY" in output
+
+
 def test_preflight_checks_config_without_contacting_network(tmp_path, monkeypatch) -> None:
     scenario = _scenario_file(tmp_path)
     monkeypatch.setattr(
@@ -175,6 +208,26 @@ def test_doctor_rejects_remote_http_for_authenticated_verification(tmp_path) -> 
 
     check = _check(checks, "Verification auth", "FAIL")
     assert "require HTTPS" in check.message
+
+
+def test_doctor_does_not_allow_insecure_remote_http_for_authenticated_verification(
+    tmp_path,
+) -> None:
+    scenario = _verification_scenario_file(
+        tmp_path,
+        url="http://staging.example.test/__hookstorm/state",
+    )
+    checks = run_preflight(
+        scenario,
+        target="http://127.0.0.1:8000/webhook",
+        environment={"HOOKSTORM_VERIFY_TOKEN": "safe-test-token"},
+        allow_insecure_http=True,
+    )
+
+    assert _check(checks, "Target", "PASS")
+    assert _check(checks, "Verification target", "PASS")
+    auth = _check(checks, "Verification auth", "FAIL")
+    assert "require HTTPS" in auth.message
 
 
 def test_doctor_allows_http_for_loopback_authenticated_verification(tmp_path) -> None:
@@ -582,7 +635,7 @@ def test_doctor_json_output_is_versioned_and_secret_safe(
     }
     assert document["summary"] == {
         "total_checks": len(document["checks"]),
-        "passed": 4,
+        "passed": 5,
         "failed": 0,
         "warnings": 1,
         "info": 1,
