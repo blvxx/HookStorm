@@ -137,3 +137,25 @@ def test_all_repository_workflow_actions_are_pinned_to_full_commit_shas() -> Non
                     f"{workflow_path.relative_to(workflow_dir.parent.parent)} "
                     f"job {job_name!r} uses an unpinned action: {action}"
                 )
+
+
+def test_published_release_attaches_validated_distributions_with_limited_permissions() -> None:
+    workflow_path = Path(__file__).resolve().parents[1] / ".github" / "workflows" / "release.yml"
+    workflow = yaml.load(workflow_path.read_text(encoding="utf-8"), Loader=yaml.BaseLoader)
+
+    attach = workflow["jobs"]["attach"]
+    assert attach["if"] == "github.event_name == 'release' && github.event.action == 'published'"
+    assert attach["needs"] == "build"
+    assert attach["permissions"] == {"contents": "write"}
+
+    download = next(step for step in attach["steps"] if step.get("name") == "Download validated distributions")
+    assert download["uses"] == "actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131"
+    assert download["with"] == {"name": "python-distributions", "path": "dist/"}
+
+    upload = next(step for step in attach["steps"] if step.get("name") == "Attach wheel and source archive")
+    assert upload["env"]["GH_TOKEN"] == "${{ github.token }}"
+    assert upload["env"]["RELEASE_TAG"] == "${{ github.event.release.tag_name }}"
+    assert upload["run"] == 'gh release upload "$RELEASE_TAG" dist/* --repo "$GITHUB_REPOSITORY"'
+    assert "--clobber" not in upload["run"]
+
+    assert workflow["jobs"]["publish"]["permissions"] == {"id-token": "write"}

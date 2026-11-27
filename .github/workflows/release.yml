@@ -95,6 +95,27 @@ jobs:
           if-no-files-found: error
           retention-days: 7
 
+
+  attach:
+    name: Attach validated distributions to GitHub Release
+    if: github.event_name == 'release' && github.event.action == 'published'
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Download validated distributions
+        uses: actions/download-artifact@37930b1c2abaa49bbe596cd826c3c89aef350131 # v7
+        with:
+          name: python-distributions
+          path: dist/
+
+      - name: Attach wheel and source archive
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RELEASE_TAG: ${{ github.event.release.tag_name }}
+        run: gh release upload "$RELEASE_TAG" dist/* --repo "$GITHUB_REPOSITORY"
+
   publish:
     name: Publish to PyPI
     if: github.event_name == 'release' && github.event.action == 'published'

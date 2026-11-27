@@ -18,8 +18,8 @@ HookStorm is currently in the pre-release stage. Do not publish a stable release
 
 1. Create an annotated tag from the reviewed `main` commit, using the `vX.Y.Z` format.
 2. Create a GitHub Release from that tag.
-3. Include the relevant changelog notes and attach the wheel and source distribution.
-4. Mark the release as a pre-release until the project owner explicitly considers the compatibility and support commitments stable.
+3. Include the relevant changelog notes and mark the release as a pre-release until the project owner explicitly considers the compatibility and support commitments stable.
+4. Publish the GitHub Release. The release workflow attaches the validated wheel and source distribution automatically after the build checks pass.
 
 ## Optional PyPI publication
 
