@@ -554,6 +554,28 @@ def test_failed_business_state_verification_fails_the_run(receiver) -> None:
     assert result["summary"]["success"] is False
 
 
+def test_verification_timeout_is_an_absolute_deadline_for_slow_drip_responses(receiver) -> None:
+    base, _state = receiver
+    data = validate_scenario({
+        "version": 1,
+        "name": "absolute verification timeout",
+        "events": [{"id": "ping", "event_id": "evt_slow_verify", "payload": {}}],
+        "verify": {
+            "url": f"{base}/state-slow-drip",
+            "timeout_ms": 150,
+            "expect_json": {"processed_events": 1},
+        },
+    })
+
+    result = asyncio.run(run_scenario(data, base))
+
+    verification = result["verification"]
+    assert result["summary"]["success"] is False
+    assert verification["status_code"] == 200
+    assert verification["error"] == "verification request timed out"
+    assert verification["latency_ms"] < 300
+
+
 def test_verification_url_obeys_local_only_safety_before_delivery(receiver) -> None:
     base, state = receiver
     data = validate_scenario({
