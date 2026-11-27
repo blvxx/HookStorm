@@ -16,3 +16,4 @@ def test_runtime_version_matches_project_metadata() -> None:
     assert project["version"] == __version__
     assert project["version"] == "0.1.0a1"
     assert "Development Status :: 3 - Alpha" in project["classifiers"]
+    assert "Programming Language :: Python :: 3.14" in project["classifiers"]

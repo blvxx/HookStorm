@@ -427,7 +427,7 @@ ruff check .
 pytest
 ~~~
 
-CI tests Python 3.11, 3.12, and 3.13 on Linux, plus Python 3.12 on Windows and macOS. Every matrix job runs lint, tests, builds the wheel, and smoke-tests the installed wheel in a clean virtual environment.
+CI tests Python 3.11, 3.12, 3.13, and 3.14 on Linux, plus Python 3.12 on Windows and macOS. Every matrix job runs lint, tests, builds the wheel, and smoke-tests the installed wheel in a clean virtual environment.
 
 Webhook responses and business-state verification responses are streamed with a 2 MiB decoded-body limit. Larger responses fail the corresponding assertion rather than being buffered without a bound.
 
