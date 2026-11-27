@@ -35,8 +35,10 @@ def test_composite_action_keeps_remote_access_and_history_opt_in() -> None:
     assert "HOOKSTORM_PROJECT_PATH" in action["runs"]["steps"][1]["env"]
     assert "pip install" in action["runs"]["steps"][1]["run"]
     assert "hookstorm validate" in script
-    assert "hookstorm doctor" in script
-    assert "run_args[@]" in script
+    assert "doctor_args=(doctor" in script
+    assert 'hookstorm "${doctor_args[@]}"' in script
+    assert "run_args=(run" in script
+    assert 'hookstorm "${run_args[@]}"' in script
     assert "--no-history" in script
     assert "allow-insecure-http requires allow-remote=true" in script
 
