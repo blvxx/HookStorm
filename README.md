@@ -38,7 +38,8 @@ The demo receiver binds to `127.0.0.1` only. The command writes a self-contained
 | Fuzzing | Seeded JSON payloads plus optional order, duplicate, delay, and transport-fault variation with replayable failures |
 | Request faults | Malformed JSON, content-type and compression variants, chunked framing, partial uploads, and Content-Length mismatch |
 | Reports and regression checks | HTML, JSON, JUnit, local SQLite history, portable baselines |
-| Pytest integration | Optional fixtures, async runner, sync wrapper, and scenario loader |
+| Pytest and framework integrations | Optional fixtures plus FastAPI / Flask test-receiver adapters |
+| Docker | Minimal non-root runtime image |
 
 Scenarios use the backwards-compatible `version: 1` YAML format. Provider profiles for Stripe, GitHub, Shopify, and Standard Webhooks supply synthetic event shapes and provider headers (`hookstorm run --provider github`, or `hookstorm init --provider stripe`). See the [scenario reference](docs/scenario-format.md) and [provider guide](docs/provider-profiles.md) for fields, limits, signatures, and examples.
 
@@ -69,7 +70,9 @@ Read [SECURITY.md](SECURITY.md) and the [architecture notes](docs/architecture.m
 
 ## Documentation
 
+- [Installation: pip, uv, pipx, Docker](docs/installation.md)
 - [Scenario format and behavior](docs/scenario-format.md)
+- [FastAPI and Flask test endpoints](docs/framework-integrations.md)
 - [Seeded fuzzing and failure minimization](docs/fuzzing.md)
 - [Pytest integration API](docs/pytest-integration.md)
 - [Composite GitHub Action](docs/github-action.md)
@@ -80,6 +83,7 @@ Read [SECURITY.md](SECURITY.md) and the [architecture notes](docs/architecture.m
 - [Ambiguous acknowledgements and idempotency](docs/ambiguous-acknowledgements.md)
 - [Architecture and current limitations](docs/architecture.md)
 - [CI integration for application repositories](docs/ci-integration.md)
+- [Alpha release readiness review](docs/alpha-release-review.md)
 - [Release and PyPI publishing checklist](docs/release-checklist.md)
 
 ## Next
@@ -87,10 +91,9 @@ Read [SECURITY.md](SECURITY.md) and the [architecture notes](docs/architecture.m
 Planned work, in priority order:
 
 1. Add slow request-body streaming, controlled secret rotation, and bounded large-payload transport profiles.
-2. Small FastAPI / Flask helpers that keep framework adapters optional.
-3. A minimal non-root Docker image and uvx / pipx installation guides.
-4. A published MkDocs documentation site.
-5. Provider retry schedule presets after explicit per-attempt schedule support and longer safe run-time budgets are designed.
+2. Evaluate HTTP/2 fault coverage and reduce reliance on HTTPX private transport internals.
+3. Enable hosted documentation deployment after the Zensical site build and repository Pages settings are reviewed.
+4. Add provider retry schedule presets only after explicit per-attempt schedule support and longer safe run-time budgets are designed.
 
 ## Development
 
