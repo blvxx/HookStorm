@@ -74,3 +74,23 @@ jobs:
         run: docker run --rm --entrypoint python hookstorm:ci -c "import os; assert os.getuid() != 0, 'container must not run as root'; print(os.getuid())"
       - name: Smoke-test CLI in a read-only container
         run: docker run --rm --read-only --tmpfs /tmp -v "$GITHUB_WORKSPACE/examples:/examples:ro" hookstorm:ci validate /examples/payment-retry.yaml
+
+  httpx-minimum:
+    name: HTTPX minimum supported version
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+      - uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
+        with:
+          python-version: "3.12"
+          cache: pip
+      - name: Install project and optional integration dependencies
+        run: python -m pip install -e '.[dev,fastapi,flask]'
+      - name: Install the declared minimum HTTPX version
+        run: python -m pip install --force-reinstall "httpx==0.27.0"
+      - name: Verify dependency version
+        run: python -c "import httpx; assert httpx.__version__ == '0.27.0', httpx.__version__"
+      - name: Test transport, DNS pinning, and framework compatibility
+        run: pytest tests/test_runner.py tests/test_safety.py tests/test_integrations.py
