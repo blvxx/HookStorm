@@ -41,7 +41,7 @@ class WebhookRecord:
     event_id: str | None
     run_id: str | None
     duplicate: bool
-    payload: Any
+    payload: typing.Any
     raw_body: bytes
     headers: dict[str, str]
     received_at: str
@@ -92,7 +92,7 @@ class WebhookRecorder:
         self._processed: set[tuple[str, str]] = set()
 
     @staticmethod
-    def _header(headers: collections.abc.Mapping[str, typing.Any], *names: str) -> str | None:
+    def _header(headers: collections.abc.collections.abc.Mapping[str, typing.Any], *names: str) -> str | None:
         wanted = {name.lower() for name in names}
         for name, value in headers.items():
             if str(name).lower() in wanted:
@@ -102,14 +102,14 @@ class WebhookRecorder:
 
     @staticmethod
     def _reject_duplicate_keys(pairs: list[tuple[str, typing.Any]]) -> dict[str, typing.Any]:
-        value: dict[str, Any] = {}
+        value: dict[str, typing.Any] = {}
         for key, item in pairs:
             if key in value:
                 raise ValueError(f"duplicate JSON object key: {key}")
             value[key] = item
         return value
 
-    def _decode_body(self, headers: Mapping[str, Any], body: bytes) -> bytes:
+    def _decode_body(self, headers: collections.abc.Mapping[str, typing.Any], body: bytes) -> bytes:
         if len(body) > self.max_body_bytes:
             raise WebhookRequestError(
                 f"request body exceeds the {self.max_body_bytes}-byte limit",
@@ -153,7 +153,7 @@ class WebhookRecorder:
                 status_code=400,
             ) from exc
 
-    def _safe_headers(self, headers: Mapping[str, Any]) -> dict[str, str]:
+    def _safe_headers(self, headers: collections.abc.Mapping[str, typing.Any]) -> dict[str, str]:
         result: dict[str, str] = {}
         for name, value in headers.items():
             key = str(name)
@@ -170,7 +170,7 @@ class WebhookRecorder:
             )
         return result
 
-    def record(self, headers: Mapping[str, Any], raw_body: bytes) -> WebhookRecord:
+    def record(self, headers: collections.abc.Mapping[str, typing.Any], raw_body: bytes) -> WebhookRecord:
         """Validate and retain one JSON request while preserving its wire bytes."""
         if not isinstance(raw_body, bytes):
             raise TypeError("raw_body must be bytes")
@@ -250,7 +250,7 @@ class WebhookRecorder:
         with self._lock:
             return tuple(self._events)
 
-    def snapshot(self) -> dict[str, Any]:
+    def snapshot(self) -> dict[str, typing.Any]:
         """Return aggregate counters without exposing payloads or headers."""
         with self._lock:
             duplicates = sum(event.duplicate for event in self._events)
