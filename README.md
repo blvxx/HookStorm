@@ -38,6 +38,7 @@ The demo receiver binds to `127.0.0.1` only. The command writes a self-contained
 | Capture | Loopback-only JSON webhook receiver, header redaction, and atomic scenario export |
 | Fuzzing | Seeded JSON payload mutations, replayable failing cases, and bounded failure minimization |
 | Reports and regression checks | HTML, JSON, JUnit, local SQLite history, portable baselines |
+| Pytest integration | Optional fixtures, async runner, sync wrapper, and scenario loader |
 
 Scenarios use the backwards-compatible `version: 1` YAML format. Provider profiles for Stripe, GitHub, Shopify, and Standard Webhooks supply synthetic event shapes and provider headers (`hookstorm run --provider github`, or `hookstorm init --provider stripe`). See the [scenario reference](docs/scenario-format.md) and [provider guide](docs/provider-profiles.md) for fields, limits, signatures, and examples.
 
@@ -70,6 +71,7 @@ Read [SECURITY.md](SECURITY.md) and the [architecture notes](docs/architecture.m
 
 - [Scenario format and behavior](docs/scenario-format.md)
 - [Seeded fuzzing and failure minimization](docs/fuzzing.md)
+- [Pytest integration API](docs/pytest-integration.md)
 - [Loopback webhook capture](docs/capture.md)
 - [Provider profiles and retry-policy notes](docs/provider-profiles.md)
 - [Seeded fuzzing and failure minimization](docs/fuzzing.md)
@@ -86,9 +88,9 @@ Planned work, in priority order:
 2. Expand fuzzing to vary event order, duplicate deliveries, delays, and controlled transport failures.
 3. Expand request fault injection for malformed JSON, content types, compression, chunking, partial uploads, content-length mismatches, slow bodies, secret rotation, and large payloads.
 4. A reusable composite GitHub Action with SHA-pinned dependencies.
-5. A structured pytest integration API and small FastAPI / Flask helpers.
+5. Small FastAPI / Flask helpers that keep framework adapters optional.
 6. JSON Schema output for editor completion.
-7. A minimal non-root Docker image and `uvx` / `pipx` installation guides.
+7. A minimal non-root Docker image and uvx / pipx installation guides.
 8. A published MkDocs documentation site.
 9. Provider retry schedule presets after explicit per-attempt schedule support and longer safe run-time budgets are designed.
 
