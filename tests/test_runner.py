@@ -775,7 +775,13 @@ def test_deterministic_fault_injection_example_proves_single_effect(receiver) ->
     result = asyncio.run(run_scenario(data, base))
 
     attempts = result["deliveries"][0]["attempts"]
-    assert result["summary"]["success"] is True
+    assert result["summary"]["success"] is True, {
+        "summary": result["summary"],
+        "attempts": attempts,
+        "verification": result["verification"],
+        "receiver_requests": state["requests"],
+        "effects": state["effects"],
+    }
     assert [attempt.get("injected_fault") for attempt in attempts] == [
         "connect_error",
         "response_loss",
