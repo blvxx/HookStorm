@@ -44,7 +44,7 @@ def test_initialize_project_creates_valid_scenario_and_workflow(tmp_path) -> Non
     assert "hookstorm doctor" in preflight["run"]
     assert "--connect" in preflight["run"]
     assert "--allow-insecure-http" in preflight["run"]
-    assert HOOKSTORM_INSTALL_REF == "a4798688e292e396f2691565dd2c3bf4f9bf4577"
+    assert HOOKSTORM_INSTALL_REF == "121bef739f76cd0de61d31993e967d475235d0ca"
     assert HOOKSTORM_INSTALL_REF in workflow_text
     assert "--allow-insecure-http" in workflow_text
     assert "HOOKSTORM_ALLOW_INSECURE_HTTP" in workflow_text
