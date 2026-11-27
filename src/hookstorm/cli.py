@@ -29,6 +29,7 @@ from hookstorm.provider_profiles import provider_event
 from hookstorm.pytest_export import write_pytest
 from hookstorm.report import render_json, write_report
 from hookstorm.runner import run_scenario
+from hookstorm.scenario_schema import read_scenario_schema
 from hookstorm.scaffold import initialize_project
 
 
@@ -223,6 +224,10 @@ def _parser() -> argparse.ArgumentParser:
         default="text",
         help="output format (default: text)",
     )
+
+    schema = subparsers.add_parser("schema", help="print or export the version 1 JSON Schema")
+    schema.add_argument("--output", help="write the schema to a file instead of stdout")
+    schema.add_argument("--force", action="store_true", help="overwrite an existing output file")
 
     validate = subparsers.add_parser("validate", help="validate a scenario without sending requests")
     validate.add_argument("scenario", help="path to a scenario YAML file")
@@ -637,6 +642,20 @@ def main(argv: Sequence[str] | None = None) -> int:
             return _doctor_command(args)
         if args.command == "capture":
             return _capture_command(args)
+        if args.command == "schema":
+            serialized_schema = read_scenario_schema()
+            if not args.output:
+                sys.stdout.write(serialized_schema)
+                return 0
+            schema_path = Path(args.output)
+            if schema_path.exists() and not args.force:
+                raise ValueError(
+                    f"Refusing to overwrite existing schema file: {schema_path}; pass --force"
+                )
+            schema_path.parent.mkdir(parents=True, exist_ok=True)
+            schema_path.write_text(serialized_schema, encoding="utf-8")
+            print(f"JSON Schema written: {schema_path.resolve()}")
+            return 0
         if args.command == "history":
             if args.history_command == "list":
                 return _history_list_command(args)
