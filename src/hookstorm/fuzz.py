@@ -4,6 +4,7 @@ from __future__ import annotations
 
 import copy
 import json
+import os
 import random
 from collections.abc import Awaitable, Callable, Iterable
 from pathlib import Path
@@ -248,11 +249,28 @@ def scenario_to_yaml(scenario: dict[str, Any]) -> str:
 
 
 def _write_case(directory: Path, name: str, scenario: dict[str, Any]) -> str:
+    """Write a replay case exclusively with owner-only permissions on POSIX."""
     directory.mkdir(parents=True, exist_ok=True)
     path = directory / name
-    if path.exists():
-        raise FileExistsError(f"Refusing to overwrite fuzz case: {path}")
-    path.write_text(scenario_to_yaml(scenario), encoding="utf-8")
+    descriptor = os.open(
+        path,
+        os.O_WRONLY | os.O_CREAT | os.O_EXCL,
+        0o600,
+    )
+    try:
+        if os.name == "posix":
+            os.fchmod(descriptor, 0o600)
+        with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
+            descriptor = -1
+            stream.write(scenario_to_yaml(scenario))
+    except OSError:
+        if descriptor >= 0:
+            os.close(descriptor)
+        try:
+            path.unlink()
+        except OSError:
+            pass
+        raise
     return str(path)
 
 
