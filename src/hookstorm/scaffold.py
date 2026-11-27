@@ -6,7 +6,6 @@ import json
 import re
 from pathlib import Path, PureWindowsPath
 
-# Pin generated workflows to a reviewed commit containing all documented scenario features.
 HOOKSTORM_INSTALL_REF = "7ab9ffb6ab510b4067916a83068bf60f8c010a70"
 _SIGNATURE_PROVIDERS = {"generic", "stripe", "github", "shopify", "standard_webhooks"}
 _SAFE_PATH = re.compile(r"^[A-Za-z0-9._/-]+$")
@@ -102,6 +101,7 @@ jobs:
       HOOKSTORM_SCENARIO: ${{{{ vars.HOOKSTORM_SCENARIO || '{scenario_path}' }}}}
       HOOKSTORM_TARGET_URL: ${{{{ vars.HOOKSTORM_TARGET_URL }}}}
       HOOKSTORM_SECRET: ${{{{ secrets.HOOKSTORM_SECRET }}}}
+      HOOKSTORM_ALLOW_INSECURE_HTTP: ${{{{ vars.HOOKSTORM_ALLOW_INSECURE_HTTP || '0' }}}}
       HOOKSTORM_LATENCY_THRESHOLD_PCT: ${{{{ vars.HOOKSTORM_LATENCY_THRESHOLD_PCT || '20' }}}}
       HOOKSTORM_HISTORY_DB: .hookstorm/history.sqlite3
       HOOKSTORM_BASELINE_FILE: .hookstorm-baselines/webhook.json
@@ -122,7 +122,13 @@ jobs:
           "{install}"
 
       - name: Preflight staging endpoint
-        run: hookstorm doctor "$HOOKSTORM_SCENARIO" --connect --secret-env HOOKSTORM_SECRET
+        shell: bash
+        run: |
+          ALLOW_INSECURE_HTTP_ARGS=()
+          if [[ "${{HOOKSTORM_ALLOW_INSECURE_HTTP:-0}}" == "1" ]]; then
+            ALLOW_INSECURE_HTTP_ARGS+=(--allow-insecure-http)
+          fi
+          hookstorm doctor "$HOOKSTORM_SCENARIO" --connect --secret-env HOOKSTORM_SECRET "${{ALLOW_INSECURE_HTTP_ARGS[@]}}"
 
       - name: Restore main-branch baseline
         uses: actions/cache/restore@0057852bfaa89a56745cba8c7296529d2fc39830
@@ -138,9 +144,14 @@ jobs:
           set -euo pipefail
           mkdir -p .hookstorm .hookstorm-baselines test-results
 
+          ALLOW_INSECURE_HTTP_ARGS=()
+          if [[ "${{HOOKSTORM_ALLOW_INSECURE_HTTP:-0}}" == "1" ]]; then
+            ALLOW_INSECURE_HTTP_ARGS+=(--allow-insecure-http)
+          fi
+
           hookstorm run "$HOOKSTORM_SCENARIO" \
             --target "$HOOKSTORM_TARGET_URL" \
-            --allow-remote \
+            --allow-remote "${{ALLOW_INSECURE_HTTP_ARGS[@]}}" \
             --secret-env HOOKSTORM_SECRET \
             --history-db "$HOOKSTORM_HISTORY_DB" \
             --format junit \
