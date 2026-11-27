@@ -6,7 +6,7 @@ import time
 
 import pytest
 
-from hookstorm.config import ScenarioError, validate_scenario
+from hookstorm.config import ScenarioError, load_scenario, validate_scenario
 from hookstorm.report import render_html, render_json, render_junit
 from hookstorm.runner import MAX_RESPONSE_BODY_BYTES, run_scenario
 
@@ -758,3 +758,32 @@ def test_run_timeout_cancels_in_flight_response_processing(receiver, monkeypatch
 
     with pytest.raises(ValueError, match="exceeded run_timeout_ms=1000"):
         asyncio.run(run_scenario(data, base))
+
+
+def test_deterministic_fault_injection_example_proves_single_effect(receiver) -> None:
+    from pathlib import Path
+
+    base, state = receiver
+    example_path = (
+        Path(__file__).resolve().parents[1]
+        / "examples"
+        / "deterministic-fault-injection.yaml"
+    )
+    data = load_scenario(example_path)
+    data["verify"]["url"] = f"${base}/state"
+
+    result = asyncio.run(run_scenario(data, base))
+
+    attempts = result["deliveries"][0]["attempts"]
+    assert result["summary"]["success"] is True
+    assert [attempt.get("injected_fault") for attempt in attempts] == [
+        "connect_error",
+        "response_loss",
+        None,
+    ]
+    assert [request["event_id"] for request in state["requests"]] == [
+        "evt_fault_injection_001",
+        "evt_fault_injection_001",
+    ]
+    assert len(state["effects"]) == 1
+    assert result["verification"]["passed"] is True
