@@ -20,6 +20,8 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Add provider event profiles with synthetic payloads, event IDs/types, provider-managed headers, and profile-aware `hookstorm run` / `hookstorm init`.
 - Add seeded JSON payload fuzzing with unique trial event IDs, replayable YAML failure cases, and an optional bounded failure reducer.
 - Extend seeded fuzzing with opt-in deterministic event-order, duplicate-count, per-attempt delay, and transport-fault mutation dimensions while preserving payload-only defaults.
+- Add request-level fault injection for malformed JSON, wrong Content-Type, gzip/deflate bodies, invalid compressed data, valid/malformed chunked framing, partial uploads, and Content-Length mismatch.
+- Add a request-level fault matrix example and run it against the local demo receiver in webhook integration CI.
 - Add deterministic pre-send connection errors, post-processing acknowledgement loss, and truncated response-body read failures, with separate idempotency examples.
 - Add HTTP status and nested JSON assertions, plus an optional read-only business-state verification probe.
 - Add self-contained HTML, JSON, and JUnit reports.
