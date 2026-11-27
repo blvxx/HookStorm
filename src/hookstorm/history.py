@@ -893,6 +893,10 @@ def load_history_export(source: str | Path) -> dict[str, Any]:
             parse_constant=reject_non_standard_number,
             object_pairs_hook=reject_duplicate_keys,
         )
+        # The stdlib parser may turn a valid-looking exponent such as 1e999
+        # into infinity. Reject non-finite numbers even in fields later ignored
+        # by the history whitelist.
+        json.dumps(document, ensure_ascii=True, allow_nan=False)
     except UnicodeDecodeError as exc:
         raise HistoryError(f"Baseline file '{location}' is not valid UTF-8") from exc
     except (ValueError, RecursionError) as exc:
