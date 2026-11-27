@@ -45,6 +45,11 @@
 - Add a deterministic commit-then-drop receiver failure and a scenario that verifies idempotent processing after an ambiguous acknowledgement.
 - Extend `hookstorm init` and CI scenarios with Standard Webhooks support.
 - Add per-event run-relative scheduling offsets without blocking available concurrency slots.
+- Attach an opaque SHA-256 fingerprint of behavior-defining scenario settings to each run and portable baseline.
+- Treat changed scenario configuration as a regression unless the comparison explicitly opts into `--allow-config-change`.
+- Warn when comparing legacy baselines that predate scenario fingerprints.
+- Reject duplicate delivery identities in history comparisons instead of silently overwriting a delivery result.
+- Document how to refresh baselines after intentional scenario contract changes.
 - Reject non-ASCII and control characters in webhook header values before any network request.
 - Require unique event IDs within a scenario to protect idempotency and history comparisons.
 - Use full UUID run identifiers to reduce the risk of history key collisions.
