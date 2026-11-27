@@ -22,7 +22,7 @@ The chosen port is printed at startup. By default capture stops accepting additi
 
 - Only HTTP POST requests with one valid `Content-Length` header are accepted. Chunked request bodies are rejected.
 - Bodies must be UTF-8 JSON. Non-JSON bodies receive HTTP 400 because scenario version 1 models JSON payloads; raw binary or form bodies cannot be replayed faithfully by this command.
-- Each request body is limited to 1 MiB; the complete captured scenario is limited to 8 MiB.
+- Each request body is limited to 1 MiB; the complete captured scenario is limited to 8 MiB. JSON nesting is limited to 100 object/array levels, consistently across supported Python versions and operating systems.
 - Authorization, cookies, API keys, tokens, password-like fields, and signature headers are omitted by default.
 - The receiver is strictly bound to IPv4 loopback. It does not use redirects or forward captured requests anywhere.
 - The scenario file is atomically replaced after each accepted event and uses POSIX permissions `0600`.
