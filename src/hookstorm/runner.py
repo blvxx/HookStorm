@@ -317,8 +317,20 @@ async def run_scenario(
                 "webhook-signature",
             }
             for key, value in event["headers"].items():
-                if key.lower() not in reserved:
-                    base_headers[key] = value
+                normalized_key = key.lower()
+                if normalized_key in reserved:
+                    continue
+                existing_key = next(
+                    (
+                        existing
+                        for existing in base_headers
+                        if existing.lower() == normalized_key
+                    ),
+                    None,
+                )
+                if existing_key is not None:
+                    del base_headers[existing_key]
+                base_headers[key] = value
 
             event_deliveries: list[dict[str, Any]] = []
             for duplicate_index in range(delivery_config["duplicate_count"] + 1):
