@@ -365,6 +365,37 @@ def test_history_export_is_portable_and_sanitized(tmp_path) -> None:
     assert "secret" not in loaded
 
 
+def test_history_export_preserves_existing_baseline_when_atomic_replace_fails(
+    tmp_path, monkeypatch
+) -> None:
+    database = tmp_path / "history.sqlite3"
+    output = tmp_path / "baseline.json"
+    save_run(make_result("run_export2"), database)
+    output.write_text("previous valid baseline", encoding="utf-8")
+
+    def fail_replace(_source, _destination):
+        raise OSError("simulated replacement failure")
+
+    monkeypatch.setattr(history_module.os, "replace", fail_replace)
+    with pytest.raises(HistoryError, match="Cannot export run"):
+        export_history_run("latest", output, database)
+
+    assert output.read_text(encoding="utf-8") == "previous valid baseline"
+    assert list(tmp_path.glob(".baseline.json.*.tmp")) == []
+
+
+def test_load_history_export_rejects_oversized_and_deep_json(tmp_path) -> None:
+    oversized = tmp_path / "oversized-baseline.json"
+    oversized.write_bytes(b" " * (history_module._MAX_HISTORY_EXPORT_BYTES + 1))
+    with pytest.raises(HistoryError, match="size limit"):
+        load_history_export(oversized)
+
+    deep = tmp_path / "deep-baseline.json"
+    deep.write_text("[" * 1_200 + "null" + "]" * 1_200, encoding="utf-8")
+    with pytest.raises(HistoryError, match="within parser limits"):
+        load_history_export(deep)
+
+
 def test_compare_history_file_detects_regression_from_another_database(tmp_path) -> None:
     baseline_db = tmp_path / "baseline.sqlite3"
     current_db = tmp_path / "current.sqlite3"
