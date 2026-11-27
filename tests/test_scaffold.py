@@ -193,3 +193,26 @@ def test_initialize_project_generates_provider_specific_scenario(
     assert scenario["events"][0]["id"] == expected_event_type
     assert scenario["delivery"]["signature_provider"] == provider
     assert scenario["delivery"]["signature"] == "valid"
+
+
+@pytest.mark.parametrize(
+    ("field", "value"),
+    [
+        ("event_type", "   "),
+        ("event_type", "type\twith-tab"),
+        ("event_type", "event-☃"),
+        ("event_type", "event-\x7f"),
+        ("event_id", "   "),
+        ("event_id", "evt-☃"),
+        ("event_id", "evt-\x00"),
+    ],
+)
+def test_initialize_rejects_event_values_that_scenario_validation_would_reject(
+    tmp_path, field: str, value: str
+) -> None:
+    with pytest.raises(ValueError, match="printable ASCII"):
+        initialize_project(
+            root=tmp_path,
+            include_workflow=False,
+            **{field: value},
+        )
