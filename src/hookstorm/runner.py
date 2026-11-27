@@ -370,99 +370,100 @@ async def run_scenario(
 
     try:
         async with asyncio.timeout(scenario["run_timeout_ms"] / 1000):
-        async with httpx.AsyncClient(
-            follow_redirects=False,
-            trust_env=False,
-            timeout=httpx.Timeout(30.0, connect=5.0),
-        ) as client:
-            # Start the earliest scheduled events first, even if setup overhead means
-            # multiple offsets have already elapsed. Restore scenario order after execution.
-            execution_order = sorted(
-                range(len(ordered_events)),
-                key=lambda index: ordered_events[index].get("schedule_after_ms", 0),
-            )
-            scheduled_groups = await asyncio.gather(
-                *(process_event(ordered_events[index]) for index in execution_order)
-            )
-            groups_by_scenario_index = {
-                index: group
-                for index, group in zip(execution_order, scheduled_groups, strict=True)
-            }
-            all_deliveries = [
-                delivery
-                for index in range(len(ordered_events))
-                for delivery in groups_by_scenario_index[index]
-            ]
-
-            verification = None
-            if verify_config is not None and verification_url is not None:
-                verify_started = time.perf_counter()
-                verification = {
-                    "method": "GET",
-                    "target": reported_verify_target,
-                    "status_code": None,
-                    "latency_ms": 0.0,
-                    "error": None,
-                    "expected_status": False,
-                    "expected_json": False,
-                    "passed": False,
+            async with httpx.AsyncClient(
+                follow_redirects=False,
+                trust_env=False,
+                timeout=httpx.Timeout(30.0, connect=5.0),
+            ) as client:
+                # Start the earliest scheduled events first, even if setup overhead means
+                # multiple offsets have already elapsed. Restore scenario order after execution.
+                execution_order = sorted(
+                    range(len(ordered_events)),
+                    key=lambda index: ordered_events[index].get("schedule_after_ms", 0),
+                )
+                scheduled_groups = await asyncio.gather(
+                    *(process_event(ordered_events[index]) for index in execution_order)
+                )
+                groups_by_scenario_index = {
+                    index: group
+                    for index, group in zip(execution_order, scheduled_groups, strict=True)
                 }
-                try:
-                    async with client.stream(
-                        "GET",
-                        verification_url,
-                        headers={
-                            "User-Agent": f"HookStorm/{__version__} (+https://github.com/blvxx/HookStorm)",
-                            "X-HookStorm-Run": run_id,
-                            **verification_auth_headers,
-                        },
-                        timeout=verify_config["timeout_ms"] / 1000,
-                    ) as response:
-                        verification["status_code"] = response.status_code
-                        response_body = await _read_limited_response_body(response)
+                all_deliveries = [
+                    delivery
+                    for index in range(len(ordered_events))
+                    for delivery in groups_by_scenario_index[index]
+                ]
+
+                verification = None
+                if verify_config is not None and verification_url is not None:
+                    verify_started = time.perf_counter()
+                    verification = {
+                        "method": "GET",
+                        "target": reported_verify_target,
+                        "status_code": None,
+                        "latency_ms": 0.0,
+                        "error": None,
+                        "expected_status": False,
+                        "expected_json": False,
+                        "passed": False,
+                    }
+                    try:
+                        async with client.stream(
+                            "GET",
+                            verification_url,
+                            headers={
+                                "User-Agent": f"HookStorm/{__version__} (+https://github.com/blvxx/HookStorm)",
+                                "X-HookStorm-Run": run_id,
+                                **verification_auth_headers,
+                            },
+                            timeout=verify_config["timeout_ms"] / 1000,
+                        ) as response:
+                            verification["status_code"] = response.status_code
+                            response_body = await _read_limited_response_body(response)
+                            verification["latency_ms"] = round(
+                                (time.perf_counter() - verify_started) * 1000, 2
+                            )
+                            verification["expected_status"] = (
+                                response.status_code in verify_config["expect_status"]
+                            )
+                            if response_body is None:
+                                matched, mismatch = (
+                                    False,
+                                    "verification response body exceeds the 2 MiB safety limit",
+                                )
+                            else:
+                                try:
+                                    matched, mismatch = _matches_subset(
+                                        json.loads(response_body), verify_config["expect_json"]
+                                    )
+                                except ValueError:
+                                    matched, mismatch = (
+                                        False,
+                                        "verification response body is not valid JSON",
+                                    )
+                        verification["expected_json"] = matched
+                        if mismatch:
+                            verification["error"] = mismatch
+                        elif not verification["expected_status"]:
+                            verification["error"] = (
+                                f"verification returned unexpected HTTP status {response.status_code}"
+                            )
+                        verification["passed"] = (
+                            verification["expected_status"] and verification["expected_json"]
+                        )
+                    except httpx.TimeoutException:
                         verification["latency_ms"] = round(
                             (time.perf_counter() - verify_started) * 1000, 2
                         )
-                        verification["expected_status"] = (
-                            response.status_code in verify_config["expect_status"]
+                        verification["error"] = "verification request timed out"
+                    except httpx.RequestError as exc:
+                        verification["latency_ms"] = round(
+                            (time.perf_counter() - verify_started) * 1000, 2
                         )
-                        if response_body is None:
-                            matched, mismatch = (
-                                False,
-                                "verification response body exceeds the 2 MiB safety limit",
-                            )
-                        else:
-                            try:
-                                matched, mismatch = _matches_subset(
-                                    json.loads(response_body), verify_config["expect_json"]
-                                )
-                            except ValueError:
-                                matched, mismatch = (
-                                    False,
-                                    "verification response body is not valid JSON",
-                                )
-                    verification["expected_json"] = matched
-                    if mismatch:
-                        verification["error"] = mismatch
-                    elif not verification["expected_status"]:
                         verification["error"] = (
-                            f"verification returned unexpected HTTP status {response.status_code}"
+                            f"verification request error: {type(exc).__name__}"
                         )
-                    verification["passed"] = (
-                        verification["expected_status"] and verification["expected_json"]
-                    )
-                except httpx.TimeoutException:
-                    verification["latency_ms"] = round(
-                        (time.perf_counter() - verify_started) * 1000, 2
-                    )
-                    verification["error"] = "verification request timed out"
-                except httpx.RequestError as exc:
-                    verification["latency_ms"] = round(
-                        (time.perf_counter() - verify_started) * 1000, 2
-                    )
-                    verification["error"] = (
-                        f"verification request error: {type(exc).__name__}"
-                    )
+
 
     except TimeoutError as exc:
         raise ValueError(
