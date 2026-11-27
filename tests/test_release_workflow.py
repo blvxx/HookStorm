@@ -116,3 +116,24 @@ def test_ci_builds_and_smoke_tests_wheel_and_source_distribution() -> None:
     assert build["run"] == "python -m build --sdist --wheel --outdir dist"
     assert smoke["run"] == "python scripts/smoke_wheel.py --all"
     assert steps.index(build) < steps.index(smoke)
+
+
+def test_all_repository_workflow_actions_are_pinned_to_full_commit_shas() -> None:
+    import re
+
+    workflow_dir = Path(__file__).resolve().parents[1] / ".github" / "workflows"
+    workflow_paths = sorted((*workflow_dir.glob("*.yml"), *workflow_dir.glob("*.yaml")))
+    assert workflow_paths
+
+    for workflow_path in workflow_paths:
+        workflow = yaml.load(workflow_path.read_text(encoding="utf-8"), Loader=yaml.BaseLoader)
+        for job_name, job in workflow.get("jobs", {}).items():
+            for step in job.get("steps", []):
+                action = step.get("uses")
+                if action is None or action.startswith("./"):
+                    continue
+                reference = action.rsplit("@", 1)[-1].split()[0]
+                assert re.fullmatch(r"[0-9a-f]{40}", reference), (
+                    f"{workflow_path.relative_to(workflow_dir.parent.parent)} "
+                    f"job {job_name!r} uses an unpinned action: {action}"
+                )

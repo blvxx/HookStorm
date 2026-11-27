@@ -67,3 +67,16 @@ def test_external_workflow_bash_steps_pass_syntax_check() -> None:
             check=False,
         )
         assert checked.returncode == 0, checked.stderr
+
+
+def test_copy_ready_template_pins_all_github_actions_to_full_shas() -> None:
+    import re
+
+    workflow = _load_workflow()
+    steps = workflow["jobs"]["webhook-regression"]["steps"]
+    for step in steps:
+        action = step.get("uses")
+        if action is None or action.startswith("./"):
+            continue
+        reference = action.rsplit("@", 1)[-1].split()[0]
+        assert re.fullmatch(r"[0-9a-f]{40}", reference), action
