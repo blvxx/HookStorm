@@ -120,7 +120,12 @@ def test_reverse_order_is_applied(receiver) -> None:
     }
     result = asyncio.run(run_scenario(validate_scenario(data), base))
     assert result["summary"]["success"] is True
+    # Delivery.order reverses network arrival but JSON/JUnit data stays in source order.
     assert [request["event_id"] for request in state["requests"]] == ["evt_second", "evt_first"]
+    assert [delivery["event_id"] for delivery in result["deliveries"]] == [
+        "evt_first",
+        "evt_second",
+    ]
 
 
 def test_generates_and_sends_hmac_signature(receiver) -> None:
