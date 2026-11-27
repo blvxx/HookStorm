@@ -41,6 +41,15 @@ The same event_id is preserved across retries and duplicate deliveries, so the r
 
 Requires Python 3.11 or newer.
 
+After the first public alpha is published, install it directly from PyPI:
+
+~~~bash
+python -m pip install --pre hookstorm
+hookstorm --version
+~~~
+
+To work from source or contribute, clone the repository:
+
 ~~~bash
 git clone https://github.com/blvxx/HookStorm.git
 cd HookStorm
@@ -417,7 +426,7 @@ pytest
 
 CI tests Python 3.11, 3.12, and 3.13 on Linux, plus Python 3.12 on Windows and macOS. Every matrix job runs lint, tests, builds the wheel, and smoke-tests the installed wheel in a clean virtual environment.
 
-For the release gates, artifact checks, and GitHub Release / optional PyPI publication steps, see [the release checklist](docs/release-checklist.md).
+For release gates and artifact checks, see [the release checklist](docs/release-checklist.md) and [PyPI Trusted Publishing guide](docs/pypi-publishing.md).
 
 ## Roadmap
 
