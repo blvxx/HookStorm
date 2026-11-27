@@ -13,6 +13,7 @@ from hookstorm.capture import (
     MAX_CAPTURE_BODY_BYTES,
     CaptureError,
     CaptureStore,
+    _parse_content_length,
     create_capture_server,
 )
 from hookstorm.config import load_scenario, scenario_fingerprint, validate_scenario
@@ -48,6 +49,22 @@ def _stop_server(server, thread) -> None:
     server.server_close()
     thread.join(timeout=3)
     assert not thread.is_alive()
+
+
+def test_content_length_parser_rejects_ambiguous_and_oversized_values() -> None:
+    assert _parse_content_length(["0000000000000000000001"]) == 1
+
+    with pytest.raises(CaptureError) as duplicate:
+        _parse_content_length(["1", "1"])
+    assert duplicate.value.status_code == 411
+
+    with pytest.raises(CaptureError) as non_ascii:
+        _parse_content_length(["１"])
+    assert non_ascii.value.status_code == 411
+
+    with pytest.raises(CaptureError) as oversized:
+        _parse_content_length(["9" * 5_000])
+    assert oversized.value.status_code == 413
 
 
 def test_capture_server_is_loopback_only_and_redacts_sensitive_headers(tmp_path) -> None:
