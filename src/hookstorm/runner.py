@@ -45,11 +45,20 @@ def _json_bytes(value: Any) -> bytes:
 
 
 def _parse_response_json(body: bytes) -> Any:
-    """Parse bounded UTF-8 JSON without accepting pathological nesting or non-finite numbers."""
+    """Parse bounded UTF-8 JSON without ambiguity, pathological nesting, or non-finite numbers."""
+
+    def reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+        value: dict[str, Any] = {}
+        for key, item in pairs:
+            if key in value:
+                raise ValueError(f"response JSON contains duplicate object key {key!r}")
+            value[key] = item
+        return value
+
     try:
         source = body.decode("utf-8")
         ensure_json_text_depth(source)
-        value = json.loads(source)
+        value = json.loads(source, object_pairs_hook=reject_duplicate_keys)
         # The standard decoder accepts NaN/Infinity and converts 1e999 to inf.
         # Reject those values even when a caller only checks a subset of fields.
         json.dumps(value, ensure_ascii=True, allow_nan=False)
