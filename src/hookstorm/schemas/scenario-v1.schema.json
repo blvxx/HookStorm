@@ -315,108 +315,51 @@
               }
             }
           }
+        },
+        "order": {
+          "type": "string",
+          "enum": [
+            "in_order",
+            "reverse"
+          ]
+        },
+        "concurrency": {
+          "type": "integer",
+          "minimum": 1,
+          "maximum": 50
         }
       }
     },
     "delivery": {
-      "allOf": [
+      "$ref": "#/$defs/deliveryCommon"
+    },
+    "eventDelivery": {
+      "anyOf": [
         {
           "$ref": "#/$defs/deliveryCommon"
         },
         {
-          "type": "object",
-          "additionalProperties": false,
-          "properties": {
-            "order": {
-              "type": "string",
-              "enum": [
-                "in_order",
-                "reverse"
-              ]
-            },
-            "concurrency": {
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 50
-            },
-            "duplicate_count": {
-              "type": "integer",
-              "minimum": 0,
-              "maximum": 100
-            },
-            "delay_ms": {
-              "type": "integer",
-              "minimum": 0,
-              "maximum": 60000
-            },
-            "timeout_ms": {
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 300000
-            },
-            "signature": {
-              "type": "string",
-              "enum": [
-                "none",
-                "valid",
-                "invalid",
-                "missing"
-              ]
-            },
-            "signature_provider": {
-              "type": "string",
-              "enum": [
-                "generic",
-                "stripe",
-                "github",
-                "shopify",
-                "standard_webhooks"
-              ]
-            },
-            "signature_timestamp_offset_seconds": {
-              "type": "integer",
-              "minimum": -86400,
-              "maximum": 86400
-            },
-            "fault_injection": {
-              "type": "object",
-              "additionalProperties": false,
-              "properties": {
-                "connect_error_attempts": {
-                  "type": "array",
-                  "uniqueItems": true,
-                  "items": {
-                    "type": "integer",
-                    "minimum": 1,
-                    "maximum": 10
-                  }
-                },
-                "response_loss_attempts": {
-                  "type": "array",
-                  "uniqueItems": true,
-                  "items": {
-                    "type": "integer",
-                    "minimum": 1,
-                    "maximum": 10
-                  }
-                },
-                "response_body_error_attempts": {
-                  "type": "array",
-                  "uniqueItems": true,
-                  "items": {
-                    "type": "integer",
-                    "minimum": 1,
-                    "maximum": 10
-                  }
-                }
+          "type": "null"
+        }
+      ],
+      "allOf": [
+        {
+          "not": {
+            "anyOf": [
+              {
+                "required": [
+                  "order"
+                ]
+              },
+              {
+                "required": [
+                  "concurrency"
+                ]
               }
-            }
+            ]
           }
         }
       ]
-    },
-    "eventDelivery": {
-      "$ref": "#/$defs/deliveryCommon"
     },
     "event": {
       "type": "object",
@@ -616,7 +559,7 @@
                 "type": "string",
                 "minLength": 1,
                 "maxLength": 2048,
-                "pattern": "^/"
+                "pattern": "^/[ -~]*$"
               },
               "original_event_id": {
                 "anyOf": [
@@ -643,7 +586,9 @@
                 }
               }
             }
-          }
+          },
+          "minItems": 1,
+          "maxItems": 500
         }
       }
     }
