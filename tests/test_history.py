@@ -629,3 +629,47 @@ def test_load_history_export_rejects_duplicate_delivery_identities(tmp_path) -> 
 
     with pytest.raises(HistoryError, match="duplicate delivery identity"):
         load_history_export(baseline_file)
+
+
+
+def test_load_history_export_rejects_non_object_delivery_entries(tmp_path) -> None:
+    database = tmp_path / "history.sqlite3"
+    baseline_file = tmp_path / "baseline.json"
+    save_run(make_result("run_nonobject"), database)
+    export_history_run("latest", baseline_file, database)
+
+    document = json.loads(baseline_file.read_text(encoding="utf-8"))
+    document["run"]["deliveries"][0] = None
+    baseline_file.write_text(json.dumps(document), encoding="utf-8")
+
+    with pytest.raises(HistoryError, match="delivery 0 must be a JSON object"):
+        load_history_export(baseline_file)
+
+
+@pytest.mark.parametrize("format_version", [True, 1.0, "1", None])
+def test_load_history_export_requires_integer_format_version(
+    tmp_path, format_version: object
+) -> None:
+    baseline_file = tmp_path / "baseline.json"
+    baseline_file.write_text(
+        json.dumps({
+            "format": "hookstorm-history",
+            "format_version": format_version,
+            "run": {},
+        }),
+        encoding="utf-8",
+    )
+
+    with pytest.raises(HistoryError, match="Unsupported baseline file format"):
+        load_history_export(baseline_file)
+
+
+def test_load_history_export_rejects_duplicate_json_keys(tmp_path) -> None:
+    baseline_file = tmp_path / "baseline.json"
+    baseline_file.write_text(
+        '{"format":"hookstorm-history","format":"other","format_version":1,"run":{}}',
+        encoding="utf-8",
+    )
+
+    with pytest.raises(HistoryError, match="duplicate JSON key"):
+        load_history_export(baseline_file)
