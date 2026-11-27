@@ -19,6 +19,7 @@ def test_package_metadata_has_author_documentation_and_dev_tooling() -> None:
     dev_dependencies = project["optional-dependencies"]["dev"]
     assert any(item.startswith("mypy") for item in dev_dependencies)
     assert any(item.startswith("coverage") for item in dev_dependencies)
+    assert project["optional-dependencies"]["pytest"] == ["pytest>=8.0,<10"]
     assert (ROOT / "src" / "hookstorm" / "py.typed").is_file()
     assert "py.typed" in data["tool"]["setuptools"]["package-data"]["hookstorm"]
 
