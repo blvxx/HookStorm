@@ -1,16 +1,8 @@
 # Changelog
 
-## 0.1.0 — Initial public development release
-
-- Add YAML scenario validation and CLI commands (run, validate).
-- Add retries, duplicate delivery, reverse event ordering, delays, timeouts, and HMAC modes.
-- Add HTTP status and JSON response assertions.
-- Add JSON and self-contained HTML reports.
-- Block non-loopback targets by default.
-- Add local demo receiver, sample scenarios, tests, and GitHub Actions CI.
-
-
 ## Unreleased
+
+## 0.1.0a1 — First public alpha preview
 
 - Add bounded concurrent delivery for independent events (1–50 workers; sequential by default).
 - Preserve scenario order in reports when concurrent requests finish out of order.
@@ -56,3 +48,12 @@
 - Refresh the generated GitHub Actions installer pin and add a regression assertion for the pinned revision.
 - Build and install-test the wheel in an isolated environment on every CI matrix job.
 - Add a public release checklist covering artifact validation, GitHub Releases, and optional PyPI trusted publishing.
+
+## Initial implementation
+
+- Add YAML scenario validation and CLI commands (run, validate).
+- Add retries, duplicate delivery, reverse event ordering, delays, timeouts, and HMAC modes.
+- Add HTTP status and JSON response assertions.
+- Add JSON and self-contained HTML reports.
+- Block non-loopback targets by default.
+- Add local demo receiver, sample scenarios, tests, and GitHub Actions CI.
