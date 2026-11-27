@@ -13,7 +13,7 @@ from urllib.parse import urlsplit
 
 import yaml
 
-from hookstorm.config import validate_scenario
+from hookstorm.config import ScenarioError, validate_scenario
 
 MAX_CAPTURE_BODY_BYTES = 1_048_576
 MAX_CAPTURE_SCENARIO_BYTES = 8 * 1_048_576
@@ -137,8 +137,12 @@ class CaptureStore:
                 body.decode("utf-8"),
                 object_pairs_hook=_unique_json_object,
             )
-        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
-            raise CaptureError("capture accepts UTF-8 JSON request bodies only") from exc
+        except CaptureError:
+            raise
+        except (UnicodeDecodeError, ValueError, RecursionError) as exc:
+            raise CaptureError(
+                "capture accepts valid UTF-8 JSON request bodies within parser limits"
+            ) from exc
 
         normalized_headers: dict[str, str] = {}
         sensitive_headers: dict[str, str] = {}
@@ -187,10 +191,18 @@ class CaptureStore:
         try:
             validate_scenario(candidate)
             self._write(candidate)
-        except Exception:
+        except Exception as exc:
             self.events.pop()
             self.capture_events.pop()
             self.total_body_bytes -= len(body)
+            if isinstance(exc, ScenarioError):
+                raise CaptureError(
+                    f"captured request cannot be represented as a HookStorm scenario: {exc}"
+                ) from exc
+            if isinstance(exc, RecursionError):
+                raise CaptureError(
+                    "captured request exceeds the supported JSON/YAML nesting limits"
+                ) from exc
             raise
         return event
 
