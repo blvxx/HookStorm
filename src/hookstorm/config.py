@@ -503,7 +503,14 @@ def _validate_scenario(data: Any) -> dict[str, Any]:
             for key, value in custom_headers.items()
         ):
             raise ScenarioError(f"{where}.headers must be a mapping of string keys to string values")
+        seen_header_names: set[str] = set()
         for key, value in custom_headers.items():
+            normalized_name = key.lower()
+            if normalized_name in seen_header_names:
+                raise ScenarioError(
+                    f"{where}.headers must not contain case-insensitive duplicate names: {key}"
+                )
+            seen_header_names.add(normalized_name)
             if (
                 not re.fullmatch(r"[!#$%&'*+._^|~0-9A-Za-z-]+", key)
                 or not _is_safe_header_value(value)
