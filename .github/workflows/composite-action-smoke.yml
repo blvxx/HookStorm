@@ -1,0 +1,86 @@
+name: Composite action smoke test
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - ".github/actions/run/**"
+      - ".github/workflows/composite-action-smoke.yml"
+      - "examples/payment-retry.yaml"
+      - "examples/receiver.py"
+      - "pyproject.toml"
+  pull_request:
+    branches: [main]
+    paths:
+      - ".github/actions/run/**"
+      - ".github/workflows/composite-action-smoke.yml"
+      - "examples/payment-retry.yaml"
+      - "examples/receiver.py"
+      - "pyproject.toml"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  composite-action:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Check out HookStorm
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7
+
+      - name: Set up Python
+        uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
+        with:
+          python-version: "3.12"
+          cache: pip
+
+      - name: Start local demo receiver
+        shell: bash
+        run: |
+          set -euo pipefail
+          mkdir -p test-results
+          python examples/receiver.py > test-results/receiver.log 2>&1 &
+          echo "$!" > test-results/receiver.pid
+          ready=0
+          for attempt in $(seq 1 30); do
+            if python -c "import socket; s=socket.create_connection(('127.0.0.1', 8000), timeout=0.25); s.close()" 2>/dev/null; then
+              ready=1
+              break
+            fi
+            sleep 0.5
+          done
+          if [ "$ready" -ne 1 ]; then
+            cat test-results/receiver.log
+            echo "::error::Demo receiver did not start"
+            exit 1
+          fi
+
+      - name: Run the local composite action
+        uses: ./.github/actions/run
+        with:
+          scenario: examples/payment-retry.yaml
+          target-url: http://127.0.0.1:8000/webhook/flaky
+          connect-preflight: "true"
+          format: junit
+          output-path: test-results/composite-action.xml
+
+      - name: Stop local demo receiver
+        if: always()
+        shell: bash
+        run: |
+          if [ -f test-results/receiver.pid ]; then
+            kill "$(cat test-results/receiver.pid)" 2>/dev/null || true
+            wait "$(cat test-results/receiver.pid)" 2>/dev/null || true
+          fi
+
+      - name: Upload composite action report
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7
+        with:
+          name: hookstorm-composite-action-smoke
+          path: |
+            test-results/composite-action.xml
+            test-results/receiver.log
+          if-no-files-found: warn
+          retention-days: 14
