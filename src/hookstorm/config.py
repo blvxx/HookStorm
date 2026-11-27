@@ -379,7 +379,7 @@ def _validate_verify(value: Any) -> dict[str, Any] | None:
                 expected_json, ensure_ascii=False, separators=(",", ":"), allow_nan=False
             )
         )
-    except (TypeError, ValueError, UnicodeEncodeError, RecursionError) as exc:
+    except (TypeError, ValueError, UnicodeEncodeError) as exc:
         raise ScenarioError("verify.expect_json must contain JSON-compatible values") from exc
 
     timeout_ms = _integer(
@@ -487,7 +487,7 @@ def _validate_scenario(data: Any) -> dict[str, Any]:
             encoded_payload = json.dumps(
                 payload, ensure_ascii=False, separators=(",", ":"), allow_nan=False
             ).encode("utf-8")
-        except (TypeError, ValueError, UnicodeEncodeError, RecursionError) as exc:
+        except (TypeError, ValueError, UnicodeEncodeError) as exc:
             raise ScenarioError(f"{where}.payload must be valid JSON-compatible data") from exc
         if len(encoded_payload) > 1_048_576:
             raise ScenarioError(f"{where}.payload exceeds the 1 MiB limit")
@@ -567,7 +567,7 @@ def _validate_scenario(data: Any) -> dict[str, Any]:
                         expected, ensure_ascii=False, separators=(",", ":"), allow_nan=False
                     )
                 )
-            except (TypeError, ValueError, UnicodeEncodeError, RecursionError) as exc:
+            except (TypeError, ValueError, UnicodeEncodeError) as exc:
                 raise ScenarioError(
                     f"{where}.{expectation_key} must contain JSON-compatible values"
                 ) from exc
