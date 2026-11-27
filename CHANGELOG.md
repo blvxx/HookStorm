@@ -22,6 +22,7 @@ The format follows [Keep a Changelog](https://keepachangelog.com/en/1.1.0/), and
 - Extend seeded fuzzing with opt-in deterministic event-order, duplicate-count, per-attempt delay, and transport-fault mutation dimensions while preserving payload-only defaults.
 - Add request-level fault injection for malformed JSON, wrong Content-Type, gzip/deflate bodies, invalid compressed data, valid/malformed chunked framing, partial uploads, and Content-Length mismatch.
 - Add a request-level fault matrix example and run it against the local demo receiver in webhook integration CI.
+- Add a main-branch-only GitHub Pages deployment workflow using pinned official Actions, separate build/deploy jobs, least-privilege permissions, and a protected `github-pages` environment.
 - Add optional FastAPI and Flask test-receiver adapters backed by a shared bounded in-memory recorder with duplicate detection and sensitive-header redaction.
 - Add a minimal multi-stage Docker image that runs HookStorm as UID 10001 and a read-only/non-root container smoke test in CI.
 - Add uv / uvx / pipx installation guidance, a Zensical documentation site configuration, and a dedicated documentation build workflow.
