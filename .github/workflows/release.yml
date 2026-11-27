@@ -20,6 +20,18 @@ jobs:
         with:
           ref: ${{ github.event.release.tag_name }}
           persist-credentials: false
+          fetch-depth: 0
+
+      - name: Verify release commit is reachable from main
+        if: github.event_name == 'release'
+        env:
+          RELEASE_COMMIT: ${{ github.sha }}
+        run: |
+          git fetch --no-tags origin main
+          if ! git merge-base --is-ancestor "$RELEASE_COMMIT" FETCH_HEAD; then
+            echo "::error::The release tag must point to a commit reachable from main."
+            exit 1
+          fi
 
       - name: Set up Python
         uses: actions/setup-python@6d4fd22b20465ccc0f7354476588e8df7c9ca0e0 # v7
@@ -62,6 +74,9 @@ jobs:
 
       - name: Lint
         run: ruff check .
+
+      - name: Check formatting
+        run: ruff format --check .
 
       - name: Run tests
         run: pytest
