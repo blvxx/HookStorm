@@ -5,10 +5,10 @@ from __future__ import annotations
 import json
 import zlib
 from dataclasses import dataclass
+from collections.abc import Mapping
 from datetime import UTC, datetime
 from threading import Lock
 from typing import Any
-from collections.abc import Mapping
 
 
 _DEFAULT_MAX_BODY_BYTES = 1_048_576
@@ -190,7 +190,7 @@ class WebhookRecorder:
                 decoded.decode("utf-8"),
                 object_pairs_hook=self._reject_duplicate_keys,
             )
-        except (UnicodeDecodeError, json.JSONDecodeError, ValueError) as exc:
+        except (UnicodeDecodeError, ValueError) as exc:
             raise WebhookRequestError(
                 "request body must contain valid UTF-8 JSON without duplicate object keys",
                 status_code=400,
