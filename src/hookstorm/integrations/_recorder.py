@@ -273,7 +273,7 @@ class WebhookRecorder:
             identity = (run_id or "", event_id)
             with self._lock:
                 self._ensure_capacity()
-                self._ensure_body_capacity(len(raw_body))
+                self._ensure_body_capacity(len(raw_body) + len(decoded))
                 duplicate = identity in self._processed
                 self._processed.add(identity)
                 event = WebhookRecord(
@@ -286,7 +286,7 @@ class WebhookRecorder:
                     received_at=datetime.datetime.now(datetime.UTC).isoformat(),
                 )
                 self._events.append(event)
-                self._total_body_bytes += len(raw_body)
+                self._total_body_bytes += len(raw_body) + len(decoded)
                 return event
 
         event = WebhookRecord(
