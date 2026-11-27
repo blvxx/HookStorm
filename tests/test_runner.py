@@ -320,6 +320,23 @@ def test_json_boolean_does_not_match_integer(receiver) -> None:
     assert result["summary"]["success"] is False
     assert result["deliveries"][0]["attempts"][0]["expected_json"] is False
 
+def test_custom_content_type_replaces_default_without_duplicate_header(receiver) -> None:
+    base, state = receiver
+    result = asyncio.run(run_scenario(
+        scenario(event={"headers": {"content-type": "application/custom+json"}}),
+        base,
+    ))
+
+    assert result["summary"]["success"] is True
+    content_types = [
+        value
+        for key, value in state["requests"][0]["headers"].items()
+        if key.lower() == "content-type"
+    ]
+    assert content_types == ["application/custom+json"]
+
+
+
 
 def test_concurrency_limit_runs_events_in_parallel_and_keeps_report_order(receiver) -> None:
     base, state = receiver
