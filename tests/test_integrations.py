@@ -181,7 +181,11 @@ def test_fastapi_router_records_requests_and_rejects_bad_payloads() -> None:
     assert second.json()["duplicate"] is True
     assert bad.status_code == 400
     assert oversized.status_code == 413
-    assert integration.recorder.events[0].headers["Authorization"] == "[REDACTED]"
+    stored_headers = {
+        name.lower(): value
+        for name, value in integration.recorder.events[0].headers.items()
+    }
+    assert stored_headers["authorization"] == "[REDACTED]"
 
 
 def test_flask_endpoint_records_requests_and_returns_http_errors() -> None:
