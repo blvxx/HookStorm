@@ -36,6 +36,7 @@ The demo receiver binds to `127.0.0.1` only. The command writes a self-contained
 | Assertions | HTTP status, nested JSON, and optional read-only business-state verification |
 | Capture | Loopback-only JSON webhook receiver, header redaction, and atomic scenario export |
 | Fuzzing | Seeded JSON payloads plus optional order, duplicate, delay, and transport-fault variation with replayable failures |
+| Request faults | Malformed JSON, content-type and compression variants, chunked framing, partial uploads, and Content-Length mismatch |
 | Reports and regression checks | HTML, JSON, JUnit, local SQLite history, portable baselines |
 | Pytest integration | Optional fixtures, async runner, sync wrapper, and scenario loader |
 
@@ -73,6 +74,7 @@ Read [SECURITY.md](SECURITY.md) and the [architecture notes](docs/architecture.m
 - [Pytest integration API](docs/pytest-integration.md)
 - [Composite GitHub Action](docs/github-action.md)
 - [JSON Schema and editor support](docs/json-schema.md)
+- [Request and transport fault injection](docs/fault-injection.md)
 - [Loopback webhook capture](docs/capture.md)
 - [Provider profiles and retry-policy notes](docs/provider-profiles.md)
 - [Ambiguous acknowledgements and idempotency](docs/ambiguous-acknowledgements.md)
@@ -84,7 +86,7 @@ Read [SECURITY.md](SECURITY.md) and the [architecture notes](docs/architecture.m
 
 Planned work, in priority order:
 
-1. Expand request fault injection for malformed JSON, content types, compression, chunking, partial uploads, content-length mismatches, slow bodies, secret rotation, and large payloads.
+1. Add slow request-body streaming, controlled secret rotation, and bounded large-payload transport profiles.
 2. Small FastAPI / Flask helpers that keep framework adapters optional.
 3. A minimal non-root Docker image and uvx / pipx installation guides.
 4. A published MkDocs documentation site.
