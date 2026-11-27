@@ -72,6 +72,7 @@ Read [SECURITY.md](SECURITY.md) and the [architecture notes](docs/architecture.m
 - [Seeded fuzzing and failure minimization](docs/fuzzing.md)
 - [Pytest integration API](docs/pytest-integration.md)
 - [Composite GitHub Action](docs/github-action.md)
+- [JSON Schema and editor support](docs/json-schema.md)
 - [Loopback webhook capture](docs/capture.md)
 - [Provider profiles and retry-policy notes](docs/provider-profiles.md)
 - [Ambiguous acknowledgements and idempotency](docs/ambiguous-acknowledgements.md)
