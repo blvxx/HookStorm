@@ -210,6 +210,8 @@ def _delivery_index(
     """Index deliveries without silently discarding duplicate identities."""
     indexed: dict[tuple[str, str, int], dict[str, Any]] = {}
     for index, item in enumerate(deliveries):
+        if not isinstance(item, dict):
+            raise HistoryError(f"{label} delivery {index} must be a JSON object")
         key = _delivery_key(item)
         if key in indexed:
             raise HistoryError(
@@ -749,10 +751,21 @@ def load_history_export(source: str | Path) -> dict[str, Any]:
             f"Baseline file '{location}' contains non-standard JSON number {value}"
         )
 
+    def reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+        parsed: dict[str, Any] = {}
+        for key, value in pairs:
+            if key in parsed:
+                raise HistoryError(
+                    f"Baseline file '{location}' contains duplicate JSON key {key!r}"
+                )
+            parsed[key] = value
+        return parsed
+
     try:
         document = json.loads(
             location.read_text(encoding="utf-8"),
             parse_constant=reject_non_standard_number,
+            object_pairs_hook=reject_duplicate_keys,
         )
     except OSError as exc:
         raise HistoryError(f"Cannot read baseline file '{location}': {exc}") from exc
@@ -761,9 +774,12 @@ def load_history_export(source: str | Path) -> dict[str, Any]:
 
     if not isinstance(document, dict):
         raise HistoryError("Baseline file must contain a JSON object")
+    format_version = document.get("format_version")
     if (
         document.get("format") != _EXPORT_FORMAT
-        or document.get("format_version") != _EXPORT_FORMAT_VERSION
+        or isinstance(format_version, bool)
+        or not isinstance(format_version, int)
+        or format_version != _EXPORT_FORMAT_VERSION
     ):
         raise HistoryError(
             "Unsupported baseline file format; expected hookstorm-history version 1"
