@@ -721,7 +721,7 @@ def main(argv: Sequence[str] | None = None) -> int:
                     iterations=args.iterations,
                     allow_remote=args.allow_remote,
                     allow_insecure_http=args.allow_insecure_http,
-                    secret=os.getenv(args.secret_env),
+                    secret=os.getenv(args.secret_env, ""),
                     minimize_budget=args.minimize_budget,
                     cases_dir=args.cases_dir,
                     vary_order=args.vary_order,
@@ -753,7 +753,9 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(f"pytest integration test written: {output.resolve()}")
             print("Set HOOKSTORM_TARGET to the test receiver URL before running pytest.")
             return 0
-        secret = os.getenv(args.secret_env)
+        # Pass an explicit empty value when the selected variable is absent so
+        # the runner cannot silently fall back to HOOKSTORM_SECRET.
+        secret = os.getenv(args.secret_env, "")
         result = asyncio.run(
             run_scenario(
                 scenario,
