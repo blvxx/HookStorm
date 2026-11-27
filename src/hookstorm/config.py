@@ -454,7 +454,9 @@ def validate_scenario(data: Any) -> dict[str, Any]:
                 "x-hub-signature-256", "x-shopify-hmac-sha256",
                 "webhook-id", "webhook-timestamp", "webhook-signature",
                 "x-github-event", "x-github-delivery", "x-shopify-topic",
-                "x-shopify-shop-domain", "x-shopify-webhook-id",
+                "x-shopify-shop-domain", "x-shopify-api-version",
+                "x-shopify-triggered-at", "x-shopify-webhook-id",
+                "x-shopify-event-id",
             }:
                 raise ScenarioError(f"{where}.headers may not override {key}")
         profile_headers = (
