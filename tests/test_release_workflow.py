@@ -137,3 +137,12 @@ def test_all_repository_workflow_actions_are_pinned_to_full_commit_shas() -> Non
                     f"{workflow_path.relative_to(workflow_dir.parent.parent)} "
                     f"job {job_name!r} uses an unpinned action: {action}"
                 )
+
+
+def test_ci_and_release_workflows_enforce_ruff_formatting() -> None:
+    root = Path(__file__).resolve().parents[1] / ".github" / "workflows"
+    for filename in ("ci.yml", "release.yml"):
+        workflow = yaml.load((root / filename).read_text(encoding="utf-8"), Loader=yaml.BaseLoader)
+        steps = workflow["jobs"]["test" if filename == "ci.yml" else "build"]["steps"]
+        format_step = next(step for step in steps if step.get("name") == "Format")
+        assert format_step["run"] == "ruff format --check ."
