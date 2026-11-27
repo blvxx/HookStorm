@@ -7,7 +7,7 @@ import random
 import pytest
 
 from hookstorm.config import load_scenario, scenario_fingerprint, validate_scenario
-from hookstorm.fuzz import mutate_payload, minimize_json_payload, run_fuzz, scenario_to_yaml
+from hookstorm.fuzz import minimize_json_payload, mutate_payload, run_fuzz, scenario_to_yaml
 
 
 def _base_scenario() -> dict:

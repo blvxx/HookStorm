@@ -362,17 +362,22 @@ async def run_fuzz(
             if minimize_budget:
                 trial_number = 0
 
-                async def reproduces(candidate_payload: Any) -> bool:
+                async def reproduces(
+                    candidate_payload: Any,
+                    base_scenario: dict[str, Any] = candidate_scenario,
+                    selected_event_index: int = event_index,
+                    selected_iteration: int = iteration,
+                ) -> bool:
                     nonlocal trial_number, executions
                     trial_number += 1
-                    trial_scenario = copy.deepcopy(candidate_scenario)
-                    trial_scenario["events"][event_index]["payload"] = copy.deepcopy(
+                    trial_scenario = copy.deepcopy(base_scenario)
+                    trial_scenario["events"][selected_event_index]["payload"] = copy.deepcopy(
                         candidate_payload
                     )
                     _apply_trial_event_ids(
                         trial_scenario,
                         seed=seed,
-                        iteration=iteration,
+                        iteration=selected_iteration,
                         trial=trial_number,
                     )
                     trial_result = await execute(
