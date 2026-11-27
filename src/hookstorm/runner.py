@@ -104,11 +104,11 @@ def prepare_request_body(body: bytes, fault: str | None) -> tuple[bytes, dict[st
     if fault == "deflate_body":
         return zlib.compress(body), {"Content-Encoding": "deflate"}
     if fault == "invalid_gzip":
-        return b"\\x1f\\x8b\\x08\\x00hookstorm-invalid-gzip", {
+        return b"\x1f\x8b\x08\x00hookstorm-invalid-gzip", {
             "Content-Encoding": "gzip"
         }
     if fault == "invalid_deflate":
-        return b"\\x78\\x9chookstorm-invalid-deflate", {
+        return b"\x78\x9chookstorm-invalid-deflate", {
             "Content-Encoding": "deflate"
         }
     if fault == "wrong_content_type":
@@ -117,7 +117,7 @@ def prepare_request_body(body: bytes, fault: str | None) -> tuple[bytes, dict[st
 
 
 def _rewrite_request_headers(header_block: bytes, fault: str, body_length: int) -> bytes:
-    lines = header_block.split(b"\\r\\n")
+    lines = header_block.split(b"\r\n")
     request_line, raw_headers = lines[0], lines[1:]
     headers: list[bytes] = []
     replaced_length = False
@@ -152,7 +152,7 @@ def _rewrite_request_headers(header_block: bytes, fault: str, body_length: int) 
     if fault in {"partial_upload", "content_length_mismatch"}:
         headers.append(b"Connection: close")
 
-    return b"\\r\\n".join([request_line, *headers, b"", b""])
+    return b"\r\n".join([request_line, *headers, b"", b""])
 
 
 class _RequestFaultNetworkStream:
@@ -175,7 +175,7 @@ class _RequestFaultNetworkStream:
 
         if not self._headers_sent:
             self._pending_headers.extend(buffer)
-            marker = b"\\r\\n\\r\\n"
+            marker = b"\r\n\r\n"
             header_bytes = bytes(self._pending_headers)
             split_at = header_bytes.find(marker)
             if split_at < 0:
@@ -199,9 +199,9 @@ class _RequestFaultNetworkStream:
     async def _write_body(self, buffer: bytes, timeout: float | None) -> None:
         if self._fault == "chunked_transfer":
             self._body_bytes_sent += len(buffer)
-            chunk = f"{len(buffer):X}\\r\\n".encode("ascii") + buffer + b"\\r\\n"
+            chunk = f"{len(buffer):X}\r\n".encode("ascii") + buffer + b"\r\n"
             if self._body_bytes_sent >= self._body_length:
-                chunk += b"0\\r\\n\\r\\n"
+                chunk += b"0\r\n\r\n"
             await self._stream.write(chunk, timeout=timeout)
             return
 
@@ -209,7 +209,7 @@ class _RequestFaultNetworkStream:
             if self._body_bytes_sent == 0:
                 self._body_bytes_sent += len(buffer)
                 await self._stream.write(
-                    b"Z\\r\\n" + buffer + b"\\r\\n0\\r\\n\\r\\n",
+                    b"Z\r\n" + buffer + b"\r\n0\r\n\r\n",
                     timeout=timeout,
                 )
             return
