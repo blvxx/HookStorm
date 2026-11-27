@@ -135,7 +135,10 @@ def _validate_fault_injection(value: Any, where: str) -> dict[str, list[int]]:
     _unknown_keys(value, allowed, where)
 
     normalized: dict[str, list[int]] = {}
-    for field in sorted(allowed):
+    fields = ["connect_error_attempts", "response_loss_attempts"]
+    if "response_body_error_attempts" in value:
+        fields.append("response_body_error_attempts")
+    for field in fields:
         attempts = value.get(field, [])
         if not isinstance(attempts, list):
             raise ScenarioError(f"{where}.{field} must be a list of attempt numbers")
