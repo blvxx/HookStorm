@@ -64,6 +64,23 @@ class CaptureError(ValueError):
         self.status_code = status_code
 
 
+def _parse_content_length(values: list[str]) -> int:
+    """Parse one bounded ASCII Content-Length without converting attacker-sized integers."""
+    if len(values) != 1 or not values[0].isascii() or not values[0].isdecimal():
+        raise CaptureError(
+            "one valid Content-Length header is required", status_code=411
+        )
+    normalized = values[0].lstrip("0") or "0"
+    limit = str(MAX_CAPTURE_BODY_BYTES)
+    if len(normalized) > len(limit) or (
+        len(normalized) == len(limit) and normalized > limit
+    ):
+        raise CaptureError(
+            "request body exceeds the 1 MiB capture limit", status_code=413
+        )
+    return int(normalized)
+
+
 def _unique_json_object(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
     """Build a JSON object while rejecting ambiguous duplicate member names."""
     result: dict[str, Any] = {}
@@ -326,12 +343,10 @@ def create_capture_server(
                 self._respond(501, "chunked request bodies are not supported by capture")
                 return
             lengths = self.headers.get_all("Content-Length", [])
-            if len(lengths) != 1 or not lengths[0].isdigit():
-                self._respond(411, "one valid Content-Length header is required")
-                return
-            length = int(lengths[0])
-            if length > MAX_CAPTURE_BODY_BYTES:
-                self._respond(413, "request body exceeds the 1 MiB capture limit")
+            try:
+                length = _parse_content_length(lengths)
+            except CaptureError as exc:
+                self._respond(exc.status_code, str(exc))
                 return
             try:
                 body = self.rfile.read(length)
