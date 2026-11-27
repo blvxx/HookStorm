@@ -20,7 +20,6 @@ Before submitting a pull request:
 
 ~~~bash
 ruff check .
-ruff format --check .
 pytest
 ~~~
 
