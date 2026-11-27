@@ -280,4 +280,10 @@ def test_html_report_marks_injected_transport_faults() -> None:
     assert "Connect fault" in html_report
     assert "ACK loss" in html_report
     assert html_report.count("class='attempt ") == 3
+    assert "Injected faults" in html_report
+    assert "data-has-fault='true'" in html_report
+    assert 'id="fault-filter"' in html_report
+    assert 'id="sort-filter"' in html_report
+    assert "Highest total latency" in html_report
+    assert "sortCards" in html_report
     assert "injected" in html_report
