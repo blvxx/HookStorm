@@ -210,7 +210,7 @@ def test_oversized_business_verification_response_fails(receiver) -> None:
 
 
 def test_rejects_compressed_webhook_response_before_decompression(receiver) -> None:
-    base, _state = receiver
+    base, state = receiver
     result = asyncio.run(
         run_scenario(
             scenario(event={"expect_json": {"ok": True}}),
@@ -224,10 +224,11 @@ def test_rejects_compressed_webhook_response_before_decompression(receiver) -> N
     assert attempt["error"] == (
         "compressed response bodies are not supported; received Content-Encoding: gzip"
     )
+    assert state["requests"][0]["headers"]["Accept-Encoding"] == "identity"
 
 
 def test_rejects_compressed_verification_response_before_decompression(receiver) -> None:
-    base, _state = receiver
+    base, state = receiver
     data = validate_scenario({
         "version": 1,
         "name": "compressed verification response",
@@ -246,6 +247,7 @@ def test_rejects_compressed_verification_response_before_decompression(receiver)
         "verification compressed response bodies are not supported; "
         "received Content-Encoding: gzip"
     )
+    assert state["verification_requests"][0]["headers"]["Accept-Encoding"] == "identity"
 
 
 def test_query_parameters_are_not_written_to_report_target(receiver) -> None:
