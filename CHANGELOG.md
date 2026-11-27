@@ -2,20 +2,20 @@
 
 ## Unreleased
 
-- Pin all repository GitHub Actions workflows to reviewed full commit SHAs and refresh generated and copy-ready integration templates to the latest reviewed HookStorm revision.
+## 0.1.0a1 — First public alpha preview
+
+### Delivery, diagnostics, and integration improvements
 
 - Add a shared-clock waterfall view to the interactive HTML report, reusing search, result/fault filters, and sort controls across both timeline layouts.
 - Show deterministic transport fault markers in terminal run summaries and `history show`, including the affected attempt and event.
 - Expand `hookstorm init` into an interactive scenario wizard for event identity, signature provider, retries, and duplicate deliveries; expose the same options as non-interactive flags.
-- Refresh generated and copy-ready staging workflow installer pins to the current CI-validated main commit.
 - Add deterministic per-attempt client-side fault injection for pre-send connection errors and post-processing acknowledgement loss; preserve markers in history and add fault-aware filtering and sorting to the interactive HTML timeline.
 - Validate history run metrics and delivery identities before storage or baseline comparison; reject non-finite JSON numbers in imported baselines.
+- Pin repository and generated GitHub Actions workflows to reviewed full commit SHAs, and refresh the scaffolded HookStorm installer reference to the latest reviewed revision.
 - Add Python 3.14 to the CI compatibility matrix and package classifiers.
 - Restrict local history databases and exported baseline files to owner-only POSIX permissions.
 - Smoke-test installed wheel and source distributions using only the generated scenario and the installed CLI.
 - Keep `hookstorm init` working when Windows reports the current directory through an 8.3 short-path alias.
-
-## 0.1.0a1 — First public alpha preview
 
 ### Release hardening
 
