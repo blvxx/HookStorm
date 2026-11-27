@@ -144,6 +144,10 @@ def test_pages_deployment_is_main_only_and_uses_least_privilege_jobs() -> None:
         "id-token": "write",
     }
     assert workflow["jobs"]["deploy"]["environment"]["name"] == "github-pages"
+    assert workflow["concurrency"] == {
+        "group": "github-pages",
+        "cancel-in-progress": "false",
+    }
 
     actions = [
         step["uses"]
