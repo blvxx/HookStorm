@@ -118,6 +118,10 @@ def test_recorder_rejects_unsupported_encoding_and_invalid_compression() -> None
         ({"Content-Type": "application/json"}, b"{", 400),
         ({"Content-Type": "application/json"}, b'{"x":1,"x":2}', 400),
         ({"Content-Type": "application/json"}, b'{"x":{"y":1,"y":2}}', 400),
+        ({"Content-Type": "application/json"}, b'{"x":NaN}', 400),
+        ({"Content-Type": "application/json"}, b'{"x":Infinity}', 400),
+        ({"Content-Type": "application/json"}, b'{"x":-Infinity}', 400),
+        ({"Content-Type": "application/json"}, b'{"x":1e999}', 400),
         ({"Content-Type": "application/json"}, b"\xff", 400),
     ],
 )
