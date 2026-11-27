@@ -32,7 +32,8 @@ def test_readme_is_a_short_project_landing_page() -> None:
     assert len(readme.splitlines()) < 180
     assert "30 seconds to first result" in readme
     assert "How is HookStorm different?" in readme
-    assert "## Next" in readme
+    assert "## Help validate the alpha" in readme
+    assert "docs/user-validation.md" in readme
     assert "## Roadmap" not in readme
     assert "whsec_" not in readme
     assert "\\\\" not in readme
