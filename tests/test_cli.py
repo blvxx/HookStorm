@@ -1,5 +1,7 @@
 from __future__ import annotations
 
+from pathlib import Path
+
 from hookstorm.cli import main
 from hookstorm.history import list_runs, save_run
 
@@ -313,3 +315,25 @@ def test_init_command_refuses_to_overwrite_without_force(
     assert scenario.read_text(encoding="utf-8") == "preserve existing scenario"
     assert not (tmp_path / ".github" / "workflows" / "webhook-regression.yml").exists()
     assert "Use --force" in capsys.readouterr().err
+
+
+
+def test_init_command_handles_working_directory_path_alias(
+    tmp_path, monkeypatch, capsys
+) -> None:
+    monkeypatch.chdir(tmp_path)
+    # Simulate Windows returning a short spelling for cwd while generated paths
+    # are resolved using the long spelling.
+    monkeypatch.setattr(Path, "cwd", classmethod(lambda cls: tmp_path.parent))
+
+    assert main([
+        "init",
+        "--no-workflow",
+        "--signature-provider",
+        "generic",
+    ]) == 0
+
+    scenario = (tmp_path / "scenarios" / "webhook.yaml").resolve()
+    output = capsys.readouterr().out
+    assert scenario.is_file()
+    assert str(scenario) in output
