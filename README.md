@@ -31,7 +31,7 @@ The demo receiver binds to `127.0.0.1` only. The command writes a self-contained
 | Transient failures and retries | Bounded attempts, exponential backoff, configurable retry statuses |
 | Duplicate and reordered events | Stable event IDs, duplicate deliveries, reverse ordering |
 | Timing and concurrency | Request timeouts, run deadline, per-event scheduling, bounded concurrency |
-| Ambiguous acknowledgements | Deterministic pre-send connection errors and post-processing response loss |
+| Ambiguous acknowledgements | Deterministic pre-send errors, dropped acknowledgements, and truncated response bodies after processing |
 | Signatures | Generic HMAC, Stripe, GitHub, Shopify, Standard Webhooks v1 |
 | Assertions | HTTP status, nested JSON, and optional read-only business-state verification |
 | Seeded fuzzing | Reproducible JSON payload mutations, bounded failure minimization, and replayable YAML cases |
@@ -84,7 +84,7 @@ Planned work, in priority order:
 
 1. Extend seeded payload fuzzing to vary event order, duplicate deliveries, delays, and controlled failure injection.
 2. Expand fuzzing to vary event order, duplicate deliveries, delays, and controlled transport failures.
-3. Add request fault injection for malformed JSON, content types, compression, chunking, partial uploads, content-length mismatches, slow bodies, secret rotation, and large payloads.
+3. Expand request fault injection for malformed JSON, content types, compression, chunking, partial uploads, content-length mismatches, slow bodies, secret rotation, and large payloads.
 4. A reusable composite GitHub Action with SHA-pinned dependencies.
 5. A structured pytest integration API and small FastAPI / Flask helpers.
 6. JSON Schema output for editor completion.
