@@ -382,6 +382,23 @@ def test_fuzz_replay_case_is_created_with_owner_only_permissions(tmp_path) -> No
     assert stat.S_IMODE(os.stat(path).st_mode) == 0o600
 
 
+def test_fuzz_replay_case_is_removed_when_serialization_fails(
+    tmp_path, monkeypatch
+) -> None:
+    directory = tmp_path / "failed-cases"
+
+    def fail_serialization(_scenario):
+        raise ValueError("synthetic serialization failure")
+
+    monkeypatch.setattr("hookstorm.fuzz.scenario_to_yaml", fail_serialization)
+
+    with pytest.raises(ValueError, match="synthetic serialization failure"):
+        _write_case(directory, "failed.yaml", _base_scenario())
+
+    assert not (directory / "failed.yaml").exists()
+    assert list(directory.iterdir()) == []
+
+
 def test_fuzz_replay_case_refuses_to_overwrite_existing_file(tmp_path) -> None:
     directory = tmp_path / "cases"
     directory.mkdir()
