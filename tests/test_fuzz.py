@@ -147,3 +147,25 @@ def test_fuzz_runner_rejects_unbounded_parameters(iterations: object, budget: in
                 minimize_budget=budget,
             )
         )
+
+
+def test_standard_webhooks_fuzz_trial_keeps_event_id_envelope_in_sync() -> None:
+    from hookstorm.fuzz import _apply_trial_event_ids
+
+    scenario = validate_scenario(
+        {
+            "version": 1,
+            "name": "standard webhooks fuzz",
+            "provider": "standard_webhooks",
+            "events": [{}],
+        }
+    )
+    event = scenario["events"][0]
+    old_event_id = event["event_id"]
+
+    _apply_trial_event_ids(scenario, seed=23, iteration=1, trial=0)
+
+    event = scenario["events"][0]
+    assert event["event_id"] != old_event_id
+    assert event["payload"]["id"] == event["event_id"]
+    assert event["headers"]["webhook-id"] == event["event_id"]

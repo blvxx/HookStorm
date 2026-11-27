@@ -78,7 +78,7 @@ Read [SECURITY.md](SECURITY.md) and the [architecture notes](docs/architecture.m
 
 Planned work, in priority order:
 
-1. Seeded randomized fuzz runs with reproducible, minimized failure scenarios.
+1. Extend seeded payload fuzzing to vary event order, duplicate deliveries, delays, and controlled failure injection.
 2. A loopback-only `hookstorm capture` receiver that creates scenarios and redacts sensitive headers by default.
 3. Additional request fault injection: malformed JSON, content types, compression, chunking, partial uploads, content-length mismatches, slow bodies, secret rotation, and large payloads.
 4. A reusable composite GitHub Action with SHA-pinned dependencies.

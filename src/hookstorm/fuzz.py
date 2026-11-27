@@ -218,7 +218,7 @@ def _apply_trial_event_ids(
                 provider_headers(provider, event["id"], event["event_id"])
             )
             if (
-                provider == "stripe"
+                provider in {"stripe", "standard_webhooks"}
                 and isinstance(event["payload"], dict)
                 and event["payload"].get("id") == old_event_id
             ):
