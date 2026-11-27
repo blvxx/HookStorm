@@ -26,10 +26,10 @@ CLI summaries + diagnostics + exit code (0 passed, 1 assertions failed, 2 invali
 
 ## Main modules
 
-- `config.py`: loads version 1 YAML scenarios with safe parsing, duplicate-key rejection, defaults, and bounded event, payload, header, and timing limits.
-- `safety.py`: validates target URL syntax and the local-only policy. Remote HTTPS requires `--allow-remote`; non-loopback HTTP additionally requires `--allow-insecure-http`.
+- `config.py`: loads version 1 YAML scenarios with safe parsing, duplicate-key rejection, a 16 MiB source-file cap, a 16-alias cap, 1 MiB per-event and 16 MiB aggregate payload limits, and bounded event, header, and timing limits.
+- `safety.py`: validates target URL syntax, canonicalizes hostnames using the same IDNA form as HTTPX, and enforces the local-only policy. The runner pins every resolved host to its validated IP addresses and fails closed if the transport requests an unpinned hostname. Remote HTTPS requires `--allow-remote`; non-loopback HTTP additionally requires `--allow-insecure-http`.
 - `doctor.py`: validates scenarios, endpoint configuration, signing-secret presence, and verification-probe authentication configuration. Optional connection checks perform DNS/TCP and HTTPS TLS diagnostics without sending HTTP requests.
-- `runner.py`: sends requests asynchronously with HTTPX, schedules independent events, preserves event IDs, signs the exact transmitted body bytes, refreshes timestamped signatures on every retry, and checks HTTP and JSON responses. Deterministic request faults cover malformed JSON, content type, gzip/deflate, chunked framing, partial uploads, and Content-Length mismatch. Existing `connect_error`, `response_loss`, and `response_body_error` faults remain available. Delivery and verification responses are streamed with a 2 MiB decoded-body cap.
+- `runner.py`: sends requests asynchronously with HTTPX, schedules independent events, preserves event IDs, signs the exact transmitted body bytes, refreshes timestamped signatures on every retry, and checks HTTP and JSON responses. Deterministic request faults cover malformed JSON, content type, gzip/deflate, chunked framing, partial uploads, and Content-Length mismatch. Existing `connect_error`, `response_loss`, and `response_body_error` faults remain available. Delivery and verification responses request identity encoding and are streamed as raw bytes with a 2 MiB cap before parsing; compressed responses are rejected to avoid unbounded automatic decompression.
 - `request_faults.py`: prepares compressed and malformed request bodies and wraps newly opened HTTP/1.1 network streams for chunk framing, partial upload, and length mismatch injection. Wire-fault requests use a non-keepalive transport to isolate faults per attempt while retaining prevalidated DNS pinning and TLS hostname verification.
 - `fuzz.py`: applies seeded JSON payload mutations and opt-in event-order, duplicate-count, delay, and transport-fault variations. It regenerates provider identities, validates every trial before sending, records privacy-conscious summaries, and optionally uses a bounded payload reducer.
 - `report.py`: generates JSON, JUnit XML, or self-contained HTML with attempt cards, a shared-clock waterfall, search, result/fault filters, and sorting.
@@ -70,7 +70,7 @@ CLI summaries + diagnostics + exit code (0 passed, 1 assertions failed, 2 invali
 - `--format junit` writes one JUnit testcase per event delivery, including duplicates; assertion failures and transport errors are distinguished.
 - `.github/workflows/ci.yml` runs lint and tests across the supported Python / operating-system matrix, builds distributions, and smoke-tests installed artifacts.
 - `.github/workflows/webhook-scenarios.yml` runs the local demo receiver and representative YAML scenarios, compares runs with cached main-branch baselines, and uploads per-scenario JUnit reports.
-- `examples/ci/webhook-regression.yml` is a consumer-facing staging template. It uses a caller-managed endpoint and HMAC secret, skips fork-originated PRs, and refreshes baselines only from trusted main-branch runs.
+- `examples/ci/webhook-regression.yml` is a consumer-facing staging template. Pull requests run scenario validation only, without a staging environment or credentials. The staging integration runs only on trusted pushes to `main` or manual dispatches on `main`, and refreshes baselines only from those runs.
 
 ## Run history and regression model
 
