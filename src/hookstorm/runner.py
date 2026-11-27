@@ -138,6 +138,27 @@ class _PinnedNetworkBackend:
         await self._backend.sleep(seconds)
 
 
+class _PartialResponseReadErrorStream(httpx.AsyncByteStream):
+    """Yield part of a response body, then simulate a connection reset."""
+
+    def __init__(self, stream: httpx.AsyncByteStream) -> None:
+        self._stream = stream
+
+    async def __aiter__(self):
+        async for chunk in self._stream:
+            if chunk:
+                yield chunk[: max(1, len(chunk) // 2)]
+                raise httpx.ReadError(
+                    "injected connection reset after a partial response body"
+                )
+        raise httpx.ReadError(
+            "injected connection reset before the response body completed"
+        )
+
+    async def aclose(self) -> None:
+        await self._stream.aclose()
+
+
 class _FaultInjectingTransport(httpx.AsyncBaseTransport):
     """Apply deterministic faults and pin HTTPX DNS to pre-validated addresses."""
 
@@ -180,6 +201,8 @@ class _FaultInjectingTransport(httpx.AsyncBaseTransport):
                 "injected acknowledgement loss after the endpoint processed the request",
                 request=request,
             )
+        if fault == "response_body_error":
+            response.stream = _PartialResponseReadErrorStream(response.stream)
         return response
 
     async def aclose(self) -> None:
@@ -323,6 +346,7 @@ async def run_scenario(
         "fault_injection": {
             "connect_error_attempts": [],
             "response_loss_attempts": [],
+            "response_body_error_attempts": [],
         },
     }
     retry = scenario["retry"]
@@ -408,6 +432,7 @@ async def run_scenario(
                         {
                             "connect_error_attempts": [],
                             "response_loss_attempts": [],
+                            "response_body_error_attempts": [],
                         },
                     )
                     injected_fault = (
@@ -415,6 +440,8 @@ async def run_scenario(
                         if attempt in fault_plan.get("connect_error_attempts", [])
                         else "response_loss"
                         if attempt in fault_plan.get("response_loss_attempts", [])
+                        else "response_body_error"
+                        if attempt in fault_plan.get("response_body_error_attempts", [])
                         else None
                     )
                     outcome: dict[str, Any] = {
@@ -489,6 +516,10 @@ async def run_scenario(
                         elif injected_fault == "response_loss":
                             outcome["error"] = (
                                 "injected acknowledgement loss after the endpoint processed the request"
+                            )
+                        elif injected_fault == "response_body_error":
+                            outcome["error"] = (
+                                "injected connection reset after a partial response body"
                             )
                         else:
                             outcome["error"] = f"request error: {type(exc).__name__}"
