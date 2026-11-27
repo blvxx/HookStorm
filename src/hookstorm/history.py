@@ -17,6 +17,14 @@ class HistoryError(RuntimeError):
     """Raised when a local run-history operation cannot be completed."""
 
 
+def _fchmod_private(descriptor: int, mode: int) -> None:
+    """Apply a file mode through the POSIX-only descriptor API when available."""
+    fchmod = getattr(os, "fchmod", None)
+    if not callable(fchmod):
+        raise OSError("The current POSIX platform does not support descriptor chmod")
+    fchmod(descriptor, mode)
+
+
 def resolve_history_db(path: str | Path | None = None) -> str:
     """Resolve an explicit path, the environment override, or the user-local default."""
     raw = str(path) if path is not None else os.getenv("HOOKSTORM_HISTORY_DB")
@@ -49,7 +57,7 @@ def _connect(path: str | Path | None = None) -> sqlite3.Connection:
                     0o600,
                 )
                 try:
-                    os.fchmod(descriptor, 0o600)
+                    _fchmod_private(descriptor, 0o600)
                 finally:
                     os.close(descriptor)
 
@@ -73,7 +81,7 @@ def _write_private_text(path: Path, content: str) -> None:
         0o600,
     )
     try:
-        os.fchmod(descriptor, 0o600)
+        _fchmod_private(descriptor, 0o600)
         with os.fdopen(descriptor, "w", encoding="utf-8") as stream:
             descriptor = -1
             stream.write(content)
