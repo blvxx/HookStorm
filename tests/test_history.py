@@ -222,10 +222,12 @@ def test_compare_rejects_duplicate_delivery_identities(duplicate_side: str) -> N
     baseline = make_result("run_001")
     current = make_result("run_002")
     duplicate_deliveries = [delivery("evt_duplicate"), delivery("evt_duplicate")]
-    if duplicate_side == "baseline":
-        baseline["deliveries"] = duplicate_deliveries
-    else:
-        current["deliveries"] = duplicate_deliveries
+    target = baseline if duplicate_side == "baseline" else current
+    target["deliveries"] = duplicate_deliveries
+    target["summary"]["total_deliveries"] = 2
+    target["summary"]["passed"] = 2
+    target["summary"]["failed"] = 0
+    target["summary"]["attempts"] = 2
 
     with pytest.raises(HistoryError, match="duplicate delivery identity"):
         compare_results(current, baseline)
@@ -532,7 +534,7 @@ def test_compare_rejects_summary_counts_inconsistent_with_deliveries() -> None:
 def test_save_run_rejects_summary_attempt_count_inconsistent_with_deliveries(
     tmp_path,
 ) -> None:
-    result = make_result("run_inconsistent")
+    result = make_result("run_inconsisten0")
     result["summary"]["attempts"] = 2
 
     with pytest.raises(HistoryError, match="summary.attempts"):
@@ -545,7 +547,7 @@ def test_load_history_export_rejects_non_standard_json_numbers(
 ) -> None:
     database = tmp_path / "history.sqlite3"
     baseline_file = tmp_path / "baseline.json"
-    save_run(make_result("run_jsonstrict"), database)
+    save_run(make_result("run_jsonstric1"), database)
     export_history_run("latest", baseline_file, database)
 
     raw = baseline_file.read_text(encoding="utf-8")
@@ -562,7 +564,7 @@ def test_load_history_export_rejects_invalid_duplicate_indices(
 ) -> None:
     database = tmp_path / "history.sqlite3"
     baseline_file = tmp_path / "baseline.json"
-    save_run(make_result("run_badindex"), database)
+    save_run(make_result("run_badinde2"), database)
     export_history_run("latest", baseline_file, database)
 
     document = json.loads(baseline_file.read_text(encoding="utf-8"))
@@ -576,7 +578,7 @@ def test_load_history_export_rejects_invalid_duplicate_indices(
 def test_load_history_export_rejects_inconsistent_summary_metrics(tmp_path) -> None:
     database = tmp_path / "history.sqlite3"
     baseline_file = tmp_path / "baseline.json"
-    save_run(make_result("run_badsummary"), database)
+    save_run(make_result("run_badummar3"), database)
     export_history_run("latest", baseline_file, database)
 
     document = json.loads(baseline_file.read_text(encoding="utf-8"))
@@ -590,7 +592,7 @@ def test_load_history_export_rejects_inconsistent_summary_metrics(tmp_path) -> N
 def test_load_history_export_rejects_empty_attempt_history(tmp_path) -> None:
     database = tmp_path / "history.sqlite3"
     baseline_file = tmp_path / "baseline.json"
-    save_run(make_result("run_noattempts"), database)
+    save_run(make_result("run_noattempt4"), database)
     export_history_run("latest", baseline_file, database)
 
     document = json.loads(baseline_file.read_text(encoding="utf-8"))
@@ -616,7 +618,7 @@ def test_save_run_rejects_duplicate_delivery_identities(tmp_path) -> None:
 def test_load_history_export_rejects_duplicate_delivery_identities(tmp_path) -> None:
     database = tmp_path / "history.sqlite3"
     baseline_file = tmp_path / "baseline.json"
-    save_run(make_result("run_duplicate_import"), database)
+    save_run(make_result("run_duplicate_impor6"), database)
     export_history_run("latest", baseline_file, database)
 
     document = json.loads(baseline_file.read_text(encoding="utf-8"))
@@ -635,7 +637,7 @@ def test_load_history_export_rejects_duplicate_delivery_identities(tmp_path) -> 
 def test_load_history_export_rejects_non_object_delivery_entries(tmp_path) -> None:
     database = tmp_path / "history.sqlite3"
     baseline_file = tmp_path / "baseline.json"
-    save_run(make_result("run_nonobject"), database)
+    save_run(make_result("run_nonobjec7"), database)
     export_history_run("latest", baseline_file, database)
 
     document = json.loads(baseline_file.read_text(encoding="utf-8"))
