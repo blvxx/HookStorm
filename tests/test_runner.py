@@ -6,7 +6,6 @@ import socket
 import time
 
 import httpx
-
 import pytest
 
 from hookstorm.config import ScenarioError, load_scenario, validate_scenario
