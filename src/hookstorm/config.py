@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import hashlib
 import json
 import re
 from pathlib import Path
@@ -389,6 +390,30 @@ def validate_scenario(data: Any) -> dict[str, Any]:
         "events": normalized_events,
         "verify": verify,
     }
+
+
+def scenario_fingerprint(scenario: dict[str, Any]) -> str:
+    """Return a stable SHA-256 fingerprint for the behavior-defining scenario config.
+
+    Human-facing name and description are deliberately excluded. The digest includes
+    delivery behavior, retry policy, events, and verification expectations, but does
+    not expose those values in history or portable baselines.
+    """
+    behavior = {
+        key: scenario.get(key)
+        for key in ("version", "delivery", "retry", "events", "verify")
+    }
+    try:
+        canonical = json.dumps(
+            behavior,
+            sort_keys=True,
+            ensure_ascii=False,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
+    except (TypeError, ValueError, UnicodeEncodeError) as exc:
+        raise ScenarioError("Scenario configuration cannot be fingerprinted as JSON") from exc
+    return hashlib.sha256(canonical).hexdigest()
 
 
 def load_scenario(path: str | Path) -> dict[str, Any]:
