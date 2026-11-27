@@ -35,7 +35,7 @@ The demo receiver binds to `127.0.0.1` only. The command writes a self-contained
 | Signatures | Generic HMAC, Stripe, GitHub, Shopify, Standard Webhooks v1 |
 | Assertions | HTTP status, nested JSON, and optional read-only business-state verification |
 | Capture | Loopback-only JSON webhook receiver, header redaction, and atomic scenario export |
-| Fuzzing | Seeded JSON payload mutations, replayable failing cases, and bounded failure minimization |
+| Fuzzing | Seeded JSON payloads plus optional order, duplicate, delay, and transport-fault variation with replayable failures |
 | Reports and regression checks | HTML, JSON, JUnit, local SQLite history, portable baselines |
 | Pytest integration | Optional fixtures, async runner, sync wrapper, and scenario loader |
 
@@ -84,12 +84,11 @@ Read [SECURITY.md](SECURITY.md) and the [architecture notes](docs/architecture.m
 
 Planned work, in priority order:
 
-1. Extend seeded payload fuzzing to vary event order, duplicate deliveries, delays, and controlled transport failures.
-2. Expand request fault injection for malformed JSON, content types, compression, chunking, partial uploads, content-length mismatches, slow bodies, secret rotation, and large payloads.
-3. Small FastAPI / Flask helpers that keep framework adapters optional.
-4. A minimal non-root Docker image and uvx / pipx installation guides.
-5. A published MkDocs documentation site.
-6. Provider retry schedule presets after explicit per-attempt schedule support and longer safe run-time budgets are designed.
+1. Expand request fault injection for malformed JSON, content types, compression, chunking, partial uploads, content-length mismatches, slow bodies, secret rotation, and large payloads.
+2. Small FastAPI / Flask helpers that keep framework adapters optional.
+3. A minimal non-root Docker image and uvx / pipx installation guides.
+4. A published MkDocs documentation site.
+5. Provider retry schedule presets after explicit per-attempt schedule support and longer safe run-time budgets are designed.
 
 ## Development
 
