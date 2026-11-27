@@ -38,6 +38,9 @@ def test_initialize_project_creates_valid_scenario_and_workflow(tmp_path) -> Non
     assert env["HOOKSTORM_ALLOW_INSECURE_HTTP"] == (
         "${{ vars.HOOKSTORM_ALLOW_INSECURE_HTTP || '0' }}"
     )
+    assert env["HOOKSTORM_LATENCY_MIN_DELTA_MS"] == (
+        "${{ vars.HOOKSTORM_LATENCY_MIN_DELTA_MS || '25' }}"
+    )
     workflow_text = workflow_path.read_text(encoding="utf-8")
     steps = workflow["jobs"]["webhook-regression"]["steps"]
     for step in steps:
@@ -55,6 +58,7 @@ def test_initialize_project_creates_valid_scenario_and_workflow(tmp_path) -> Non
     assert all(character in "0123456789abcdef" for character in HOOKSTORM_INSTALL_REF)
     assert f"git+https://github.com/blvxx/HookStorm.git@{HOOKSTORM_INSTALL_REF}" in workflow_text
     assert "--allow-insecure-http" in workflow_text
+    assert "--latency-min-delta-ms" in workflow_text
     assert "HOOKSTORM_ALLOW_INSECURE_HTTP" in workflow_text
     assert "7ab9ffb6ab510b4067916a83068bf60f8c010a70" not in workflow_text
     assert "8755dc158c732a420e09b83d8bae0e29a10e9206" not in workflow_text

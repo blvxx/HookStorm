@@ -101,6 +101,7 @@ def _parser() -> argparse.ArgumentParser:
     history_compare.add_argument("baseline_run_id")
     history_compare.add_argument("--current", default="latest")
     history_compare.add_argument("--latency-threshold-pct", type=float, default=20.0)
+    history_compare.add_argument("--latency-min-delta-ms", type=float, default=25.0)
     history_compare.add_argument(
         "--allow-config-change",
         action="store_true",
@@ -113,6 +114,7 @@ def _parser() -> argparse.ArgumentParser:
     history_compare_file.add_argument("baseline_file", help="exported HookStorm baseline JSON")
     history_compare_file.add_argument("--current", default="latest")
     history_compare_file.add_argument("--latency-threshold-pct", type=float, default=20.0)
+    history_compare_file.add_argument("--latency-min-delta-ms", type=float, default=25.0)
     history_compare_file.add_argument(
         "--allow-config-change",
         action="store_true",
@@ -299,6 +301,11 @@ def _print_history_comparison(comparison: dict) -> int:
         f"Scenario: {comparison['current_scenario']} "
         f"(baseline: {comparison['baseline_scenario']})"
     )
+    print(
+        "Latency gate: p95 relative increase above "
+        f"{comparison['latency_threshold_pct']:.1f}% and absolute increase of at least "
+        f"{comparison['latency_min_delta_ms']:.2f} ms"
+    )
     if not comparison["same_scenario"]:
         print("WARNING: scenario names differ; interpret coverage and metric changes carefully.")
     if comparison["same_configuration"] is False:
@@ -359,6 +366,7 @@ def _history_compare_command(args: argparse.Namespace) -> int:
         current_run_id=args.current,
         path=args.db,
         latency_threshold_pct=args.latency_threshold_pct,
+        latency_min_delta_ms=args.latency_min_delta_ms,
         allow_config_change=args.allow_config_change,
     )
     return _print_history_comparison(comparison)
@@ -370,6 +378,7 @@ def _history_compare_file_command(args: argparse.Namespace) -> int:
         current_run_id=args.current,
         path=args.db,
         latency_threshold_pct=args.latency_threshold_pct,
+        latency_min_delta_ms=args.latency_min_delta_ms,
         allow_config_change=args.allow_config_change,
     )
     print(f"Baseline file: {Path(args.baseline_file).expanduser()}")

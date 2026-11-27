@@ -791,3 +791,31 @@ def test_multiple_processes_can_write_to_the_same_history_database(tmp_path) -> 
     assert len(set(run_ids)) == 8
     stored = list_runs(database, limit=20)
     assert {item["run_id"] for item in stored} == set(run_ids)
+
+
+def test_relative_latency_change_below_absolute_floor_does_not_regress() -> None:
+    baseline = make_result("run_001", deliveries=[delivery("evt_1", latency_ms=1.0)])
+    current = make_result("run_002", deliveries=[delivery("evt_1", latency_ms=2.0)])
+
+    comparison = compare_results(current, baseline, latency_threshold_pct=20.0, latency_min_delta_ms=25.0)
+    assert comparison["has_regressions"] is False
+    assert comparison["latency_min_delta_ms"] == 25.0
+    assert not any("latency increased" in item["reason"] for item in comparison["regressions"])
+
+
+def test_p95_latency_regression_requires_relative_and_absolute_thresholds() -> None:
+    baseline = make_result("run_001", deliveries=[delivery("evt_1", latency_ms=100.0)])
+    current = make_result("run_002", deliveries=[delivery("evt_1", latency_ms=125.0)])
+    comparison = compare_results(current, baseline, latency_threshold_pct=20.0, latency_min_delta_ms=25.0)
+    p95_regressions = [
+        item for item in comparison["regressions"]
+        if item["reason"].startswith("p95 delivery latency increased")
+    ]
+    assert len(p95_regressions) == 1
+    assert p95_regressions[0]["p95_delta_ms"] == 25.0
+
+
+@pytest.mark.parametrize("value", [True, -0.1, 60_000.1, float("nan"), float("inf"), "25"])
+def test_compare_rejects_invalid_minimum_absolute_latency_delta(value: object) -> None:
+    with pytest.raises(HistoryError, match="Minimum absolute latency delta"):
+        compare_results(make_result("run_002"), make_result("run_001"), latency_min_delta_ms=value)

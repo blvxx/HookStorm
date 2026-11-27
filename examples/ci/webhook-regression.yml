@@ -37,6 +37,7 @@ jobs:
       HOOKSTORM_SECRET: ${{ secrets.HOOKSTORM_SECRET }}
       HOOKSTORM_ALLOW_INSECURE_HTTP: ${{ vars.HOOKSTORM_ALLOW_INSECURE_HTTP || '0' }}
       HOOKSTORM_LATENCY_THRESHOLD_PCT: ${{ vars.HOOKSTORM_LATENCY_THRESHOLD_PCT || '20' }}
+      HOOKSTORM_LATENCY_MIN_DELTA_MS: ${{ vars.HOOKSTORM_LATENCY_MIN_DELTA_MS || '25' }}
       HOOKSTORM_HISTORY_DB: .hookstorm/history.sqlite3
       HOOKSTORM_BASELINE_FILE: .hookstorm-baselines/webhook.json
     steps:
@@ -107,7 +108,8 @@ jobs:
           if [ -f "$HOOKSTORM_BASELINE_FILE" ]; then
             hookstorm history compare-file "$HOOKSTORM_BASELINE_FILE" \
               --db "$HOOKSTORM_HISTORY_DB" \
-              --latency-threshold-pct "$HOOKSTORM_LATENCY_THRESHOLD_PCT"
+              --latency-threshold-pct "$HOOKSTORM_LATENCY_THRESHOLD_PCT" \
+              --latency-min-delta-ms "$HOOKSTORM_LATENCY_MIN_DELTA_MS"
 
             # Only a successful main-branch run may advance the baseline.
             if is_trusted_main_run; then

@@ -93,7 +93,7 @@ jobs:
 
             if hookstorm run "$scenario" --target "$target" --format junit --output "test-results/${name}.xml" --history-db "$history_db"; then
               if [ -f "$baseline" ]; then
-                if hookstorm history compare-file "$baseline" --db "$history_db" --latency-threshold-pct 1000; then
+                if hookstorm history compare-file "$baseline" --db "$history_db" --latency-threshold-pct 20 --latency-min-delta-ms 25; then
                   echo "Scenario ${name}: PASS · no regression"
                   if is_main_push; then
                     if ! hookstorm history export latest --output "$baseline" --db "$history_db"; then

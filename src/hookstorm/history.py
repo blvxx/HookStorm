@@ -545,13 +545,20 @@ def compare_results(
     baseline: dict[str, Any],
     *,
     latency_threshold_pct: float = 20.0,
+    latency_min_delta_ms: float = 25.0,
     allow_config_change: bool = False,
 ) -> dict[str, Any]:
     """Compare two runs and identify failure, coverage, and latency regressions."""
     if isinstance(latency_threshold_pct, bool) or not isinstance(latency_threshold_pct, (int, float)):
         raise HistoryError("Latency threshold must be a number")
-    if not 0 <= latency_threshold_pct <= 1000:
+    if not 0 <= latency_threshold_pct <= 1000 or not math.isfinite(float(latency_threshold_pct)):
         raise HistoryError("Latency threshold must be between 0 and 1000 percent")
+    if (
+        isinstance(latency_min_delta_ms, bool)
+        or not isinstance(latency_min_delta_ms, (int, float))
+        or not 0 <= latency_min_delta_ms <= 60_000
+    ):
+        raise HistoryError("Minimum absolute latency delta must be between 0 and 60000 ms")
     if not isinstance(allow_config_change, bool):
         raise HistoryError("allow_config_change must be a boolean")
 
@@ -619,16 +626,27 @@ def compare_results(
         if old_latency > 0:
             latency_change_pct = round(((new_latency - old_latency) / old_latency) * 100, 2)
             change["latency_change_pct"] = latency_change_pct
-            if latency_change_pct > latency_threshold_pct:
+            latency_delta_ms = round(new_latency - old_latency, 2)
+            change["latency_delta_ms"] = latency_delta_ms
+            if (
+                latency_change_pct > latency_threshold_pct
+                and latency_delta_ms >= latency_min_delta_ms
+            ):
                 regressions.append({
                     **change,
                     "reason": f"delivery latency increased by {latency_change_pct}% "
-                              f"(threshold {latency_threshold_pct}%)",
+                              f"and {latency_delta_ms} ms "
+                              f"(threshold {latency_threshold_pct}%; "
+                              f"minimum absolute delta {latency_min_delta_ms} ms)",
                 })
-            elif latency_change_pct < -latency_threshold_pct:
+            elif (
+                latency_change_pct < -latency_threshold_pct
+                and -latency_delta_ms >= latency_min_delta_ms
+            ):
                 improvements.append({
                     **change,
-                    "reason": f"delivery latency improved by {abs(latency_change_pct)}%",
+                    "reason": f"delivery latency improved by {abs(latency_change_pct)}% "
+                              f"and {abs(latency_delta_ms)} ms",
                 })
         changes.append(change)
 
@@ -660,18 +678,30 @@ def compare_results(
     current_p95 = current_metrics["p95_latency_ms"]
     if baseline_p95 > 0:
         p95_delta_pct = round(((current_p95 - baseline_p95) / baseline_p95) * 100, 2)
-        if p95_delta_pct > latency_threshold_pct:
+        p95_delta_ms = round(current_p95 - baseline_p95, 2)
+        if (
+            p95_delta_pct > latency_threshold_pct
+            and p95_delta_ms >= latency_min_delta_ms
+        ):
             regressions.append({
                 "reason": f"p95 delivery latency increased by {p95_delta_pct}% "
-                          f"(threshold {latency_threshold_pct}%)",
+                          f"and {p95_delta_ms} ms "
+                          f"(threshold {latency_threshold_pct}%; "
+                          f"minimum absolute delta {latency_min_delta_ms} ms)",
                 "baseline_p95_ms": baseline_p95,
                 "current_p95_ms": current_p95,
+                "p95_delta_ms": p95_delta_ms,
             })
-        elif p95_delta_pct < -latency_threshold_pct:
+        elif (
+            p95_delta_pct < -latency_threshold_pct
+            and -p95_delta_ms >= latency_min_delta_ms
+        ):
             improvements.append({
-                "reason": f"p95 delivery latency improved by {abs(p95_delta_pct)}%",
+                "reason": f"p95 delivery latency improved by {abs(p95_delta_pct)}% "
+                          f"and {abs(p95_delta_ms)} ms",
                 "baseline_p95_ms": baseline_p95,
                 "current_p95_ms": current_p95,
+                "p95_delta_ms": p95_delta_ms,
             })
 
     if failed_delta > 0 and not any(
@@ -694,6 +724,7 @@ def compare_results(
         "same_configuration": same_configuration,
         "allow_config_change": allow_config_change,
         "latency_threshold_pct": float(latency_threshold_pct),
+        "latency_min_delta_ms": float(latency_min_delta_ms),
         "baseline": baseline_metrics,
         "current": current_metrics,
         "delta": {
@@ -717,6 +748,7 @@ def compare_history_runs(
     current_run_id: str = "latest",
     path: str | Path | None = None,
     latency_threshold_pct: float = 20.0,
+    latency_min_delta_ms: float = 25.0,
     allow_config_change: bool = False,
 ) -> dict[str, Any]:
     """Load and compare two records from the local history database."""
@@ -736,6 +768,7 @@ def compare_history_runs(
         current,
         baseline,
         latency_threshold_pct=latency_threshold_pct,
+        latency_min_delta_ms=latency_min_delta_ms,
         allow_config_change=allow_config_change,
     )
 
@@ -845,6 +878,7 @@ def compare_history_file(
     current_run_id: str = "latest",
     path: str | Path | None = None,
     latency_threshold_pct: float = 20.0,
+    latency_min_delta_ms: float = 25.0,
     allow_config_change: bool = False,
 ) -> dict[str, Any]:
     """Compare the latest local run against a sanitized JSON baseline file."""
@@ -860,5 +894,6 @@ def compare_history_file(
         current,
         baseline,
         latency_threshold_pct=latency_threshold_pct,
+        latency_min_delta_ms=latency_min_delta_ms,
         allow_config_change=allow_config_change,
     )

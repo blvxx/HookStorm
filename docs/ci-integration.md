@@ -86,6 +86,7 @@ Add the following values to that environment:
 | `HOOKSTORM_VERIFY_API_KEY` | Optional secret | Example API key referenced by `verify.auth.key_env`; use the exact variable name from your scenario. |
 | `HOOKSTORM_SCENARIO` | Optional variable | Scenario path. Defaults to `scenarios/webhook.yaml`. |
 | `HOOKSTORM_LATENCY_THRESHOLD_PCT` | Optional variable | Allowed latency increase. Defaults to `20`. |
+| `HOOKSTORM_LATENCY_MIN_DELTA_MS` | Optional variable | Minimum absolute p95 latency increase in milliseconds. Defaults to `25`. |
 
 The target must be a test environment you own or are authorized to exercise. The sample workflow passes `--allow-remote` because a staging URL is normally not loopback; remote HTTPS is the expected transport. Non-loopback plaintext HTTP is blocked by default. Only when HTTPS cannot be used for a controlled test endpoint, set the optional `HOOKSTORM_ALLOW_INSECURE_HTTP=1` environment variable; the generated workflow then passes `--allow-insecure-http` to both doctor and run. Authenticated remote verification probes still require HTTPS. Do not point it at production payment, billing, or customer-facing webhook endpoints. Use synthetic records and an isolated test account.
 
@@ -118,7 +119,7 @@ GitHub documents [cache scope and security restrictions](https://docs.github.com
 
 ## 5. Tune and troubleshoot
 
-The default latency regression threshold is `20` percent. CI runners can be noisy, so measure several successful runs before choosing a threshold. Increase the threshold only when the observed variation is environmental noise you have investigated; keep functional delivery and coverage regressions gated.
+The default latency gate requires both a p95 increase above `20` percent and an absolute increase of at least `25` ms. This avoids failing on large relative changes between very small timings while retaining a meaningful regression check. Tune both values after observing successful runs on your runners; functional delivery and coverage regressions remain gated independently.
 
 Useful commands:
 
@@ -140,7 +141,7 @@ hookstorm history export latest --output .hookstorm-baselines/webhook.json
 
 # Compare a later run with that baseline
 hookstorm history compare-file .hookstorm-baselines/webhook.json \
-  --db .hookstorm/history.sqlite3 --latency-threshold-pct 20
+  --db .hookstorm/history.sqlite3 --latency-threshold-pct 20 --latency-min-delta-ms 25
 ```
 
 For the full scenario schema, see [scenario-format.md](scenario-format.md). For portable baseline format and CLI semantics, see the run history section in the [README](../README.md).

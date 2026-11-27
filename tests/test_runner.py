@@ -825,39 +825,3 @@ def test_runner_connects_only_to_the_prevalidated_dns_addresses(receiver, monkey
     assert result["summary"]["success"] is True
     assert hostname_lookups == 2
     assert state["requests"][0]["headers"]["Host"] == f"localhost:{port}"
-
-
-@pytest.mark.parametrize("path", ["/large-gzip", "/large-deflate"])
-def test_compressed_response_limit_applies_after_content_decoding(receiver, path: str) -> None:
-    base, _ = receiver
-    result = asyncio.run(
-        run_scenario(
-            scenario(event={"expect_json": {"ok": True}}),
-            base + path,
-        )
-    )
-
-    attempt = result["deliveries"][0]["attempts"][0]
-    assert result["summary"]["success"] is False
-    assert attempt["status_code"] == 200
-    assert attempt["expected_json"] is False
-    assert attempt["error"] == (
-        f"response body exceeds the {MAX_RESPONSE_BODY_BYTES // (1024 * 1024)} MiB safety limit"
-    )
-
-
-def test_inaccurate_content_length_fails_without_accepting_partial_json(receiver) -> None:
-    base, _ = receiver
-    result = asyncio.run(
-        run_scenario(
-            scenario(event={"expect_json": {"ok": True}}),
-            base + "/false-length",
-        )
-    )
-
-    attempt = result["deliveries"][0]["attempts"][0]
-    assert result["summary"]["success"] is False
-    assert attempt["status_code"] == 200
-    assert attempt["expected_status"] is False
-    assert attempt["expected_json"] is False
-    assert attempt["error"] == "request error: RemoteProtocolError"

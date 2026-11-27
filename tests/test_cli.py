@@ -442,3 +442,13 @@ events:
     assert "Injected faults: 1" in details
     assert "Connect fault" in details
     assert "before request reached the endpoint" in details
+
+
+def test_history_compare_cli_exposes_minimum_absolute_latency_delta() -> None:
+    from hookstorm.cli import _parser
+    args = _parser().parse_args([
+        "history", "compare-file", "baseline.json",
+        "--latency-threshold-pct", "30", "--latency-min-delta-ms", "40",
+    ])
+    assert args.latency_threshold_pct == 30.0
+    assert args.latency_min_delta_ms == 40.0

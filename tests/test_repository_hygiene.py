@@ -33,6 +33,9 @@ def test_readme_is_a_short_project_landing_page() -> None:
     assert "## Roadmap" not in readme
     assert "whsec_" not in readme
     assert "\\\\" not in readme
+    webhook_workflow = (ROOT / ".github" / "workflows" / "webhook-scenarios.yml").read_text(encoding="utf-8")
+    assert "--latency-threshold-pct 20 --latency-min-delta-ms 25" in webhook_workflow
+    assert "--latency-threshold-pct 1000" not in webhook_workflow
 
 
 def test_changelog_keeps_unreleased_changes_in_one_consistent_format() -> None:
