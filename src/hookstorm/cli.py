@@ -23,8 +23,8 @@ from hookstorm.history import (
     result_metrics,
     save_run,
 )
-from hookstorm.pytest_export import write_pytest
 from hookstorm.provider_profiles import provider_event
+from hookstorm.pytest_export import write_pytest
 from hookstorm.report import render_json, write_report
 from hookstorm.runner import run_scenario
 from hookstorm.scaffold import initialize_project
