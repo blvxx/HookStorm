@@ -681,3 +681,37 @@ def test_provider_managed_headers_cannot_be_overridden() -> None:
 
     with pytest.raises(ScenarioError, match="may not override"):
         validate_scenario(data)
+
+
+
+def test_empty_payload_is_a_valid_json_object() -> None:
+    data = valid_scenario()
+    data["events"][0]["payload"] = {}
+
+    normalized = validate_scenario(data)
+
+    assert normalized["events"][0]["payload"] == {}
+
+
+def test_payload_at_exact_one_megabyte_boundary_is_accepted() -> None:
+    data = valid_scenario()
+    data["events"][0]["payload"] = {"blob": "x" * (1_048_576 - 11)}
+
+    normalized = validate_scenario(data)
+
+    assert len(json.dumps(
+        normalized["events"][0]["payload"],
+        ensure_ascii=False,
+        separators=(",", ":"),
+        allow_nan=False,
+    ).encode("utf-8")) == 1_048_576
+
+
+def test_scheduled_event_and_delivery_timeout_must_fit_run_timeout() -> None:
+    data = valid_scenario()
+    data["run_timeout_ms"] = 300
+    data["delivery"] = {"timeout_ms": 200}
+    data["events"][0]["schedule_after_ms"] = 150
+
+    with pytest.raises(ScenarioError, match="worst-case request-time budget"):
+        validate_scenario(data)

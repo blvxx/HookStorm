@@ -825,3 +825,57 @@ def test_runner_connects_only_to_the_prevalidated_dns_addresses(receiver, monkey
     assert result["summary"]["success"] is True
     assert hostname_lookups == 2
     assert state["requests"][0]["headers"]["Host"] == f"localhost:{port}"
+
+
+
+def test_zero_backoff_retries_without_waiting(receiver) -> None:
+    base, state = receiver
+    result = asyncio.run(
+        run_scenario(
+            scenario(retry={"max_attempts": 2, "backoff_ms": 0}),
+            f"{base}/flaky",
+        )
+    )
+
+    assert result["summary"]["success"] is True
+    assert [attempt["status_code"] for attempt in result["deliveries"][0]["attempts"]] == [
+        503,
+        200,
+    ]
+    assert state["attempts"][(state["requests"][0]["run_id"], "evt_test_1")] == 2
+
+
+def test_reverse_order_preserves_sequential_duplicates_per_event(receiver) -> None:
+    base, state = receiver
+    data = {
+        "version": 1,
+        "name": "reverse plus duplicates",
+        "delivery": {"order": "reverse", "duplicate_count": 1},
+        "retry": {"max_attempts": 1, "backoff_ms": 0},
+        "events": [
+            {"id": "first", "event_id": "evt_first", "payload": {}},
+            {"id": "second", "event_id": "evt_second", "payload": {}},
+        ],
+    }
+
+    result = asyncio.run(run_scenario(validate_scenario(data), base))
+
+    assert result["summary"]["success"] is True
+    assert [
+        (request["event_id"], request["duplicate_index"])
+        for request in state["requests"]
+    ] == [
+        ("evt_second", 0),
+        ("evt_second", 1),
+        ("evt_first", 0),
+        ("evt_first", 1),
+    ]
+    assert [
+        (delivery["event_id"], delivery["duplicate_index"])
+        for delivery in result["deliveries"]
+    ] == [
+        ("evt_second", 0),
+        ("evt_second", 1),
+        ("evt_first", 0),
+        ("evt_first", 1),
+    ]
