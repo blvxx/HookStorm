@@ -20,6 +20,12 @@ import httpx
 
 from hookstorm import __version__
 from hookstorm.config import scenario_fingerprint
+from hookstorm.request_faults import (
+    WIRE_REQUEST_FAULTS,
+    prepare_request_body,
+    request_fault_context,
+    wrap_network_stream,
+)
 from hookstorm.safety import TargetResolution, resolve_target
 from hookstorm.standard_webhooks import (
     decode_standard_webhooks_secret,
@@ -100,24 +106,26 @@ class _PinnedNetworkBackend:
     ) -> Any:
         addresses = self._pinned_addresses.get(host.rstrip(".").lower())
         if addresses is None:
-            return await self._backend.connect_tcp(
+            stream = await self._backend.connect_tcp(
                 host,
                 port,
                 timeout=timeout,
                 local_address=local_address,
                 socket_options=socket_options,
             )
+            return wrap_network_stream(stream)
 
         failures: list[Exception] = []
         for address in addresses:
             try:
-                return await self._backend.connect_tcp(
+                stream = await self._backend.connect_tcp(
                     address,
                     port,
                     timeout=timeout,
                     local_address=local_address,
                     socket_options=socket_options,
                 )
+                return wrap_network_stream(stream)
             except (httpcore.ConnectError, httpcore.ConnectTimeout) as exc:
                 failures.append(exc)
 
@@ -164,18 +172,31 @@ class _FaultInjectingTransport(httpx.AsyncBaseTransport):
     """Apply deterministic faults and pin HTTPX DNS to pre-validated addresses."""
 
     def __init__(self, targets: tuple[TargetResolution, ...]) -> None:
-        self._transport = httpx.AsyncHTTPTransport(trust_env=False)
         pinned_addresses: dict[str, list[str]] = {}
         for target in targets:
             values = pinned_addresses.setdefault(target.hostname, [])
             for address in target.addresses:
                 if address not in values:
                     values.append(address)
+        self._pinned_addresses = {
+            hostname: tuple(addresses)
+            for hostname, addresses in pinned_addresses.items()
+        }
+        self._transport = self._build_transport()
+        self._wire_transport = self._build_transport(
+            limits=httpx.Limits(max_keepalive_connections=0)
+        )
 
+    def _build_transport(
+        self,
+        *,
+        limits: httpx.Limits | None = None,
+    ) -> httpx.AsyncHTTPTransport:
+        transport = httpx.AsyncHTTPTransport(trust_env=False, limits=limits)
         # HTTPX delegates socket creation to its httpcore pool. Replace only
         # the network backend: the original URL host remains intact for the
         # HTTP Host header, TLS SNI, and certificate hostname verification.
-        pool = getattr(self._transport, "_pool", None)
+        pool = getattr(transport, "_pool", None)
         backend = getattr(pool, "_network_backend", None)
         if pool is None or backend is None:
             raise RuntimeError(
@@ -184,8 +205,9 @@ class _FaultInjectingTransport(httpx.AsyncBaseTransport):
             )
         pool._network_backend = _PinnedNetworkBackend(
             backend,
-            {hostname: tuple(addresses) for hostname, addresses in pinned_addresses.items()},
+            self._pinned_addresses,
         )
+        return transport
 
     async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
         fault = request.extensions.get("hookstorm_fault_injection")
@@ -195,7 +217,13 @@ class _FaultInjectingTransport(httpx.AsyncBaseTransport):
                 request=request,
             )
 
-        response = await self._transport.handle_async_request(request)
+        if fault in WIRE_REQUEST_FAULTS:
+            body_length = int(request.extensions.get("hookstorm_request_body_length", 0))
+            with request_fault_context(fault, body_length):
+                response = await self._wire_transport.handle_async_request(request)
+        else:
+            response = await self._transport.handle_async_request(request)
+
         if fault == "response_loss":
             await response.aclose()
             raise httpx.ReadError(
@@ -210,6 +238,7 @@ class _FaultInjectingTransport(httpx.AsyncBaseTransport):
 
     async def aclose(self) -> None:
         await self._transport.aclose()
+        await self._wire_transport.aclose()
 
 
 MAX_RESPONSE_BODY_BYTES = 2 * 1024 * 1024
@@ -417,11 +446,16 @@ async def run_scenario(
                     if delivery_config["delay_ms"]:
                         await asyncio.sleep(delivery_config["delay_ms"] / 1000)
                     headers = dict(base_headers)
+                    request_body, request_fault_headers = prepare_request_body(
+                        event_body,
+                        injected_fault,
+                    )
+                    headers.update(request_fault_headers)
                     headers["X-HookStorm-Attempt"] = str(attempt)
                     headers["X-HookStorm-Duplicate-Index"] = str(duplicate_index)
                     headers.update(
                         _signature_headers(
-                            event_body,
+                            request_body,
                             secret or "",
                             delivery_config["signature"],
                             delivery_config["signature_provider"],
@@ -438,14 +472,28 @@ async def run_scenario(
                             "response_body_error_attempts": [],
                         },
                     )
-                    injected_fault = (
-                        "connect_error"
-                        if attempt in fault_plan.get("connect_error_attempts", [])
-                        else "response_loss"
-                        if attempt in fault_plan.get("response_loss_attempts", [])
-                        else "response_body_error"
-                        if attempt in fault_plan.get("response_body_error_attempts", [])
-                        else None
+                    fault_attempt_types = (
+                        ("connect_error_attempts", "connect_error"),
+                        ("response_loss_attempts", "response_loss"),
+                        ("response_body_error_attempts", "response_body_error"),
+                        ("malformed_json_attempts", "malformed_json"),
+                        ("wrong_content_type_attempts", "wrong_content_type"),
+                        ("gzip_body_attempts", "gzip_body"),
+                        ("deflate_body_attempts", "deflate_body"),
+                        ("invalid_gzip_attempts", "invalid_gzip"),
+                        ("invalid_deflate_attempts", "invalid_deflate"),
+                        ("chunked_transfer_attempts", "chunked_transfer"),
+                        ("malformed_chunked_attempts", "malformed_chunked"),
+                        ("partial_upload_attempts", "partial_upload"),
+                        ("content_length_mismatch_attempts", "content_length_mismatch"),
+                    )
+                    injected_fault = next(
+                        (
+                            fault_name
+                            for field_name, fault_name in fault_attempt_types
+                            if attempt in fault_plan.get(field_name, [])
+                        ),
+                        None,
                     )
                     outcome: dict[str, Any] = {
                         "attempt": attempt,
@@ -463,11 +511,14 @@ async def run_scenario(
                         async with client.stream(
                             "POST",
                             target,
-                            content=event_body,
+                            content=request_body,
                             headers=headers,
                             timeout=delivery_config["timeout_ms"] / 1000,
                             extensions=(
-                                {"hookstorm_fault_injection": injected_fault}
+                                {
+                                    "hookstorm_fault_injection": injected_fault,
+                                    "hookstorm_request_body_length": len(request_body),
+                                }
                                 if injected_fault is not None
                                 else None
                             ),
@@ -523,6 +574,12 @@ async def run_scenario(
                         elif injected_fault == "response_body_error":
                             outcome["error"] = (
                                 "injected connection reset after a partial response body"
+                            )
+                        elif injected_fault == "partial_upload":
+                            outcome["error"] = "injected partial request upload"
+                        elif injected_fault == "content_length_mismatch":
+                            outcome["error"] = (
+                                "injected Content-Length larger than the transmitted request body"
                             )
                         else:
                             outcome["error"] = f"request error: {type(exc).__name__}"
