@@ -242,7 +242,7 @@ def test_delivery_mutations_are_seeded_valid_and_replayable() -> None:
         "payload", "order", "duplicates", "delay", "transport_faults"
     ]
     assert first["summary"]["success"] is True
-    assert first["worst_case_http_attempts"] == 72
+    assert first["worst_case_http_attempts"] == 48
     assert [case["delivery_mutations"] for case in first["cases"]] == [
         case["delivery_mutations"] for case in second["cases"]
     ]
