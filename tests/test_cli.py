@@ -552,6 +552,32 @@ def test_fuzz_cli_executes_seeded_mutations_and_writes_json_summary(
 
 
 
+def test_fuzz_cli_parser_exposes_opt_in_delivery_mutations() -> None:
+    from hookstorm.cli import _parser
+
+    args = _parser().parse_args([
+        "fuzz",
+        "scenario.yaml",
+        "--target",
+        "http://127.0.0.1:8000/webhook",
+        "--vary-order",
+        "--vary-duplicates",
+        "--max-duplicates",
+        "4",
+        "--vary-delay",
+        "--max-delay-ms",
+        "250",
+        "--vary-faults",
+    ])
+
+    assert args.vary_order is True
+    assert args.vary_duplicates is True
+    assert args.max_duplicates == 4
+    assert args.vary_delay is True
+    assert args.max_delay_ms == 250
+    assert args.vary_faults is True
+
+
 def test_capture_cli_parser_defaults_to_loopback_capture_output() -> None:
     from hookstorm.cli import _parser
 
