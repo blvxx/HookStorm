@@ -60,6 +60,9 @@ def test_recorder_redacts_sensitive_headers_by_default() -> None:
                 "Stripe-Signature": "t=1,v1=not-for-reports",
                 "X-API-Key": "api-key-not-for-reports",
                 "X-Auth-Token": "token-not-for-reports",
+                "X-Auth-Key": "auth-key-not-for-reports",
+                "X-Private-Key": "private-key-not-for-reports",
+                "X-Client-Key": "client-key-not-for-reports",
             },
         ),
         b'{"ok":true}',
@@ -69,6 +72,9 @@ def test_recorder_redacts_sensitive_headers_by_default() -> None:
     assert event.headers["Stripe-Signature"] == "[REDACTED]"
     assert event.headers["X-API-Key"] == "[REDACTED]"
     assert event.headers["X-Auth-Token"] == "[REDACTED]"
+    assert event.headers["X-Auth-Key"] == "[REDACTED]"
+    assert event.headers["X-Private-Key"] == "[REDACTED]"
+    assert event.headers["X-Client-Key"] == "[REDACTED]"
     assert event.headers["Content-Type"] == "application/json"
 
 
