@@ -5,7 +5,7 @@ HookStorm is currently in the pre-release stage. Do not publish a stable release
 ## Before tagging
 
 - [ ] Merge all reviewed reliability, security, and packaging changes into `main`.
-- [ ] Confirm the full CI matrix and the webhook scenario workflow are green on the exact release commit, including Ruff lint and format checks.
+- [ ] Confirm the full CI matrix and the webhook scenario workflow are green on the exact release commit.
 - [ ] Confirm every repository and generated GitHub Actions workflow pins third-party actions to reviewed full commit SHAs, and the scaffolded HookStorm install pin matches the reviewed revision.
 - [ ] Confirm `pyproject.toml` and `hookstorm.__version__` agree with the intended release version.
 - [ ] Move the corresponding changelog entries from **Unreleased** into a dated/versioned section.
