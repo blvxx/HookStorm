@@ -226,3 +226,29 @@ def test_framework_adapters_validate_configuration() -> None:
         create_router(path="relative")
     with pytest.raises(ValueError, match="absolute route path"):
         register_endpoint(FastAPI(), path="relative")
+
+def test_recorder_bounds_event_count_and_can_be_cleared() -> None:
+    recorder = WebhookRecorder(max_events=1)
+    recorder.record(_headers(), b'{"ok":true}')
+
+    with pytest.raises(WebhookRequestError) as full:
+        recorder.record(
+            _headers(**{"X-Event-ID": "evt_002"}),
+            b'{"ok":false}',
+        )
+    assert full.value.status_code == 429
+    assert recorder.snapshot()["total_events"] == 1
+
+    recorder.clear()
+    event = recorder.record(
+        _headers(**{"X-Event-ID": "evt_002"}),
+        b'{"ok":false}',
+    )
+    assert event.event_id == "evt_002"
+
+
+def test_recorder_rejects_invalid_capacity_configuration() -> None:
+    with pytest.raises(ValueError, match="max_body_bytes"):
+        WebhookRecorder(max_body_bytes=0)
+    with pytest.raises(ValueError, match="max_events"):
+        WebhookRecorder(max_events=0)
