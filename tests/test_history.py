@@ -393,6 +393,24 @@ def test_history_export_preserves_existing_baseline_when_atomic_replace_fails(
     assert list(tmp_path.glob(".baseline.json.*.tmp")) == []
 
 
+def test_history_export_rejects_baselines_over_import_limit_without_replacing_file(
+    tmp_path, monkeypatch
+) -> None:
+    database = tmp_path / "history.sqlite3"
+    output = tmp_path / "baseline.json"
+    result = make_result("run_exportlimit1")
+    result["deliveries"][0]["attempts"][0]["error"] = "x" * 200
+    save_run(result, database)
+    output.write_text("previous valid baseline", encoding="utf-8")
+    monkeypatch.setattr(history_module, "_MAX_HISTORY_EXPORT_BYTES", 128)
+
+    with pytest.raises(HistoryError, match="baseline exceeds the 128-byte export limit"):
+        export_history_run("latest", output, database)
+
+    assert output.read_text(encoding="utf-8") == "previous valid baseline"
+    assert list(tmp_path.glob(".baseline.json.*.tmp")) == []
+
+
 def test_load_history_export_rejects_oversized_and_deep_json(tmp_path) -> None:
     oversized = tmp_path / "oversized-baseline.json"
     oversized.write_bytes(b" " * (history_module._MAX_HISTORY_EXPORT_BYTES + 1))
