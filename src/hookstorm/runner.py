@@ -507,7 +507,11 @@ async def run_scenario(
                                 if response_body is None:
                                     matched, mismatch = (
                                         False,
-                                        body_error or "verification response body could not be read safely",
+                                        (
+                                            f"verification {body_error}"
+                                            if body_error
+                                            else "verification response body could not be read safely"
+                                        ),
                                     )
                                 else:
                                     try:
