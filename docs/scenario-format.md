@@ -20,7 +20,7 @@ Unknown keys and duplicate YAML mapping keys are rejected to catch typos and amb
 
 ## Input and expansion limits
 
-The YAML source file is limited to 16 MiB and may contain at most 16 YAML aliases. Payloads are limited to 1 MiB per event and 16 MiB in aggregate across the complete scenario. These limits apply before delivery starts and are intended to keep local runs and CI safe when scenarios come from reviewed pull requests. If a scenario exceeds a limit, split it into smaller focused scenarios rather than increasing limits in the source.
+The YAML source file is limited to 16 MiB and may contain at most 16 YAML aliases. Payloads are limited to 1 MiB per event and 16 MiB in aggregate across the complete scenario. JSON object/array nesting is limited to 100 levels, including scenario payloads and expected JSON values; HookStorm checks this limit before recursive parsing or validation so behavior is consistent across operating systems and Python versions. These limits apply before delivery starts and are intended to keep local runs and CI safe when scenarios come from reviewed pull requests. If a scenario exceeds a limit, split it into smaller focused scenarios rather than increasing limits in the source.
 
 ## Run timeout budget
 
