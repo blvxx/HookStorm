@@ -179,3 +179,137 @@ def test_standard_webhooks_fuzz_trial_keeps_event_id_envelope_in_sync() -> None:
         0,
     )
     assert signed_headers["webhook-id"] == event["event_id"]
+
+def test_delivery_mutations_are_seeded_valid_and_replayable() -> None:
+    base = validate_scenario(
+        {
+            "version": 1,
+            "name": "delivery mutation fuzz",
+            "retry": {"max_attempts": 3, "backoff_ms": 1},
+            "events": [
+                {"id": "first", "event_id": "evt_delivery_1", "payload": {"value": 1}},
+                {"id": "second", "event_id": "evt_delivery_2", "payload": {"value": 2}},
+            ],
+        }
+    )
+
+    observed: list[dict] = []
+
+    async def fake_runner(candidate, target, **kwargs):
+        normalized = validate_scenario(candidate)
+        observed.append(normalized)
+        return {
+            "summary": {"success": True, "total_deliveries": 2, "passed": 2, "failed": 0},
+            "run_id": "run-delivery-fuzz",
+            "scenario_fingerprint": scenario_fingerprint(normalized),
+        }
+
+    first = asyncio.run(
+        run_fuzz(
+            base,
+            "http://127.0.0.1:8000/webhook",
+            seed=42,
+            iterations=4,
+            vary_order=True,
+            vary_duplicates=True,
+            max_duplicates=2,
+            vary_delay=True,
+            max_delay_ms=50,
+            vary_faults=True,
+            runner=fake_runner,
+        )
+    )
+    first_observed = list(observed)
+    observed.clear()
+    second = asyncio.run(
+        run_fuzz(
+            base,
+            "http://127.0.0.1:8000/webhook",
+            seed=42,
+            iterations=4,
+            vary_order=True,
+            vary_duplicates=True,
+            max_duplicates=2,
+            vary_delay=True,
+            max_delay_ms=50,
+            vary_faults=True,
+            runner=fake_runner,
+        )
+    )
+
+    assert first["mode"] == "seeded-scenario-fuzz"
+    assert first["dimensions"] == [
+        "payload", "order", "duplicates", "delay", "transport_faults"
+    ]
+    assert first["summary"]["success"] is True
+    assert first["worst_case_http_attempts"] == 18
+    assert [case["delivery_mutations"] for case in first["cases"]] == [
+        case["delivery_mutations"] for case in second["cases"]
+    ]
+    assert [scenario_fingerprint(item) for item in first_observed] == [
+        scenario_fingerprint(item) for item in observed
+    ]
+
+    for candidate, case in zip(first_observed, first["cases"], strict=True):
+        assert candidate["delivery"]["order"] in {"in_order", "reverse"}
+        assert {item["dimension"] for item in case["delivery_mutations"]} == {
+            "order", "duplicate_count", "delay_ms", "fault_injection"
+        }
+        for event in candidate["events"]:
+            event_delivery = {**candidate["delivery"], **event["delivery"]}
+            assert 0 <= event_delivery.get("duplicate_count", 0) <= 2
+            assert 0 <= event_delivery.get("delay_ms", 0) <= 50
+            fault_plan = event_delivery.get("fault_injection", {})
+            attempts = [
+                attempt
+                for values in fault_plan.values()
+                for attempt in values
+            ]
+            assert len(attempts) == len(set(attempts))
+            assert all(1 <= attempt <= 3 for attempt in attempts)
+
+
+def test_payload_only_fuzz_keeps_legacy_mode_and_no_delivery_changes() -> None:
+    async def fake_runner(candidate, target, **kwargs):
+        return {
+            "summary": {"success": True, "total_deliveries": 1, "passed": 1, "failed": 0},
+            "run_id": "run-legacy-fuzz",
+            "scenario_fingerprint": scenario_fingerprint(candidate),
+        }
+
+    result = asyncio.run(
+        run_fuzz(
+            _base_scenario(),
+            "http://127.0.0.1:8000/webhook",
+            iterations=1,
+            runner=fake_runner,
+        )
+    )
+
+    assert result["mode"] == "seeded-payload-fuzz"
+    assert result["dimensions"] == ["payload"]
+    assert result["cases"][0]["delivery_mutations"] == []
+
+
+@pytest.mark.parametrize(
+    ("keyword", "value"),
+    [
+        ("max_duplicates", -1),
+        ("max_duplicates", 101),
+        ("max_delay_ms", -1),
+        ("max_delay_ms", 60_001),
+        ("max_duplicates", True),
+        ("max_delay_ms", True),
+    ],
+)
+def test_fuzz_rejects_invalid_delivery_mutation_bounds(keyword: str, value: object) -> None:
+    kwargs = {keyword: value}
+    with pytest.raises(ValueError):
+        asyncio.run(
+            run_fuzz(
+                _base_scenario(),
+                "http://127.0.0.1:8000/webhook",
+                iterations=1,
+                **kwargs,
+            )
+        )
