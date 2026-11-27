@@ -592,7 +592,7 @@ def test_load_history_export_rejects_inconsistent_summary_metrics(tmp_path) -> N
 
 
 def test_compare_rejects_delivery_pass_flag_that_disagrees_with_final_attempt() -> None:
-    current = make_result("current1")
+    current = make_result("current1", deliveries=[delivery("evt_ok")])
     current["deliveries"][0]["passed"] = False
 
     with pytest.raises(HistoryError, match="does not match its final attempt"):
