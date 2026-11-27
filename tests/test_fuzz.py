@@ -2,12 +2,20 @@ from __future__ import annotations
 
 import asyncio
 import json
+import os
 import random
+import stat
 
 import pytest
 
 from hookstorm.config import load_scenario, scenario_fingerprint, validate_scenario
-from hookstorm.fuzz import minimize_json_payload, mutate_payload, run_fuzz, scenario_to_yaml
+from hookstorm.fuzz import (
+    _write_case,
+    minimize_json_payload,
+    mutate_payload,
+    run_fuzz,
+    scenario_to_yaml,
+)
 
 
 def _base_scenario() -> dict:
@@ -361,3 +369,26 @@ def test_invalid_delivery_mutation_falls_back_to_valid_payload_trial(monkeypatch
     skipped = result["cases"][0]["delivery_mutations"][0]
     assert skipped["dimension"] == "delivery_mutations"
     assert "exceeding run_timeout_ms=100" in skipped["skipped"]
+
+
+@pytest.mark.skipif(os.name != "posix", reason="POSIX file modes are not portable to Windows")
+def test_fuzz_replay_case_is_created_with_owner_only_permissions(tmp_path) -> None:
+    path = _write_case(
+        tmp_path / "private-cases",
+        "replay.yaml",
+        _base_scenario(),
+    )
+
+    assert stat.S_IMODE(os.stat(path).st_mode) == 0o600
+
+
+def test_fuzz_replay_case_refuses_to_overwrite_existing_file(tmp_path) -> None:
+    directory = tmp_path / "cases"
+    directory.mkdir()
+    existing = directory / "case.yaml"
+    existing.write_text("keep-me", encoding="utf-8")
+
+    with pytest.raises(FileExistsError, match="Refusing to overwrite"):
+        _write_case(directory, "case.yaml", _base_scenario())
+
+    assert existing.read_text(encoding="utf-8") == "keep-me"
