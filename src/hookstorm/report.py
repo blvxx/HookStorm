@@ -79,7 +79,7 @@ def render_html(result: dict[str, Any]) -> str:
         state = "passed" if passed else "failed"
         badge = "PASS" if passed else "FAIL"
         event_type = html.escape(str(delivery["event_type"]))
-        event_id = html.escape(str(delivery["event_id"]))
+        event_id = html.escape(str(delivery["event_id"]), quote=True)
         signature_provider = html.escape(str(delivery.get("signature_provider", "generic")))
         duplicate_index = int(delivery.get("duplicate_index", 0))
         error_text = " ".join(str(item.get("error") or "") for item in attempts)
