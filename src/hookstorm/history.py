@@ -235,7 +235,10 @@ def _require_non_negative_integer(value: Any, label: str, *, maximum: int | None
 def _require_finite_non_negative_number(value: Any, label: str) -> float:
     if isinstance(value, bool) or not isinstance(value, (int, float)):
         raise HistoryError(f"{label} must be a finite non-negative number")
-    number = float(value)
+    try:
+        number = float(value)
+    except (OverflowError, ValueError) as exc:
+        raise HistoryError(f"{label} must be a finite non-negative number") from exc
     if not math.isfinite(number) or number < 0:
         raise HistoryError(f"{label} must be a finite non-negative number")
     return number
@@ -271,12 +274,12 @@ def _validate_run_result(result: dict[str, Any], label: str) -> None:
             f"{label} summary.total_deliveries does not match the delivery count"
         )
 
+    _delivery_index(deliveries, label)
     actual_passed = 0
     actual_attempts = 0
     for index, item in enumerate(deliveries):
         if not isinstance(item, dict):
             raise HistoryError(f"{label} delivery {index} must be a JSON object")
-        _delivery_key(item)
         if not isinstance(item.get("passed"), bool):
             raise HistoryError(f"{label} delivery {index}.passed must be a boolean")
         actual_passed += int(item["passed"])
