@@ -29,7 +29,7 @@ After the PR is reviewed and merged, the final release commit must pass the rele
 
 ## Latest validation evidence
 
-The current PR head `718e28ef32e4e65801317fabff1ef222fefdc69c` was validated on 2026-11-27:
+The current PR head `8343d26c02df07dfb8c94b1babab06946b7004d3` was validated on 2026-11-27:
 
 | Check | Result |
 |---|---|
