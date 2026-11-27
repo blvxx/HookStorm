@@ -312,6 +312,8 @@ def _validate_verify_auth(value: Any) -> dict[str, str] | None:
         "host",
         "keep-alive",
         "proxy-connection",
+        "proxy-authenticate",
+        "proxy-authorization",
         "te",
         "trailer",
         "transfer-encoding",
