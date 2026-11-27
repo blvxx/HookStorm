@@ -49,6 +49,6 @@ Then point it at your own local or isolated staging receiver:
 hookstorm run scenarios/captured-webhooks.yaml --target http://127.0.0.1:8000/webhook
 ~~~
 
-Captured event IDs are replaced with unique local IDs so the same event can be captured more than once without violating scenario version 1 uniqueness. The original upstream event ID, when available, is kept as capture metadata and does not change replay behavior.
+Captured event IDs are replaced with unique local IDs so the same event can be captured more than once without violating scenario version 1 uniqueness. The original upstream event ID, when available, is kept as capture metadata and does not change replay behavior. Provider signature headers are not replayed: when the source is a known provider, add the matching top-level `provider` to the scenario and configure `HOOKSTORM_SECRET` so HookStorm can generate a fresh signature.
 
 Capture stores payloads and non-sensitive custom headers. Review the scenario before sharing it: payloads and event paths can still contain personal or business data.

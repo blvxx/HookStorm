@@ -22,7 +22,7 @@ _SENSITIVE_HEADER_TOKENS = (
     "secret", "cookie", "password",
 )
 _NEVER_CAPTURE_HEADERS = {
-    "host", "content-length", "transfer-encoding", "connection",
+    "host", "content-length", "transfer-encoding", "connection", "accept-encoding",
     "keep-alive", "proxy-connection", "te", "trailer", "upgrade",
     "x-hookstorm-run", "x-hookstorm-attempt", "x-hookstorm-duplicate-index",
     "x-event-id", "x-event-type", "x-github-event", "x-github-delivery",

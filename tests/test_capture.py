@@ -128,6 +128,7 @@ def test_sensitive_headers_are_saved_only_as_non_replayed_capture_metadata(tmp_p
                 "description": (
                     "Captured locally by HookStorm. Review payloads and headers before sharing."
                 ),
+                "name": "capture metadata validation",
                 "delivery": {"signature": "none"},
                 "events": [
                     {
@@ -201,3 +202,32 @@ def test_capture_metadata_must_match_scenario_events() -> None:
                 ],
             }
         )
+
+
+
+def test_concurrent_capture_requests_receive_unique_ordered_event_ids(tmp_path) -> None:
+    from concurrent.futures import ThreadPoolExecutor
+
+    store = CaptureStore(tmp_path / "concurrent.yaml", max_events=12)
+
+    with ThreadPoolExecutor(max_workers=8) as pool:
+        events = list(
+            pool.map(
+                lambda index: store.record(
+                    {"Content-Type": "application/json"},
+                    json.dumps({"sequence": index}).encode("utf-8"),
+                ),
+                range(12),
+            )
+        )
+
+    event_ids = [event["event_id"] for event in events]
+    assert len(set(event_ids)) == 12
+    scenario = load_scenario(tmp_path / "concurrent.yaml")
+    assert len(scenario["events"]) == 12
+    assert [event["event_id"] for event in scenario["events"]] == [
+        f"evt_capture_{index:04d}" for index in range(1, 13)
+    ]
+    assert [
+        item["event_id"] for item in scenario["capture"]["events"]
+    ] == [event["event_id"] for event in scenario["events"]]
