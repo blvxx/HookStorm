@@ -19,8 +19,27 @@ class ScenarioError(ValueError):
     """Raised when a scenario file is invalid."""
 
 
+_MAX_SCENARIO_FILE_BYTES = 16 * 1_048_576
+_MAX_SCENARIO_PAYLOAD_BYTES = 16 * 1_048_576
+_MAX_YAML_ALIASES = 16
+
+
 class _UniqueKeySafeLoader(yaml.SafeLoader):
-    """Safe YAML loader that rejects duplicate keys before constructing mappings."""
+    """Safe YAML loader with duplicate-key, alias-count, and expansion guards."""
+
+    def __init__(self, stream: Any) -> None:
+        self._alias_count = 0
+        super().__init__(stream)
+
+    def compose_node(self, parent: Any, index: Any) -> yaml.Node:
+        if self.check_event(yaml.AliasEvent):
+            self._alias_count += 1
+            if self._alias_count > _MAX_YAML_ALIASES:
+                raise ScenarioError(
+                    f"YAML contains more than {_MAX_YAML_ALIASES} aliases; "
+                    "reduce aliases to keep scenario loading bounded"
+                )
+        return super().compose_node(parent, index)
 
     def construct_mapping(self, node: yaml.MappingNode, deep: bool = False) -> dict:
         seen: dict[Any, Any] = {}
@@ -417,6 +436,7 @@ def validate_scenario(data: Any) -> dict[str, Any]:
 
     normalized_events: list[dict[str, Any]] = []
     seen_event_ids: set[str] = set()
+    total_payload_bytes = 0
     for index, event in enumerate(events):
         where = f"events[{index}]"
         if not isinstance(event, dict):
@@ -466,6 +486,12 @@ def validate_scenario(data: Any) -> dict[str, Any]:
             raise ScenarioError(f"{where}.payload must be valid JSON-compatible data") from exc
         if len(encoded_payload) > 1_048_576:
             raise ScenarioError(f"{where}.payload exceeds the 1 MiB limit")
+        total_payload_bytes += len(encoded_payload)
+        if total_payload_bytes > _MAX_SCENARIO_PAYLOAD_BYTES:
+            raise ScenarioError(
+                "Scenario payloads exceed the 16 MiB aggregate limit; "
+                "reduce the number or size of events"
+            )
         custom_headers = event.get("headers", {})
         if not isinstance(custom_headers, dict) or any(
             not isinstance(key, str) or not isinstance(value, str)
@@ -722,12 +748,18 @@ def load_scenario(
     """Load a scenario from YAML, optionally selecting a provider profile."""
     scenario_path = Path(path)
     try:
-        raw = yaml.load(
-            scenario_path.read_text(encoding="utf-8"),
-            Loader=_UniqueKeySafeLoader,
-        )
+        with scenario_path.open("rb") as stream:
+            serialized = stream.read(_MAX_SCENARIO_FILE_BYTES + 1)
+        if len(serialized) > _MAX_SCENARIO_FILE_BYTES:
+            raise ScenarioError(
+                f"Scenario file exceeds the {_MAX_SCENARIO_FILE_BYTES}-byte limit"
+            )
+        source = serialized.decode("utf-8")
+        raw = yaml.load(source, Loader=_UniqueKeySafeLoader)
     except FileNotFoundError as exc:
         raise ScenarioError(f"Scenario file not found: {scenario_path}") from exc
+    except UnicodeDecodeError as exc:
+        raise ScenarioError(f"Scenario file is not valid UTF-8: {scenario_path}") from exc
     except yaml.YAMLError as exc:
         raise ScenarioError(f"Invalid YAML in {scenario_path}: {exc}") from exc
     except OSError as exc:
