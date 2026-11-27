@@ -421,6 +421,13 @@ def _validate_run_result(result: dict[str, Any], label: str) -> None:
             raise HistoryError(f"{label} verification must be a JSON object or null")
         if "passed" in verification and not isinstance(verification["passed"], bool):
             raise HistoryError(f"{label} verification.passed must be a boolean")
+        for field in ("expected_status", "expected_json"):
+            if field in verification and not isinstance(verification[field], bool):
+                raise HistoryError(f"{label} verification.{field} must be a boolean")
+        if "error" in verification and verification["error"] is not None and not isinstance(
+            verification["error"], str
+        ):
+            raise HistoryError(f"{label} verification.error must be a string or null")
         if "latency_ms" in verification:
             _require_finite_non_negative_number(
                 verification["latency_ms"], f"{label} verification.latency_ms"
@@ -435,6 +442,13 @@ def _validate_run_result(result: dict[str, Any], label: str) -> None:
                 raise HistoryError(
                     f"{label} verification.status_code must be null or an HTTP status code"
                 )
+
+    verification_passed = verification is None or verification.get("passed") is True
+    expected_success = actual_passed == len(deliveries) and verification_passed
+    if summary["success"] is not expected_success:
+        raise HistoryError(
+            f"{label} summary.success does not match delivery and verification outcomes"
+        )
 
 
 def save_run(result: dict[str, Any], path: str | Path | None = None) -> str:
