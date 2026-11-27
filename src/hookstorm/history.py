@@ -10,6 +10,8 @@ import tempfile
 from pathlib import Path
 from typing import Any
 
+from hookstorm.json_limits import ensure_json_text_depth
+
 _DEFAULT_DB = Path.home() / ".hookstorm" / "history.sqlite3"
 _SCHEMA_VERSION = 1
 _MAX_HISTORY_EXPORT_BYTES = 16 * 1024 * 1024
@@ -884,6 +886,7 @@ def load_history_export(source: str | Path) -> dict[str, Any]:
 
     try:
         source_text = serialized.decode("utf-8")
+        ensure_json_text_depth(source_text)
         document = json.loads(
             source_text,
             parse_constant=reject_non_standard_number,
