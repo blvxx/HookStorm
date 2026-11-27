@@ -85,7 +85,7 @@ def request_receiver() -> Iterator[tuple[str, dict]]:
                 "payload": None,
                 "error": framing_error,
             }
-            status = 200
+            status = 400 if framing_error is not None else 200
             error = framing_error
             payload = None
 
