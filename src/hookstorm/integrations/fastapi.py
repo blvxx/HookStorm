@@ -24,6 +24,7 @@ def create_router(
     path: str = "/__hookstorm/webhook",
     recorder: WebhookRecorder | None = None,
     max_body_bytes: int = 1_048_576,
+    max_events: int = 1_000,
     include_sensitive_headers: bool = False,
 ) -> FastAPIWebhookEndpoint:
     """Create an opt-in APIRouter that records synthetic JSON webhook requests."""
@@ -39,6 +40,7 @@ def create_router(
 
     active_recorder = recorder or WebhookRecorder(
         max_body_bytes=max_body_bytes,
+        max_events=max_events,
         include_sensitive_headers=include_sensitive_headers,
     )
     router = APIRouter()
