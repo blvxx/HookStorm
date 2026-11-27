@@ -62,7 +62,7 @@ The optional top-level verify mapping runs once after all event deliveries have 
 
 | Field | Default | Constraints / behavior |
 |---|---|---|
-| url | required | Absolute HTTP(S) URL. Localhost / loopback only unless the CLI uses --allow-remote. Embedded credentials and fragments are rejected. |
+| url | required | Absolute HTTP(S) URL. Localhost / loopback only by default. Remote HTTPS requires `--allow-remote`; non-loopback HTTP additionally requires `--allow-insecure-http`. Authenticated remote probes always require HTTPS. Embedded credentials and fragments are rejected. |
 | expect_status | [200] | Accepted HTTP status code or non-empty list of codes from 100 to 599. |
 | expect_json | required | JSON object checked with the same recursive subset-matching rules as event response assertions. |
 | timeout_ms | 5000 | GET timeout, 1–300,000 ms. |
@@ -92,6 +92,10 @@ The `header` field is optional and defaults to `X-API-Key`. A custom API-key hea
 The named environment variable is resolved before any webhook delivery starts. Missing, empty, oversized, non-ASCII, or whitespace-containing credentials fail preflight without sending webhook traffic. Credential values are sent only on the verification GET and are never copied to terminal output, reports, or run history. Authenticated remote verification URLs must use HTTPS; plain HTTP is allowed only for localhost or loopback development endpoints. Store the variable in your CI secret manager or local shell environment; do not put the value in YAML.
 
 The probe is not a universal exactly-once guarantee: it verifies only the state your endpoint exposes at the time of the GET. Use isolated test data and an endpoint designed for testing.
+
+## Response body safety limit
+
+Webhook delivery responses and the business-state verification response are streamed and capped at 2 MiB after HTTP content decoding. If a response exceeds this limit, HookStorm closes the response stream and marks the JSON assertion as failed with a clear size-limit error. The limit applies even when no JSON expectation is configured; HookStorm does not buffer arbitrarily large response bodies or persist response content.
 
 ## Event fields
 
