@@ -34,6 +34,7 @@ The demo receiver binds to `127.0.0.1` only. The command writes a self-contained
 | Ambiguous acknowledgements | Deterministic pre-send connection errors and post-processing response loss |
 | Signatures | Generic HMAC, Stripe, GitHub, Shopify, Standard Webhooks v1 |
 | Assertions | HTTP status, nested JSON, and optional read-only business-state verification |
+| Fuzzing | Seeded JSON payload mutations, replayable failing cases, and bounded failure minimization |
 | Reports and regression checks | HTML, JSON, JUnit, local SQLite history, portable baselines |
 
 Scenarios use the backwards-compatible `version: 1` YAML format. Provider profiles for Stripe, GitHub, Shopify, and Standard Webhooks supply synthetic event shapes and provider headers (`hookstorm run --provider github`, or `hookstorm init --provider stripe`). See the [scenario reference](docs/scenario-format.md) and [provider guide](docs/provider-profiles.md) for fields, limits, signatures, and examples.
@@ -66,6 +67,7 @@ Read [SECURITY.md](SECURITY.md) and the [architecture notes](docs/architecture.m
 ## Documentation
 
 - [Scenario format and behavior](docs/scenario-format.md)
+- [Seeded fuzzing and failure minimization](docs/fuzzing.md)
 - [Provider profiles and retry-policy notes](docs/provider-profiles.md)
 - [Ambiguous acknowledgements and idempotency](docs/ambiguous-acknowledgements.md)
 - [Architecture and current limitations](docs/architecture.md)

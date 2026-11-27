@@ -13,6 +13,7 @@ from pathlib import Path
 from hookstorm import __version__
 from hookstorm.config import load_scenario
 from hookstorm.doctor import build_preflight_document, run_preflight
+from hookstorm.fuzz import run_fuzz
 from hookstorm.history import (
     HistoryError,
     compare_history_file,
@@ -95,6 +96,38 @@ def _parser() -> argparse.ArgumentParser:
     run.add_argument("--output", help="write a report to this path")
     run.add_argument("--history-db", help="history database path")
     run.add_argument("--no-history", action="store_true", help="do not persist this run")
+
+    fuzz = subparsers.add_parser(
+        "fuzz",
+        help="run seeded JSON payload mutations against an authorized test endpoint",
+    )
+    fuzz.add_argument("scenario", help="base version 1 YAML scenario")
+    fuzz.add_argument("--target", required=True, help="webhook URL; loopback only unless opted in")
+    fuzz.add_argument(
+        "--provider",
+        choices=("stripe", "github", "shopify", "standard_webhooks"),
+        help="apply provider-specific event, header, and signature defaults",
+    )
+    fuzz.add_argument("--seed", type=int, default=1, help="deterministic mutation seed (default: 1)")
+    fuzz.add_argument("--iterations", type=int, default=25, help="number of mutations (1–500)")
+    fuzz.add_argument(
+        "--minimize-budget",
+        type=int,
+        default=0,
+        help="maximum extra executions to reduce each failing payload (0 disables minimization)",
+    )
+    fuzz.add_argument(
+        "--cases-dir",
+        help="optionally save failing and minimized replayable YAML scenarios",
+    )
+    fuzz.add_argument("--secret-env", default="HOOKSTORM_SECRET")
+    fuzz.add_argument("--allow-remote", action="store_true", help="allow a remote HTTPS target")
+    fuzz.add_argument(
+        "--allow-insecure-http",
+        action="store_true",
+        help="allow unencrypted remote HTTP; requires --allow-remote",
+    )
+    fuzz.add_argument("--output", help="write the JSON summary to this path instead of stdout")
 
     history = subparsers.add_parser("history", help="inspect and compare local run history")
     history_sub = history.add_subparsers(dest="history_command", required=True)
@@ -564,6 +597,30 @@ def main(argv: Sequence[str] | None = None) -> int:
                 return _history_compare_file_command(args)
             if args.history_command == "export":
                 return _history_export_command(args)
+
+        if args.command == "fuzz":
+            scenario = load_scenario(args.scenario, provider=args.provider)
+            fuzz_result = asyncio.run(
+                run_fuzz(
+                    scenario,
+                    args.target,
+                    seed=args.seed,
+                    iterations=args.iterations,
+                    allow_remote=args.allow_remote,
+                    allow_insecure_http=args.allow_insecure_http,
+                    secret=os.getenv(args.secret_env),
+                    minimize_budget=args.minimize_budget,
+                    cases_dir=args.cases_dir,
+                )
+            )
+            serialized = json.dumps(fuzz_result, ensure_ascii=False, indent=2) + "\n"
+            if args.output:
+                output_path = Path(args.output)
+                output_path.write_text(serialized, encoding="utf-8")
+                print(f"Fuzz summary: {output_path.resolve()}")
+            else:
+                sys.stdout.write(serialized)
+            return 0 if fuzz_result["summary"]["success"] else 1
 
         scenario = load_scenario(
             args.scenario,

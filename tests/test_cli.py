@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 from pathlib import Path
 
 import pytest
@@ -517,3 +518,34 @@ def test_init_provider_flag_generates_a_provider_profile(tmp_path, monkeypatch, 
     assert scenario["events"][0]["id"] == "payment_intent.succeeded"
     assert scenario["events"][0]["payload"]["object"] == "event"
     capsys.readouterr()
+
+
+
+def test_fuzz_cli_executes_seeded_mutations_and_writes_json_summary(
+    receiver, tmp_path, capsys
+) -> None:
+    base, _state = receiver
+    scenario = _scenario_file(tmp_path)
+    output = tmp_path / "fuzz-summary.json"
+
+    assert main([
+        "fuzz",
+        scenario,
+        "--target",
+        base,
+        "--seed",
+        "123",
+        "--iterations",
+        "3",
+        "--output",
+        str(output),
+    ]) == 0
+
+    summary = json.loads(output.read_text(encoding="utf-8"))
+    assert summary["seed"] == 123
+    assert summary["iterations"] == 3
+    assert summary["summary"]["success"] is True
+    assert summary["summary"]["executions"] == 3
+    assert summary["worst_case_http_attempts"] == 3
+    assert len({case["event_id"] for case in summary["cases"]}) == 3
+    assert "Fuzz summary:" in capsys.readouterr().out
