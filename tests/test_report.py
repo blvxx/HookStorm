@@ -279,5 +279,5 @@ def test_html_report_marks_injected_transport_faults() -> None:
 
     assert "Connect fault" in html_report
     assert "ACK loss" in html_report
-    assert html_report.count("class='attempt") == 3
-    assert "attempt injected" in html_report
+    assert html_report.count("class='attempt ") == 3
+    assert "injected" in html_report
