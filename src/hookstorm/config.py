@@ -483,8 +483,9 @@ def scenario_fingerprint(scenario: dict[str, Any]) -> str:
     """Return a stable SHA-256 fingerprint for the behavior-defining scenario config.
 
     Human-facing name and description are deliberately excluded. The digest includes
-    delivery behavior, retry policy, events, and verification expectations, but does
-    not expose those values in history or portable baselines.
+    delivery behavior, retry policy, events, and verification expectations. A non-default
+    run timeout is included; the default retains the pre-timeout fingerprint for baseline
+    compatibility. The digest does not expose the underlying values in history or baselines.
     """
     behavior = {
         key: scenario.get(key)
