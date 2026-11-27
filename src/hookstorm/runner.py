@@ -12,7 +12,7 @@ import time
 import uuid
 from collections.abc import AsyncIterator
 from datetime import UTC, datetime
-from typing import Any
+from typing import Any, cast
 from urllib.parse import urlsplit, urlunsplit
 
 import httpcore
@@ -203,7 +203,9 @@ class _FaultInjectingTransport(httpx.AsyncBaseTransport):
                 request=request,
             )
         if fault == "response_body_error":
-            response.stream = _PartialResponseReadErrorStream(response.stream)
+            response.stream = _PartialResponseReadErrorStream(
+                cast(httpx.AsyncByteStream, response.stream)
+            )
         return response
 
     async def aclose(self) -> None:
