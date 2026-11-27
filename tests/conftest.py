@@ -33,7 +33,7 @@ def receiver() -> Iterator[tuple[str, dict]]:
 
         def do_GET(self) -> None:  # noqa: N802
             path = self.path.split("?", 1)[0]
-            if path not in {"/state", "/state-large"}:
+            if path not in {"/state", "/state-large", "/state-slow-drip"}:
                 self.send_error(404)
                 return
             run_id = self.headers.get("X-HookStorm-Run", "")
@@ -48,9 +48,17 @@ def receiver() -> Iterator[tuple[str, dict]]:
             encoded = json.dumps(payload).encode()
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
-            if path == "/state":
-                self.send_header("Content-Length", str(len(encoded)))
+            self.send_header("Content-Length", str(len(encoded)))
             self.end_headers()
+            if path == "/state-slow-drip":
+                try:
+                    for offset in range(0, len(encoded), 6):
+                        self.wfile.write(encoded[offset : offset + 6])
+                        self.wfile.flush()
+                        time.sleep(0.06)
+                except (BrokenPipeError, ConnectionResetError):
+                    pass
+                return
             self.wfile.write(encoded)
 
         def do_POST(self) -> None:  # noqa: N802
