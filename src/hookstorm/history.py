@@ -3,6 +3,7 @@
 from __future__ import annotations
 
 import json
+import math
 import os
 import sqlite3
 from pathlib import Path
@@ -209,6 +210,8 @@ def _delivery_index(
     """Index deliveries without silently discarding duplicate identities."""
     indexed: dict[tuple[str, str, int], dict[str, Any]] = {}
     for index, item in enumerate(deliveries):
+        if not isinstance(item, dict):
+            raise HistoryError(f"{label} delivery {index} must be a JSON object")
         key = _delivery_key(item)
         if key in indexed:
             raise HistoryError(
@@ -219,6 +222,146 @@ def _delivery_index(
     return indexed
 
 
+def _require_non_negative_integer(value: Any, label: str, *, maximum: int | None = None) -> int:
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, int)
+        or value < 0
+        or (maximum is not None and value > maximum)
+    ):
+        bounds = "a non-negative integer" if maximum is None else f"an integer between 0 and {maximum}"
+        raise HistoryError(f"{label} must be {bounds}")
+    return value
+
+
+def _require_finite_non_negative_number(value: Any, label: str) -> float:
+    if isinstance(value, bool) or not isinstance(value, (int, float)):
+        raise HistoryError(f"{label} must be a finite non-negative number")
+    try:
+        number = float(value)
+    except (OverflowError, ValueError) as exc:
+        raise HistoryError(f"{label} must be a finite non-negative number") from exc
+    if not math.isfinite(number) or number < 0:
+        raise HistoryError(f"{label} must be a finite non-negative number")
+    return number
+
+
+def _validate_run_result(result: dict[str, Any], label: str) -> None:
+    """Validate the metrics and delivery identities used by history comparisons."""
+    for key in ("run_id", "scenario", "started_at", "target"):
+        value = result.get(key)
+        if not isinstance(value, str) or not value.strip():
+            raise HistoryError(f"{label} {key} must be a non-empty string")
+
+    if "duration_ms" in result:
+        _require_finite_non_negative_number(result["duration_ms"], f"{label} duration_ms")
+    _read_scenario_fingerprint(result, label)
+
+    summary = result.get("summary")
+    if not isinstance(summary, dict):
+        raise HistoryError(f"{label} summary must be a JSON object")
+    count_fields = ("total_deliveries", "passed", "failed", "attempts")
+    for field in count_fields:
+        if field not in summary:
+            raise HistoryError(f"{label} summary is missing '{field}'")
+        _require_non_negative_integer(summary[field], f"{label} summary.{field}")
+    if not isinstance(summary.get("success"), bool):
+        raise HistoryError(f"{label} summary.success must be a boolean")
+
+    deliveries = result.get("deliveries")
+    if not isinstance(deliveries, list):
+        raise HistoryError(f"{label} deliveries must be a JSON array")
+    if summary["total_deliveries"] != len(deliveries):
+        raise HistoryError(
+            f"{label} summary.total_deliveries does not match the delivery count"
+        )
+
+    _delivery_index(deliveries, label)
+    actual_passed = 0
+    actual_attempts = 0
+    for index, item in enumerate(deliveries):
+        if not isinstance(item, dict):
+            raise HistoryError(f"{label} delivery {index} must be a JSON object")
+        if not isinstance(item.get("passed"), bool):
+            raise HistoryError(f"{label} delivery {index}.passed must be a boolean")
+        actual_passed += int(item["passed"])
+
+        attempts = item.get("attempts")
+        if not isinstance(attempts, list) or not attempts:
+            raise HistoryError(f"{label} delivery {index}.attempts must be a non-empty JSON array")
+        actual_attempts += len(attempts)
+        for attempt_index, attempt in enumerate(attempts):
+            attempt_label = f"{label} delivery {index} attempt {attempt_index}"
+            if not isinstance(attempt, dict):
+                raise HistoryError(f"{attempt_label} must be a JSON object")
+            if "latency_ms" in attempt:
+                _require_finite_non_negative_number(
+                    attempt["latency_ms"], f"{attempt_label}.latency_ms"
+                )
+            if "elapsed_ms" in attempt:
+                _require_finite_non_negative_number(
+                    attempt["elapsed_ms"], f"{attempt_label}.elapsed_ms"
+                )
+            if "attempt" in attempt:
+                _require_non_negative_integer(
+                    attempt["attempt"], f"{attempt_label}.attempt", maximum=10
+                )
+                if attempt["attempt"] == 0:
+                    raise HistoryError(f"{attempt_label}.attempt must be between 1 and 10")
+            if "status_code" in attempt:
+                status_code = attempt["status_code"]
+                if status_code is not None and (
+                    isinstance(status_code, bool)
+                    or not isinstance(status_code, int)
+                    or not 100 <= status_code <= 599
+                ):
+                    raise HistoryError(
+                        f"{attempt_label}.status_code must be null or an HTTP status code"
+                    )
+            for field in ("expected_status", "expected_json", "passed"):
+                if field in attempt and not isinstance(attempt[field], bool):
+                    raise HistoryError(f"{attempt_label}.{field} must be a boolean")
+            if "error" in attempt and attempt["error"] is not None and not isinstance(
+                attempt["error"], str
+            ):
+                raise HistoryError(f"{attempt_label}.error must be a string or null")
+
+        if "schedule_after_ms" in item:
+            _require_non_negative_integer(
+                item["schedule_after_ms"],
+                f"{label} delivery {index}.schedule_after_ms",
+                maximum=300_000,
+            )
+
+    if summary["passed"] != actual_passed:
+        raise HistoryError(f"{label} summary.passed does not match delivery outcomes")
+    if summary["failed"] != len(deliveries) - actual_passed:
+        raise HistoryError(f"{label} summary.failed does not match delivery outcomes")
+    if summary["attempts"] != actual_attempts:
+        raise HistoryError(f"{label} summary.attempts does not match recorded attempts")
+
+    verification = result.get("verification")
+    if verification is not None:
+        if not isinstance(verification, dict):
+            raise HistoryError(f"{label} verification must be a JSON object or null")
+        if "passed" in verification and not isinstance(verification["passed"], bool):
+            raise HistoryError(f"{label} verification.passed must be a boolean")
+        if "latency_ms" in verification:
+            _require_finite_non_negative_number(
+                verification["latency_ms"], f"{label} verification.latency_ms"
+            )
+        if "status_code" in verification:
+            status_code = verification["status_code"]
+            if status_code is not None and (
+                isinstance(status_code, bool)
+                or not isinstance(status_code, int)
+                or not 100 <= status_code <= 599
+            ):
+                raise HistoryError(
+                    f"{label} verification.status_code must be null or an HTTP status code"
+                )
+
+
 def save_run(result: dict[str, Any], path: str | Path | None = None) -> str:
     """Persist a sanitized HookStorm result and return its run ID."""
     required = ("run_id", "scenario", "started_at", "target", "summary", "deliveries")
@@ -226,8 +369,8 @@ def save_run(result: dict[str, Any], path: str | Path | None = None) -> str:
     if missing:
         raise HistoryError(f"Cannot save incomplete run result; missing: {', '.join(missing)}")
 
+    _validate_run_result(result, "Run")
     safe_result = _sanitize_result(result)
-    _read_scenario_fingerprint(safe_result, "Run")
     metrics = result_metrics(safe_result)
     try:
         encoded = json.dumps(
@@ -340,11 +483,18 @@ def get_run(run_id: str, path: str | Path | None = None) -> dict[str, Any]:
 
 
 def _delivery_key(delivery: dict[str, Any]) -> tuple[str, str, int]:
-    return (
-        str(delivery.get("event_type", "")),
-        str(delivery.get("event_id", "")),
-        int(delivery.get("duplicate_index", 0)),
+    event_type = delivery.get("event_type")
+    event_id = delivery.get("event_id")
+    duplicate_index = delivery.get("duplicate_index", 0)
+    for field, value in (("event_type", event_type), ("event_id", event_id)):
+        if not isinstance(value, str) or not value.strip() or len(value) > 256:
+            raise HistoryError(
+                f"Delivery {field} must be a non-empty string of at most 256 characters"
+            )
+    _require_non_negative_integer(
+        duplicate_index, "Delivery duplicate_index", maximum=100
     )
+    return (event_type, event_id, duplicate_index)
 
 
 def _delivery_latency(delivery: dict[str, Any]) -> float:
@@ -369,6 +519,8 @@ def compare_results(
     if not isinstance(allow_config_change, bool):
         raise HistoryError("allow_config_change must be a boolean")
 
+    _validate_run_result(current, "Current run")
+    _validate_run_result(baseline, "Baseline")
     current_fingerprint = _read_scenario_fingerprint(current, "Current run")
     baseline_fingerprint = _read_scenario_fingerprint(baseline, "Baseline")
     same_configuration = (
@@ -594,18 +746,40 @@ def export_history_run(
 def load_history_export(source: str | Path) -> dict[str, Any]:
     """Read a portable baseline and re-apply the history field whitelist."""
     location = Path(source).expanduser()
+    def reject_non_standard_number(value: str) -> None:
+        raise HistoryError(
+            f"Baseline file '{location}' contains non-standard JSON number {value}"
+        )
+
+    def reject_duplicate_keys(pairs: list[tuple[str, Any]]) -> dict[str, Any]:
+        parsed: dict[str, Any] = {}
+        for key, value in pairs:
+            if key in parsed:
+                raise HistoryError(
+                    f"Baseline file '{location}' contains duplicate JSON key {key!r}"
+                )
+            parsed[key] = value
+        return parsed
+
     try:
-        document = json.loads(location.read_text(encoding="utf-8"))
+        document = json.loads(
+            location.read_text(encoding="utf-8"),
+            parse_constant=reject_non_standard_number,
+            object_pairs_hook=reject_duplicate_keys,
+        )
     except OSError as exc:
         raise HistoryError(f"Cannot read baseline file '{location}': {exc}") from exc
-    except json.JSONDecodeError as exc:
+    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
         raise HistoryError(f"Baseline file '{location}' is not valid JSON: {exc}") from exc
 
     if not isinstance(document, dict):
         raise HistoryError("Baseline file must contain a JSON object")
+    format_version = document.get("format_version")
     if (
         document.get("format") != _EXPORT_FORMAT
-        or document.get("format_version") != _EXPORT_FORMAT_VERSION
+        or isinstance(format_version, bool)
+        or not isinstance(format_version, int)
+        or format_version != _EXPORT_FORMAT_VERSION
     ):
         raise HistoryError(
             "Unsupported baseline file format; expected hookstorm-history version 1"
@@ -620,22 +794,7 @@ def load_history_export(source: str | Path) -> dict[str, Any]:
         raise HistoryError(
             f"Baseline run is incomplete; missing: {', '.join(missing)}"
         )
-    if not all(isinstance(result.get(key), str) and result[key] for key in required[:4]):
-        raise HistoryError("Baseline run metadata fields must be non-empty strings")
-    if not isinstance(result.get("summary"), dict):
-        raise HistoryError("Baseline run summary must be a JSON object")
-    if not isinstance(result.get("deliveries"), list):
-        raise HistoryError("Baseline run deliveries must be a JSON array")
-    _read_scenario_fingerprint(result, "Baseline")
-    for index, delivery in enumerate(result["deliveries"]):
-        if not isinstance(delivery, dict) or not isinstance(delivery.get("attempts", []), list):
-            raise HistoryError(f"Baseline delivery {index} has an invalid structure")
-        for attempt_index, attempt in enumerate(delivery.get("attempts", [])):
-            if not isinstance(attempt, dict):
-                raise HistoryError(
-                    f"Baseline delivery {index} attempt {attempt_index} has an invalid structure"
-                )
-
+    _validate_run_result(result, "Baseline")
     try:
         safe_result = _sanitize_result(result)
         result_metrics(safe_result)
