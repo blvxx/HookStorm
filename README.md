@@ -34,6 +34,7 @@ The demo receiver binds to `127.0.0.1` only. The command writes a self-contained
 | Ambiguous acknowledgements | Deterministic pre-send connection errors and post-processing response loss |
 | Signatures | Generic HMAC, Stripe, GitHub, Shopify, Standard Webhooks v1 |
 | Assertions | HTTP status, nested JSON, and optional read-only business-state verification |
+| Seeded fuzzing | Reproducible JSON payload mutations, bounded failure minimization, and replayable YAML cases |
 | Fuzzing | Seeded JSON payload mutations, replayable failing cases, and bounded failure minimization |
 | Reports and regression checks | HTML, JSON, JUnit, local SQLite history, portable baselines |
 
@@ -69,6 +70,7 @@ Read [SECURITY.md](SECURITY.md) and the [architecture notes](docs/architecture.m
 - [Scenario format and behavior](docs/scenario-format.md)
 - [Seeded fuzzing and failure minimization](docs/fuzzing.md)
 - [Provider profiles and retry-policy notes](docs/provider-profiles.md)
+- [Seeded fuzzing and failure minimization](docs/fuzzing.md)
 - [Ambiguous acknowledgements and idempotency](docs/ambiguous-acknowledgements.md)
 - [Architecture and current limitations](docs/architecture.md)
 - [CI integration for application repositories](docs/ci-integration.md)
