@@ -605,6 +605,26 @@ def test_load_history_export_rejects_non_standard_json_numbers(
         load_history_export(baseline_file)
 
 
+def test_load_history_export_rejects_overflowing_exponent_even_in_ignored_fields(
+    tmp_path,
+) -> None:
+    database = tmp_path / "history.sqlite3"
+    baseline_file = tmp_path / "baseline.json"
+    save_run(make_result("run_overflow1"), database)
+    export_history_run("latest", baseline_file, database)
+
+    raw = baseline_file.read_text(encoding="utf-8")
+    raw = raw.replace(
+        '"run": {',
+        '"run": {"ignored_metadata": {"overflow": 1e999},',
+        1,
+    )
+    baseline_file.write_text(raw, encoding="utf-8")
+
+    with pytest.raises(HistoryError, match="not valid JSON within parser limits"):
+        load_history_export(baseline_file)
+
+
 @pytest.mark.parametrize("duplicate_index", [True, -1, 101, 1.5, "1"])
 def test_load_history_export_rejects_invalid_duplicate_indices(
     tmp_path, duplicate_index: object
