@@ -33,7 +33,11 @@ def _parser() -> argparse.ArgumentParser:
     parser = argparse.ArgumentParser(
         prog="hookstorm",
         description="Test webhook delivery behavior with repeatable failure scenarios.",
-        epilog="Remote targets are blocked by default. Use --allow-remote only when authorized.",
+        epilog=(
+            "Loopback targets are allowed by default. Remote HTTPS requires --allow-remote; "
+            "remote plaintext HTTP additionally requires --allow-insecure-http. "
+            "Use these flags only for systems you are authorized to test."
+        ),
     )
     parser.add_argument("--version", action="version", version=f"HookStorm {__version__}")
     subparsers = parser.add_subparsers(dest="command", required=True)
@@ -56,7 +60,12 @@ def _parser() -> argparse.ArgumentParser:
     run = subparsers.add_parser("run", help="execute a YAML scenario against a webhook endpoint")
     run.add_argument("scenario", help="path to a scenario YAML file")
     run.add_argument("--target", required=True, help="webhook URL; localhost only unless opted in")
-    run.add_argument("--allow-remote", action="store_true", help="allow a non-local target")
+    run.add_argument("--allow-remote", action="store_true", help="allow a remote HTTPS target")
+    run.add_argument(
+        "--allow-insecure-http",
+        action="store_true",
+        help="allow unencrypted remote HTTP; requires --allow-remote",
+    )
     run.add_argument("--secret-env", default="HOOKSTORM_SECRET", help="environment variable for HMAC secret")
     run.add_argument("--format", choices=("html", "json", "junit"), default="html", help="report format")
     run.add_argument("--output", help="write a report to this path")
@@ -108,6 +117,11 @@ def _parser() -> argparse.ArgumentParser:
         "scenario", nargs="?", default="scenarios/webhook.yaml", help="scenario YAML (default: scenarios/webhook.yaml)"
     )
     doctor.add_argument("--target", help="endpoint URL; defaults to HOOKSTORM_TARGET_URL")
+    doctor.add_argument(
+        "--allow-insecure-http",
+        action="store_true",
+        help="allow preflighting a remote plaintext HTTP endpoint",
+    )
     doctor.add_argument("--secret-env", default="HOOKSTORM_SECRET", help="environment variable for HMAC secret")
     doctor.add_argument(
         "--connect",
@@ -373,6 +387,7 @@ def _doctor_command(args: argparse.Namespace) -> int:
         connect=args.connect or args.verbose,
         verbose=args.verbose,
         timeout=args.timeout,
+        allow_insecure_http=args.allow_insecure_http,
     )
     document = build_preflight_document(
         checks,
@@ -423,7 +438,13 @@ def main(argv: Sequence[str] | None = None) -> int:
             return 0
         secret = os.getenv(args.secret_env)
         result = asyncio.run(
-            run_scenario(scenario, args.target, allow_remote=args.allow_remote, secret=secret)
+            run_scenario(
+                scenario,
+                args.target,
+                allow_remote=args.allow_remote,
+                allow_insecure_http=args.allow_insecure_http,
+                secret=secret,
+            )
         )
 
         history_id = None
