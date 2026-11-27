@@ -29,7 +29,14 @@ def test_initialize_project_creates_valid_scenario_and_workflow(tmp_path) -> Non
     assert scenario["delivery"]["signature_provider"] == "github"
 
     workflow = yaml.load(workflow_path.read_text(encoding="utf-8"), Loader=yaml.BaseLoader)
-    env = workflow["jobs"]["webhook-regression"]["env"]
+    validation_job = workflow["jobs"]["validate-scenario"]
+    assert validation_job["if"] == "github.event_name == 'pull_request'"
+    assert "environment" not in validation_job
+    assert "secrets." not in str(validation_job)
+    staging_job = workflow["jobs"]["webhook-regression"]
+    assert "pull_request" not in staging_job["if"]
+    assert "refs/heads/main" in staging_job["if"]
+    env = staging_job["env"]
     assert env["HOOKSTORM_SCENARIO"] == (
         "${{ vars.HOOKSTORM_SCENARIO || 'scenarios/webhook.yaml' }}"
     )
