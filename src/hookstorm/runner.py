@@ -16,6 +16,7 @@ from urllib.parse import urlsplit, urlunsplit
 
 import httpx
 
+from hookstorm import __version__
 from hookstorm.config import scenario_fingerprint
 from hookstorm.safety import validate_target
 from hookstorm.standard_webhooks import (
@@ -209,7 +210,7 @@ async def run_scenario(
             event_body = _json_bytes(event["payload"])
             base_headers = {
                 "Content-Type": "application/json",
-                "User-Agent": "HookStorm/0.1 (+https://github.com/blvxx/HookStorm)",
+                "User-Agent": f"HookStorm/{__version__} (+https://github.com/blvxx/HookStorm)",
                 "X-HookStorm-Run": run_id,
                 "X-Event-ID": event["event_id"],
                 "X-Event-Type": event["id"],
@@ -366,7 +367,7 @@ async def run_scenario(
                 response = await client.get(
                     verification_url,
                     headers={
-                        "User-Agent": "HookStorm/0.1 (+https://github.com/blvxx/HookStorm)",
+                        "User-Agent": f"HookStorm/{__version__} (+https://github.com/blvxx/HookStorm)",
                         "X-HookStorm-Run": run_id,
                         **verification_auth_headers,
                     },
@@ -413,7 +414,7 @@ async def run_scenario(
     return {
         "schema_version": 1,
         "tool": "HookStorm",
-        "version": "0.1.0",
+        "version": __version__,
         "run_id": run_id,
         "scenario": scenario["name"],
         "scenario_fingerprint": config_fingerprint,
