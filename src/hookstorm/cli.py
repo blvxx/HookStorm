@@ -278,6 +278,17 @@ def _injected_fault_label(fault: str) -> str:
     return {
         "connect_error": "Connect fault",
         "response_loss": "ACK loss",
+        "response_body_error": "Body read error",
+        "malformed_json": "Malformed JSON",
+        "wrong_content_type": "Wrong Content-Type",
+        "gzip_body": "Gzip body",
+        "deflate_body": "Deflate body",
+        "invalid_gzip": "Invalid gzip",
+        "invalid_deflate": "Invalid deflate",
+        "chunked_transfer": "Chunked transfer",
+        "malformed_chunked": "Malformed chunked framing",
+        "partial_upload": "Partial upload",
+        "content_length_mismatch": "Content-Length mismatch",
     }.get(fault, fault)
 
 
