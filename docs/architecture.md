@@ -40,6 +40,7 @@ CLI summaries + diagnostics + exit code (0 passed, 1 assertions failed, 2 invali
 - `pytest_export.py`: generates pytest integration modules with an embedded normalized scenario and runtime-only target / secret environment variables.
 - `pytest_plugin.py`: provides opt-in pytest fixtures and a structured runner API; pytest remains an optional dependency.
 - `scaffold.py`: generates a starter YAML scenario and SHA-pinned GitHub Actions staging workflow. It refuses to overwrite existing files unless `--force` is passed.
+- `.github/actions/run/action.yml`: provides a SHA-pin-friendly composite action for scenario validation, optional network preflight, delivery execution, and report output.
 
 ## Capture behavior
 
