@@ -9,6 +9,38 @@ from pathlib import Path
 from typing import Any
 
 
+_FAULT_LABELS = {
+    "connect_error": "Connect fault",
+    "response_loss": "ACK loss",
+    "response_body_error": "Body read error",
+    "malformed_json": "Malformed JSON",
+    "wrong_content_type": "Wrong Content-Type",
+    "gzip_body": "Gzip body",
+    "deflate_body": "Deflate body",
+    "invalid_gzip": "Invalid gzip",
+    "invalid_deflate": "Invalid deflate",
+    "chunked_transfer": "Chunked transfer",
+    "malformed_chunked": "Malformed chunked framing",
+    "partial_upload": "Partial upload",
+    "content_length_mismatch": "Content-Length mismatch",
+}
+_FAULT_DESCRIPTIONS = {
+    "connect_error": "connection failure",
+    "response_loss": "acknowledgement loss",
+    "response_body_error": "partial response-body read error",
+    "malformed_json": "malformed JSON request body",
+    "wrong_content_type": "wrong Content-Type request header",
+    "gzip_body": "gzip-compressed request body",
+    "deflate_body": "deflate-compressed request body",
+    "invalid_gzip": "invalid gzip request body",
+    "invalid_deflate": "invalid deflate request body",
+    "chunked_transfer": "HTTP/1.1 chunked transfer",
+    "malformed_chunked": "malformed HTTP/1.1 chunked framing",
+    "partial_upload": "partial request upload",
+    "content_length_mismatch": "Content-Length mismatch",
+}
+
+
 def render_json(result: dict[str, Any]) -> str:
     return json.dumps(result, indent=2, ensure_ascii=False) + "\n"
 
@@ -28,12 +60,8 @@ def _render_attempt(attempt: dict[str, Any], index: int, *, final: bool, passed:
     )
     error_markup = f"<em>{error}</em>" if error else ""
     fault_label = (
-        "Connect fault"
-        if injected_fault == "connect_error"
-        else "ACK loss"
-        if injected_fault == "response_loss"
-        else "Body read error"
-        if injected_fault == "response_body_error"
+        _FAULT_LABELS.get(str(injected_fault), "Injected fault")
+        if injected_fault
         else ""
     )
     fault_markup = (
@@ -128,12 +156,11 @@ def render_html(result: dict[str, Any]) -> str:
                 f"Attempt {index}: HTTP {status_code}; {latency_ms:.2f} ms; "
                 f"starts at +{elapsed_ms:.2f} ms"
             )
-            if injected_fault == "connect_error":
-                description += "; injected connection fault"
-            elif injected_fault == "response_loss":
-                description += "; injected acknowledgement loss"
-            elif injected_fault == "response_body_error":
-                description += "; injected partial response-body read error"
+            if injected_fault:
+                description += (
+                    "; injected "
+                    + _FAULT_DESCRIPTIONS.get(str(injected_fault), "transport fault")
+                )
             title = html.escape(description, quote=True)
             waterfall_attempts.append(
                 f"<span class='waterfall-attempt {attempt_state}{fault_class}' "
