@@ -64,3 +64,12 @@ def test_ci_and_release_gates_run_mypy_and_coverage() -> None:
         assert "run: mypy" in workflow
         assert "coverage run -m pytest" in workflow
         assert "run: coverage report" in workflow
+
+def test_ci_uploads_pytest_artifact_only_when_report_exists() -> None:
+    workflow_path = ROOT / ".github" / "workflows" / "ci.yml"
+    workflow = yaml.safe_load(workflow_path.read_text(encoding="utf-8"))
+    steps = workflow["jobs"]["test"]["steps"]
+    upload = next(step for step in steps if step.get("name") == "Upload pytest JUnit report")
+
+    assert upload["if"] == "always() && hashFiles('test-results/pytest.xml') != ''"
+    assert upload["with"]["if-no-files-found"] == "error"
