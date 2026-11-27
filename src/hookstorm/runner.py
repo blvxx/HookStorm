@@ -23,6 +23,7 @@ import httpx
 
 from hookstorm import __version__
 from hookstorm.config import scenario_fingerprint
+from hookstorm.json_limits import ensure_json_text_depth
 from hookstorm.safety import (
     TargetResolution,
     UnsafeTargetError,
@@ -41,6 +42,20 @@ from hookstorm.verify_auth import (
 
 def _json_bytes(value: Any) -> bytes:
     return json.dumps(value, ensure_ascii=False, separators=(",", ":"), allow_nan=False).encode("utf-8")
+
+
+def _parse_response_json(body: bytes) -> Any:
+    """Parse bounded UTF-8 JSON without accepting pathological nesting or non-finite numbers."""
+    try:
+        source = body.decode("utf-8")
+        ensure_json_text_depth(source)
+        value = json.loads(source)
+        # The standard decoder accepts NaN/Infinity and converts 1e999 to inf.
+        # Reject those values even when a caller only checks a subset of fields.
+        json.dumps(value, ensure_ascii=True, allow_nan=False)
+        return value
+    except (UnicodeDecodeError, ValueError, RecursionError, OverflowError) as exc:
+        raise ValueError("response body is not valid bounded UTF-8 JSON") from exc
 
 
 def _match_json_value(actual: Any, expected: Any, path: str) -> tuple[bool, str | None]:
@@ -768,7 +783,7 @@ async def run_scenario(
                             elif expected_json is not None:
                                 try:
                                     matched, mismatch = _matches_subset(
-                                        json.loads(response_body), expected_json
+                                        _parse_response_json(response_body), expected_json
                                     )
                                 except ValueError:
                                     matched, mismatch = (
@@ -909,7 +924,7 @@ async def run_scenario(
                             else:
                                 try:
                                     matched, mismatch = _matches_subset(
-                                        json.loads(response_body), verify_config["expect_json"]
+                                        _parse_response_json(response_body), verify_config["expect_json"]
                                     )
                                 except ValueError:
                                     matched, mismatch = (
