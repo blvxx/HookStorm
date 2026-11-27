@@ -5,6 +5,8 @@ import base64
 import socket
 import time
 
+import httpx
+
 import pytest
 
 from hookstorm.config import ScenarioError, load_scenario, validate_scenario
@@ -64,6 +66,23 @@ def test_injected_connect_error_fails_before_request_reaches_receiver(receiver) 
     assert "before request reached the endpoint" in attempts[0]["error"]
     assert attempts[1]["status_code"] == 200
     assert len(state["requests"]) == 1
+
+
+def test_response_body_reader_rejects_compressed_body_without_decompressing() -> None:
+    import gzip
+
+    from hookstorm.runner import _read_limited_response_body
+
+    compressed = gzip.compress(
+        b'{"large":"' + (b"x" * (MAX_RESPONSE_BODY_BYTES * 3)) + b'"}'
+    )
+    response = httpx.Response(
+        200,
+        headers={"Content-Encoding": "gzip"},
+        content=compressed,
+    )
+
+    assert asyncio.run(_read_limited_response_body(response)) is None
 
 
 def test_injected_response_loss_retries_after_receiver_applies_effect(receiver) -> None:
