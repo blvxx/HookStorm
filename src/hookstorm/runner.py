@@ -23,7 +23,12 @@ import httpx
 
 from hookstorm import __version__
 from hookstorm.config import scenario_fingerprint
-from hookstorm.safety import TargetResolution, resolve_target
+from hookstorm.safety import (
+    TargetResolution,
+    UnsafeTargetError,
+    canonicalize_hostname,
+    resolve_target,
+)
 from hookstorm.standard_webhooks import (
     decode_standard_webhooks_secret,
     standard_webhooks_headers,
@@ -298,16 +303,20 @@ class _PinnedNetworkBackend:
         local_address: str | None = None,
         socket_options: Any = None,
     ) -> Any:
-        addresses = self._pinned_addresses.get(host.rstrip(".").lower())
+        try:
+            canonical_host = canonicalize_hostname(host)
+        except UnsafeTargetError as exc:
+            raise httpcore.ConnectError(
+                "HTTP transport requested an invalid hostname after target validation"
+            ) from exc
+        addresses = self._pinned_addresses.get(canonical_host)
         if addresses is None:
-            stream = await self._backend.connect_tcp(
-                host,
-                port,
-                timeout=timeout,
-                local_address=local_address,
-                socket_options=socket_options,
+            # Every target and verification hostname is resolved before the run.
+            # Falling back to the backend here would reintroduce a DNS-rebinding
+            # window for IDNA-normalized or otherwise unexpected host spellings.
+            raise httpcore.ConnectError(
+                "HTTP transport requested a hostname that was not prevalidated"
             )
-            return _wrap_request_fault_stream(stream)
 
         failures: list[Exception] = []
         for address in addresses:
