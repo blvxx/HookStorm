@@ -129,25 +129,10 @@ def test_sensitive_headers_are_saved_only_as_non_replayed_capture_metadata(tmp_p
         "Stripe-Signature": "t=123,v1=forensic-signature",
         "X-Shopify-Hmac-Sha256": "forensic-hmac",
     }
+    scenario_without_capture_metadata = dict(scenario)
+    scenario_without_capture_metadata.pop("capture")
     assert scenario_fingerprint(scenario) == scenario_fingerprint(
-        validate_scenario(
-            {
-                "version": 1,
-                "name": "Captured webhook scenario",
-                "description": (
-                    "Captured locally by HookStorm. Review payloads and headers before sharing."
-                ),
-                "delivery": {"signature": "none"},
-                "events": [
-                    {
-                        "id": "payment_intent.succeeded",
-                        "event_id": "evt_capture_0001",
-                        "payload": {"type": "payment_intent.succeeded", "id": "pi_1"},
-                        "headers": {"Content-Type": "application/json"},
-                    }
-                ],
-            }
-        )
+        scenario_without_capture_metadata
     )
 
 
