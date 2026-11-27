@@ -6,7 +6,7 @@ import json
 import re
 from pathlib import Path, PureWindowsPath
 
-HOOKSTORM_INSTALL_REF = "a4d3793ef780be7e5b8106874e0beeb30a766ca4"
+HOOKSTORM_INSTALL_REF = "a4798688e292e396f2691565dd2c3bf4f9bf4577"
 _SIGNATURE_PROVIDERS = {"generic", "stripe", "github", "shopify", "standard_webhooks"}
 _SAFE_PATH = re.compile(r"^[A-Za-z0-9._/-]+$")
 
@@ -25,11 +25,23 @@ def _relative_project_path(value: str, label: str) -> Path:
     return path
 
 
+def _bounded_integer(value: object, label: str, *, minimum: int, maximum: int) -> int:
+    if (
+        isinstance(value, bool)
+        or not isinstance(value, int)
+        or not minimum <= value <= maximum
+    ):
+        raise ValueError(f"{label} must be an integer between {minimum} and {maximum}")
+    return value
+
+
 def render_scenario(
     *,
     event_type: str = "test.ping",
     event_id: str = "evt_hookstorm_init_001",
     signature_provider: str = "generic",
+    max_attempts: int = 1,
+    duplicate_count: int = 0,
 ) -> str:
     if signature_provider not in _SIGNATURE_PROVIDERS:
         choices = ", ".join(sorted(_SIGNATURE_PROVIDERS))
@@ -38,6 +50,17 @@ def render_scenario(
         raise ValueError("event type must contain 1–256 characters and no line breaks")
     if not event_id or len(event_id) > 256 or any(ch in event_id for ch in "\r\n"):
         raise ValueError("event ID must contain 1–256 characters and no line breaks")
+    max_attempts = _bounded_integer(
+        max_attempts, "max_attempts", minimum=1, maximum=10
+    )
+    duplicate_count = _bounded_integer(
+        duplicate_count, "duplicate_count", minimum=0, maximum=100
+    )
+
+    duplicate_setting = (
+        f"  duplicate_count: {duplicate_count}\n" if duplicate_count else ""
+    )
+    backoff_setting = "  backoff_ms: 100\n" if max_attempts > 1 else ""
 
     return f"""version: 1
 name: HookStorm webhook contract
@@ -46,9 +69,9 @@ delivery:
   signature: valid
   signature_provider: {signature_provider}
   timeout_ms: 5000
-retry:
-  max_attempts: 1
-events:
+{duplicate_setting}retry:
+  max_attempts: {max_attempts}
+{backoff_setting}events:
   - id: {json.dumps(event_type, ensure_ascii=False)}
     event_id: {json.dumps(event_id, ensure_ascii=False)}
     payload:
@@ -213,6 +236,8 @@ def initialize_project(
     event_type: str = "test.ping",
     event_id: str = "evt_hookstorm_init_001",
     signature_provider: str = "generic",
+    max_attempts: int = 1,
+    duplicate_count: int = 0,
     include_workflow: bool = True,
     force: bool = False,
 ) -> list[Path]:
@@ -239,6 +264,8 @@ def initialize_project(
         event_type=event_type,
         event_id=event_id,
         signature_provider=signature_provider,
+        max_attempts=max_attempts,
+        duplicate_count=duplicate_count,
     ))]
     if include_workflow:
         outputs.append((
