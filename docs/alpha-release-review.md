@@ -29,7 +29,7 @@ After the PR is reviewed and merged, the final release commit must pass the rele
 
 ## Latest validation evidence
 
-The current PR head `8343d26c02df07dfb8c94b1babab06946b7004d3` was validated on 2026-11-27:
+The current PR head `5981904934214c4bb740b8ea7f927302e3513669` was validated on 2026-11-27. The six-environment CI run, documentation build, webhook integration, and Composite Action E2E all completed successfully on this head.
 
 | Check | Result |
 |---|---|
@@ -42,8 +42,10 @@ The current PR head `8343d26c02df07dfb8c94b1babab06946b7004d3` was validated on 
 | Wheel / sdist build and clean install smoke | Passed in all six environments |
 | Docker non-root/read-only smoke | Passed |
 | Zensical documentation build | Passed |
-| Local webhook scenario integration | Passed |
+| Local webhook scenario integration, including request-level fault matrix | Passed |
 | Composite GitHub Action E2E | Passed |
+
+The framework integration tests now also verify early body-size enforcement: FastAPI consumes the ASGI request stream incrementally, while Flask reads no more than the configured limit plus one byte. An oversized body returns HTTP 413 before it is retained by the recorder.
 
 The Pages deployment workflow is checked by repository tests and is intentionally triggered only by pushes to `main`. It has not run from this draft PR, so this evidence does not claim that GitHub Pages is live.
 
@@ -60,7 +62,7 @@ The Pages deployment workflow is checked by repository tests and is intentionall
 
 - **HTTPX internals:** DNS pinning wraps a private network-backend attribute exposed by the HTTPX transport pool. CI currently protects the behavior, but an HTTPX internal refactor may require changes. Consider replacing this adapter with a supported transport seam in a future release.
 - **Transport scope:** request-level wire faults currently target HTTP/1.1. Slow streamed bodies, arbitrary packet loss, malformed HTTP/2 frames, and kernel/network-device failures are not modeled.
-- **Framework helpers:** FastAPI and Flask adapters are opt-in test receivers. They are in-memory, have bounded request/event storage, redact sensitive headers by default, and do not verify provider signatures or replace application handlers. They must not be enabled as production webhook endpoints.
+- **Framework helpers:** FastAPI and Flask adapters are opt-in test receivers. They read request bodies with bounded ingress, retain data in memory only, cap event storage, redact sensitive headers by default, and do not verify provider signatures or replace application handlers. They must not be enabled as production webhook endpoints.
 - **Container lifecycle:** the Docker image is built locally in CI and is not published to a registry. Its base image uses the maintained `python:3.12-slim` tag; refresh the base and scan it before any public image distribution.
 - **Documentation lifecycle:** Zensical builds the configured `mkdocs.yml` project. A main-only deployment workflow is prepared with pinned official Pages actions and least-privilege build/deploy jobs. GitHub Pages must still be enabled/configured, the `github-pages` environment must be allowed to deploy, and the first main-branch deployment must succeed.
 - **PyPI:** package-name ownership, Trusted Publisher setup, and actual uploaded artifacts remain unverified until the owner performs the account-side setup and publishes the first release.
