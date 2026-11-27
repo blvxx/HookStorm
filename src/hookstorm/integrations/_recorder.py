@@ -13,12 +13,43 @@ import zlib
 
 
 _DEFAULT_MAX_BODY_BYTES = 1_048_576
+_DEFAULT_MAX_TOTAL_BODY_BYTES = 8 * 1_048_576
+_MAX_REQUEST_HEADERS = 64
+_MAX_REQUEST_HEADER_BYTES = 16_384
+_SENSITIVE_HEADER_FRAGMENTS = (
+    "api-key",
+    "api_key",
+    "apikey",
+    "auth-token",
+    "auth_token",
+    "access-token",
+    "access_token",
+    "client-secret",
+    "client_secret",
+    "credential",
+    "password",
+    "signature",
+    "cookie",
+    "webhook-secret",
+    "webhook_secret",
+    "token",
+    "secret",
+)
 _SENSITIVE_HEADERS = frozenset(
     {
         "authorization",
         "proxy-authorization",
+        "authentication",
         "cookie",
         "set-cookie",
+        "api-key",
+        "api_key",
+        "apikey",
+        "x-api-key",
+        "x-auth-token",
+        "x-access-token",
+        "x-client-secret",
+        "x-webhook-secret",
         "x-hookstorm-signature",
         "stripe-signature",
         "x-shopify-hmac-sha256",
@@ -69,6 +100,7 @@ class WebhookRecorder:
         *,
         max_body_bytes: int = _DEFAULT_MAX_BODY_BYTES,
         max_events: int = 1_000,
+        max_total_body_bytes: int = _DEFAULT_MAX_TOTAL_BODY_BYTES,
         include_sensitive_headers: bool = False,
     ) -> None:
         if (
@@ -83,14 +115,24 @@ class WebhookRecorder:
             or max_events < 1
         ):
             raise ValueError("max_events must be a positive integer")
+        if (
+            isinstance(max_total_body_bytes, bool)
+            or not isinstance(max_total_body_bytes, int)
+            or max_total_body_bytes < max_body_bytes
+        ):
+            raise ValueError(
+                "max_total_body_bytes must be an integer greater than or equal to max_body_bytes"
+            )
         if not isinstance(include_sensitive_headers, bool):
             raise TypeError("include_sensitive_headers must be a boolean")
         self.max_body_bytes = max_body_bytes
         self.max_events = max_events
+        self.max_total_body_bytes = max_total_body_bytes
         self.include_sensitive_headers = include_sensitive_headers
         self._lock = threading.Lock()
         self._events: list[WebhookRecord] = []
         self._processed: set[tuple[str, str]] = set()
+        self._total_body_bytes = 0
 
     @staticmethod
     def _header(headers: collections.abc.Mapping[str, typing.Any], *names: str) -> str | None:
@@ -154,6 +196,25 @@ class WebhookRecorder:
                 status_code=400,
             ) from exc
 
+    @staticmethod
+    def _validate_header_budget(
+        headers: collections.abc.Mapping[str, typing.Any],
+    ) -> None:
+        if len(headers) > _MAX_REQUEST_HEADERS:
+            raise WebhookRequestError(
+                f"request contains more than {_MAX_REQUEST_HEADERS} headers",
+                status_code=431,
+            )
+        total_bytes = sum(
+            len(str(name).encode("utf-8")) + len(str(value).encode("utf-8"))
+            for name, value in headers.items()
+        )
+        if total_bytes > _MAX_REQUEST_HEADER_BYTES:
+            raise WebhookRequestError(
+                f"request headers exceed the {_MAX_REQUEST_HEADER_BYTES}-byte limit",
+                status_code=431,
+            )
+
     def _safe_headers(self, headers: collections.abc.Mapping[str, typing.Any]) -> dict[str, str]:
         result: dict[str, str] = {}
         for name, value in headers.items():
@@ -163,6 +224,7 @@ class WebhookRecorder:
                 normalized in _SENSITIVE_HEADERS
                 or normalized.startswith("x-hub-signature")
                 or normalized.endswith("-signature")
+                or any(fragment in normalized for fragment in _SENSITIVE_HEADER_FRAGMENTS)
             )
             result[key] = (
                 "[REDACTED]"
@@ -175,6 +237,7 @@ class WebhookRecorder:
         """Validate and retain one JSON request while preserving its wire bytes."""
         if not isinstance(raw_body, bytes):
             raise TypeError("raw_body must be bytes")
+        self._validate_header_budget(headers)
         content_type = (self._header(headers, "Content-Type") or "").split(";", 1)[0]
         content_type = content_type.strip().lower()
         if content_type != "application/json" and not (
@@ -210,6 +273,7 @@ class WebhookRecorder:
             identity = (run_id or "", event_id)
             with self._lock:
                 self._ensure_capacity()
+                self._ensure_body_capacity(len(raw_body))
                 duplicate = identity in self._processed
                 self._processed.add(identity)
                 event = WebhookRecord(
@@ -222,6 +286,7 @@ class WebhookRecorder:
                     received_at=datetime.datetime.now(datetime.UTC).isoformat(),
                 )
                 self._events.append(event)
+                self._total_body_bytes += len(raw_body)
                 return event
 
         event = WebhookRecord(
@@ -235,13 +300,23 @@ class WebhookRecorder:
         )
         with self._lock:
             self._ensure_capacity()
+            self._ensure_body_capacity(len(raw_body))
             self._events.append(event)
+            self._total_body_bytes += len(raw_body)
         return event
 
     def _ensure_capacity(self) -> None:
         if len(self._events) >= self.max_events:
             raise WebhookRequestError(
                 f"recorder reached its {self.max_events}-event limit; clear it before continuing",
+                status_code=429,
+            )
+
+    def _ensure_body_capacity(self, incoming_bytes: int) -> None:
+        if self._total_body_bytes + incoming_bytes > self.max_total_body_bytes:
+            raise WebhookRequestError(
+                f"recorder would exceed its {self.max_total_body_bytes}-byte total body limit; "
+                "clear it before continuing",
                 status_code=429,
             )
 
@@ -267,3 +342,4 @@ class WebhookRecorder:
         with self._lock:
             self._events.clear()
             self._processed.clear()
+            self._total_body_bytes = 0
