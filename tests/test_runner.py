@@ -39,6 +39,46 @@ def test_retries_transient_server_error(receiver) -> None:
     assert state["attempts"][(run_id, "evt_test_1")] == 2
 
 
+def test_retry_on_controls_http_status_retries(receiver) -> None:
+    base, state = receiver
+    result = asyncio.run(run_scenario(
+        scenario(
+            retry={"max_attempts": 3, "backoff_ms": 1, "retry_on": [429]},
+        ),
+        f"{base}/flaky",
+    ))
+
+    attempts = result["deliveries"][0]["attempts"]
+    assert result["summary"]["success"] is False
+    assert [attempt["status_code"] for attempt in attempts] == [503]
+    assert state["attempts"][(state["requests"][0]["run_id"], "evt_test_1")] == 1
+
+
+def test_request_timeouts_are_retried_even_when_retry_on_excludes_statuses(
+    receiver,
+) -> None:
+    base, state = receiver
+    data = scenario(
+        delivery={"timeout_ms": 150},
+        retry={"max_attempts": 2, "backoff_ms": 1, "retry_on": [429]},
+    )
+    data["run_timeout_ms"] = 2_000
+
+    result = asyncio.run(run_scenario(data, f"{base}/slow-drip"))
+
+    attempts = result["deliveries"][0]["attempts"]
+    assert result["summary"]["success"] is False
+    assert len(attempts) == 2
+    assert [attempt["error"] for attempt in attempts] == [
+        "request timed out",
+        "request timed out",
+    ]
+    run_id = state["requests"][0]["run_id"]
+    assert state["attempts"][(run_id, "evt_test_1")] == 2
+
+
+
+
 def test_injected_connect_error_fails_before_request_reaches_receiver(receiver) -> None:
     base, state = receiver
     result = asyncio.run(run_scenario(
