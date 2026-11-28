@@ -139,6 +139,30 @@ def _diagnose_delivery(delivery: dict[str, Any]) -> dict[str, Any]:
             "The target returned 404. Check the path, HTTP method, router, and "
             "whether the selected environment exposes this webhook endpoint."
         )
+    elif status == 409:
+        category = "receiver_conflict"
+        explanation = (
+            "The receiver returned 409 Conflict. This may be an idempotency or state conflict, "
+            "but the status alone does not prove whether a business effect was committed."
+        )
+    elif status == 413:
+        category = "payload_too_large"
+        explanation = (
+            "The receiver or an upstream proxy rejected the request size. Check request-body "
+            "limits and reduce the synthetic payload if the receiver contract permits it."
+        )
+    elif status == 415:
+        category = "unsupported_media_type"
+        explanation = (
+            "The receiver rejected the Content-Type. Confirm the endpoint expects JSON and "
+            "whether it requires a specific content type or vendor media type."
+        )
+    elif isinstance(status, int) and 300 <= status < 400:
+        category = "redirect_not_followed"
+        explanation = (
+            "The endpoint returned a redirect. HookStorm intentionally does not follow redirects; "
+            "configure the final webhook URL directly and verify the destination."
+        )
     elif isinstance(status, int) and status >= 500:
         category = "receiver_server_error"
         explanation = (
