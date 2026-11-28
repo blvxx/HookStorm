@@ -728,16 +728,17 @@ def _correlate_github_delivery(
             ),
         },
         "replay_readiness": {
-            "eligible_for_existing_loopback_replay": replay_candidate,
+            "eligible_for_guarded_replay": replay_candidate,
             "target_is_loopback": loopback_target,
             "requires_server_opt_in": "HOOKSTORM_MCP_ENABLE_REPLAY=1",
             "requires_per_call_confirmation": True,
             "preserves_event_id_and_run_correlation": True,
-            "idempotency_status": "not_proven_by_correlation",
+            "idempotency_status": "requires_pre_and_post_state_probes",
+            "guarded_tool": "hookstorm_replay_with_idempotency_guard",
             "note": (
-                "Correlation does not prove receiver-side idempotency. Before replay, verify "
-                "the receiver's persisted deduplication state or a suitable read-only business-state "
-                "probe. Provider redelivery is not triggered by this read-only adapter."
+                "Correlation does not prove receiver-side idempotency. The guarded replay tool "
+                "requires a read-only precondition and postcondition from the scenario's verify endpoint. "
+                "Provider redelivery is not triggered by this read-only adapter."
             ),
         },
         "limitations": [
@@ -1048,13 +1049,13 @@ def _correlate_shopify_delivery(
             ),
         },
         "replay_readiness": {
-            "eligible_for_existing_loopback_replay": bool(
+            "eligible_for_guarded_replay": bool(
                 confirmed
                 and local_delivery is not None
                 and not local_delivery.get("passed")
             ),
-            "idempotency_status": "not_proven_by_correlation",
-            "requires_independent_business_state_check": True,
+            "idempotency_status": "requires_pre_and_post_state_probes",
+            "guarded_tool": "hookstorm_replay_with_idempotency_guard",
             "provider_redelivery_performed": False,
         },
     }
@@ -1848,7 +1849,7 @@ def create_server(
             "scenario": result["scenario"],
             "target": result["target"],
             "summary": result["summary"],
-            "delivery": (
+            "delivery": [
                 {
                     "event_type": item["event_type"],
                     "event_id": item["event_id"],
@@ -1857,7 +1858,7 @@ def create_server(
                     "attempts": [_attempt_summary(attempt) for attempt in item["attempts"]],
                 }
                 for item in result["deliveries"]
-            ),
+            ],
             "history_saved": history_saved,
             "history_warning": history_warning,
             "pre_replay_probe": before,
