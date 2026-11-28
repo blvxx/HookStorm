@@ -72,28 +72,28 @@ Provider tools are read-only. They never ask a provider to redeliver an event, a
 
 ### GitHub repository webhook deliveries
 
-Set \`HOOKSTORM_GITHUB_TOKEN\` to a fine-grained personal access token or GitHub App token with **Webhooks: read** access to the repository. Then call:
+Set `HOOKSTORM_GITHUB_TOKEN` to a fine-grained personal access token or GitHub App token with **Webhooks: read** access to the repository. Then call:
 
-- \`hookstorm_list_github_deliveries(owner, repo, hook_id, limit, status)\` to list recent deliveries.
-- \`hookstorm_inspect_github_delivery(owner, repo, hook_id, delivery_id)\` to inspect one delivery's request and response metadata.
+- `hookstorm_list_github_deliveries(owner, repo, hook_id, limit, status)` to list recent deliveries.
+- `hookstorm_inspect_github_delivery(owner, repo, hook_id, delivery_id)` to inspect one delivery's request and response metadata.
 
 The detail tool returns the provider delivery GUID, event name/action, delivery timestamp, HTTP status, duration, a query-free destination URL, payload byte counts and SHA-256 fingerprints. It returns only allowlisted request/response header names and values; signature headers, authorization, arbitrary headers, request payload values, and response bodies are not returned. GitHub API responses are capped at 2 MiB and payload fingerprints at 1 MiB.
 
-To compare a delivery with a local run, pass both \`run_id\` and \`scenario_path\` to \`hookstorm_inspect_github_delivery\`. A correlation is \`confirmed\` only if the GitHub GUID/header agree, the local scenario fingerprint still matches the saved run, the canonical JSON payload fingerprint and event type match, and the destination matches. A payload-only match is not enough to authorize replay. Status-code agreement is reported separately; a 4xx/5xx response confirms what the receiver returned, not the internal reason it returned it.
+To compare a delivery with a local run, pass both `run_id` and `scenario_path` to `hookstorm_inspect_github_delivery`. A correlation is `confirmed` only if the GitHub GUID/header agree, the local scenario fingerprint still matches the saved run, the canonical JSON payload fingerprint and event type match, and the destination matches. A payload-only match is not enough to authorize replay. Status-code agreement is reported separately; a 4xx/5xx response confirms what the receiver returned, not the internal reason it returned it.
 
 ### Stripe Events
 
-Set \`HOOKSTORM_STRIPE_API_KEY\` to a restricted or test-mode secret key with Events read access. Then call \`hookstorm_retrieve_stripe_event(event_id)\`. The adapter uses \`GET /v1/events/{id}\` and returns allowlisted Event metadata plus canonical payload fingerprints; it does not return nested object values.
+Set `HOOKSTORM_STRIPE_API_KEY` to a restricted or test-mode secret key with Events read access. Then call `hookstorm_retrieve_stripe_event(event_id)`. The adapter uses `GET /v1/events/{id}` and returns allowlisted Event metadata plus canonical payload fingerprints; it does not return nested object values.
 
-This is an **event source**, not a delivery-attempt log source. Stripe's Events API retrieves the Event object, while per-endpoint delivery attempts, response details, and retries must be inspected through Stripe's Dashboard webhook delivery view. \`delivery_attempt_history_available\` is therefore always \`false\`. When a run and scenario are supplied, HookStorm can confirm that the canonical event object matches the stored scenario and local event ID, but it will explicitly report that endpoint delivery correlation is unavailable from this API.
+This is an **event source**, not a delivery-attempt log source. Stripe's Events API retrieves the Event object, while per-endpoint delivery attempts, response details, and retries must be inspected through Stripe's Dashboard webhook delivery view. `delivery_attempt_history_available` is therefore always `false`. When a run and scenario are supplied, HookStorm can confirm that the canonical event object matches the stored scenario and local event ID, but it will explicitly report that endpoint delivery correlation is unavailable from this API.
 
 ### Shopify webhook delivery logs
 
-Shopify CLI 5.1+ exposes historical app logs, including webhook deliveries, in JSON. Authenticate a user on the machine that runs MCP with \`shopify auth login\`, then call \`hookstorm_list_shopify_deliveries\`. The MCP process runs \`shopify app logs --type webhook --json --no-input\` from \`HOOKSTORM_MCP_SCENARIO_ROOT\`. Optional \`store\` and \`client_id\` filters narrow the app/store. \`since\` accepts \`1h\`, \`6h\`, \`12h\`, or \`24h\`; \`limit\` accepts 1–1,000.
+Shopify CLI 5.1+ exposes historical app logs, including webhook deliveries, in JSON. Authenticate a user on the machine that runs MCP with `shopify auth login`, then call `hookstorm_list_shopify_deliveries`. The MCP process runs `shopify app logs --type webhook --json --no-input` from `HOOKSTORM_MCP_SCENARIO_ROOT`. Optional `store` and `client_id` filters narrow the app/store. `since` accepts `1h`, `6h`, `12h`, or `24h`; `limit` accepts 1–1,000.
 
-The command needs an existing interactive Shopify account session; Shopify's changelog states that CI automation tokens are not supported for this log command. Set \`HOOKSTORM_SHOPIFY_CLI\` if the executable is not named \`shopify\` on \`PATH\`. The adapter disables optional Shopify CLI usage telemetry, does not pass through \`--verbose\`, does not invoke a shell, does not expose CLI stderr, and sanitizes JSON records before returning them. The CLI's 2 MiB JSON output limit and command timeout are enforced. Some records may omit or truncate body data; those records cannot be joined by payload fingerprint.
+The command needs an existing interactive Shopify account session; Shopify's changelog states that CI automation tokens are not supported for this log command. Set `HOOKSTORM_SHOPIFY_CLI` if the executable is not named `shopify` on `PATH`. The adapter disables optional Shopify CLI usage telemetry, does not pass through `--verbose`, does not invoke a shell, does not expose CLI stderr, and sanitizes JSON records before returning them. The CLI's 2 MiB JSON output limit and command timeout are enforced. Some records may omit or truncate body data; those records cannot be joined by payload fingerprint.
 
-Pass both \`run_id\` and \`scenario_path\` to \`hookstorm_list_shopify_deliveries\` to attach a per-record correlation result. A \`confirmed\` join requires the saved scenario fingerprint, Shopify event identity, payload fingerprint, topic, and target to agree. Missing or conflicting fields result in \`partial\` or \`unmatched\`, never a nearest-run guess.
+Pass both `run_id` and `scenario_path` to `hookstorm_list_shopify_deliveries` to attach a per-record correlation result. A `confirmed` join requires the saved scenario fingerprint, Shopify event identity, payload fingerprint, topic, and target to agree. Missing or conflicting fields result in `partial` or `unmatched`, never a nearest-run guess.
 
 ### What a confirmed cause means
 
@@ -101,9 +101,9 @@ A provider record can confirm an observed delivery time, endpoint, attempt numbe
 
 ### Replay and idempotency boundary
 
-Provider adapters are intentionally read-only. They do not invoke GitHub redelivery, Stripe retries, or Shopify redelivery. A confirmed provider-to-local correlation may mark a failed event as eligible for the existing local loopback replay tool, but \`idempotency_status\` remains \`not_proven_by_correlation\`. Correlation is not an idempotency check.
+Provider adapters are intentionally read-only. They do not invoke GitHub redelivery, Stripe retries, or Shopify redelivery. A confirmed provider-to-local correlation may mark a failed event as eligible for the existing local loopback replay tool, but `idempotency_status` remains `not_proven_by_correlation`. Correlation is not an idempotency check.
 
-Before any replay, inspect a read-only business-state endpoint or the receiver's persisted idempotency record. Existing replay remains disabled unless \`HOOKSTORM_MCP_ENABLE_REPLAY=1\`, requires \`confirm=true\`, uses the same event ID and source-run correlation ID, and is restricted to loopback targets. It is a local reproduction flow, not a production provider-redelivery action. Never replay a payment/order event against production merely because the provider log shows a 4xx/5xx response.
+Before any replay, inspect a read-only business-state endpoint or the receiver's persisted idempotency record. Existing replay remains disabled unless `HOOKSTORM_MCP_ENABLE_REPLAY=1`, requires `confirm=true`, uses the same event ID and source-run correlation ID, and is restricted to loopback targets. It is a local reproduction flow, not a production provider-redelivery action. Never replay a payment/order event against production merely because the provider log shows a 4xx/5xx response.
 
 Official provider references:
 
@@ -147,14 +147,14 @@ The analysis is deterministic and evidence-bounded. It provides structured evide
 
 ### Guarded replay with idempotency assertions
 
-For an event with a possible business side effect, prefer \`hookstorm_replay_with_idempotency_guard\` over the basic local replay tools. The source scenario must include a read-only \`verify.url\` endpoint, and the tool requires two distinct JSON subset assertions:
+For an event with a possible business side effect, prefer `hookstorm_replay_with_idempotency_guard` over the basic local replay tools. The source scenario must include a read-only `verify.url` endpoint, and the tool requires two distinct JSON subset assertions:
 
-- \`expected_unprocessed_json\`: the state that must be observed before the request is sent (for example, \`{"processed_events": 0}\`).
-- \`expected_processed_json\`: the state that must be observed after the request (for example, \`{"processed_events": 1}\`).
+- `expected_unprocessed_json`: the state that must be observed before the request is sent (for example, `{"processed_events": 0}`).
+- `expected_processed_json`: the state that must be observed after the request (for example, `{"processed_events": 1}`).
 
-The tool sends a bounded GET to the scenario's verify URL before replay. It includes \`X-HookStorm-Run\`, \`X-Event-ID\`, and \`X-Event-Type\`, uses the scenario's environment-backed verification authentication, pins the resolved loopback address, rejects redirects, and applies the existing 2 MiB response limit. If the precondition does not match, the tool blocks the POST even when \`confirm=true\`.
+The tool sends a bounded GET to the scenario's verify URL before replay. It includes `X-HookStorm-Run`, `X-Event-ID`, and `X-Event-Type`, uses the scenario's environment-backed verification authentication, pins the resolved loopback address, rejects redirects, and applies the existing 2 MiB response limit. If the precondition does not match, the tool blocks the POST even when `confirm=true`.
 
-The first call should use \`confirm=false\` to review the read-only preflight result. A second call with \`confirm=true\` sends exactly the selected event to the same loopback target while preserving the source event ID and correlation run ID. It then runs the same read-only state probe against \`expected_processed_json\`. The result reports \`idempotency_verified=true\` only when the postcondition matches.
+The first call should use `confirm=false` to review the read-only preflight result. A second call with `confirm=true` sends exactly the selected event to the same loopback target while preserving the source event ID and correlation run ID. It then runs the same read-only state probe against `expected_processed_json`. The result reports `idempotency_verified=true` only when the postcondition matches.
 
 These assertions are supplied by the operator and must reflect a receiver endpoint that checks the actual idempotency key/effect for this event. Prefer a postcondition that proves one business effect, not merely an HTTP acknowledgement. The preflight and POST are not an atomic transaction: the receiver must still enforce atomic deduplication by event ID to protect against concurrent requests between the GET and POST. A timeout or failed postcondition is inconclusive; inspect the business state before another attempt.
 
@@ -182,7 +182,7 @@ Example guarded tool arguments:
 }
 ~~~
 
-Change \`confirm\` to \`true\` only after reviewing the target and assertions. This tool is local-loopback-only and does not ask GitHub, Stripe, or Shopify to redeliver the provider event. The other replay tools remain available for isolated fixtures, but they do not perform this explicit pre/post-state guard.
+Change `confirm` to `true` only after reviewing the target and assertions. This tool is local-loopback-only and does not ask GitHub, Stripe, or Shopify to redeliver the provider event. The other replay tools remain available for isolated fixtures, but they do not perform this explicit pre/post-state guard.
 
 ## Batch replay
 
