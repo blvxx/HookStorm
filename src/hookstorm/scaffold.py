@@ -396,7 +396,8 @@ def update_workflow_install_ref(
         raise ValueError("install_ref must be a full 40-character lowercase Git commit SHA")
     workflow_path = Path(path)
     try:
-        original = workflow_path.read_text(encoding="utf-8")
+        with workflow_path.open("r", encoding="utf-8", newline="") as source:
+            original = source.read()
     except OSError as exc:
         raise ValueError(f"Cannot read workflow file {workflow_path}: {exc}") from exc
     matches = list(_INSTALL_REF_PATTERN.finditer(original))
@@ -408,10 +409,11 @@ def update_workflow_install_ref(
     current_ref = matches[0].group(2)
     if current_ref == install_ref:
         return False
-    updated = _INSTALL_REF_PATTERN.sub(rf"\\g<1>{install_ref}", original, count=1)
+    updated = _INSTALL_REF_PATTERN.sub(rf"\g<1>{install_ref}", original, count=1)
     temporary_path = workflow_path.with_name(workflow_path.name + ".hookstorm.tmp")
     try:
-        temporary_path.write_text(updated, encoding="utf-8", newline="\n")
+        with temporary_path.open("w", encoding="utf-8", newline="") as destination:
+            destination.write(updated)
         os.replace(temporary_path, workflow_path)
     except OSError as exc:
         try:
