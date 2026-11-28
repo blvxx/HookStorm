@@ -195,3 +195,26 @@ def test_receiver_evidence_rejects_boolean_schema_version(tmp_path: Path) -> Non
     assert result["status"] == "unmatched"
     assert result["evidence_integrity"]["ignored_records"] == 1
     assert result["root_cause"]["confirmed"] is False
+
+
+def test_receiver_evidence_requires_provider_or_request_scope_to_confirm(
+    tmp_path: Path,
+) -> None:
+    _write(tmp_path, [_record()])
+    unscoped = inspect_receiver_evidence(
+        "receiver.jsonl",
+        root=tmp_path,
+        event_id="evt_1A2B3C",
+    )
+    assert unscoped["status"] == "unconfirmed"
+    assert unscoped["identity_scope_specific"] is False
+    assert unscoped["root_cause"]["confirmed"] is False
+
+    scoped = inspect_receiver_evidence(
+        "receiver.jsonl",
+        root=tmp_path,
+        event_id="evt_1A2B3C",
+        provider="generic",
+    )
+    assert scoped["root_cause"]["confirmed"] is False
+    assert scoped["status"] == "unmatched"
