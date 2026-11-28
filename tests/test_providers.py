@@ -324,14 +324,16 @@ def test_shopify_adapter_runs_read_only_bounded_json_command_and_sanitizes() -> 
     )
 
     command, kwargs = calls[0]
-    assert command[:8] == [
+    assert command[:10] == [
         "/usr/local/bin/shopify",
         "app",
         "logs",
         "--type",
         "webhook",
         "--since",
-        "24h",
+        "168h",
+        "--until",
+        "144h",
         "--limit",
     ]
     assert "--until" in command
