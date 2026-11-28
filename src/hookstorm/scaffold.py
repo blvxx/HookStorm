@@ -5,6 +5,7 @@ from __future__ import annotations
 import json
 import os
 import re
+import uuid
 from pathlib import Path, PureWindowsPath
 
 HOOKSTORM_INSTALL_REF = "660240e1fe1b612da6ca64c2cf17f6daf0c9bac2"
@@ -42,7 +43,10 @@ _TEMPLATES = {
         "event_id": "evt_hookstorm_github_001",
         "headers": {
             "X-GitHub-Event": "issues",
-            "X-GitHub-Delivery": "evt_hookstorm_github_001",
+            "X-GitHub-Delivery": "72d3162e-cc78-11e3-81ab-4c9367dc0958",
+            "X-GitHub-Hook-ID": "42",
+            "X-GitHub-Hook-Installation-Target-Type": "repository",
+            "X-GitHub-Hook-Installation-Target-ID": "123",
         },
         "payload": {
             "action": "opened",
@@ -56,8 +60,11 @@ _TEMPLATES = {
         "event_id": "evt_hookstorm_shopify_001",
         "headers": {
             "X-Shopify-Topic": "orders/create",
-            "X-Shopify-Webhook-Id": "evt_hookstorm_shopify_001",
-            "X-Shopify-Shop-Domain": "example.invalid",
+            "X-Shopify-Webhook-Id": "545ebdd4-b7be-4d3d-b14e-54aa78e0e0f9",
+            "X-Shopify-Event-Id": "59d6d79c-595f-4e7e-bc6f-72f5c3d0c66f",
+            "X-Shopify-Shop-Domain": "hookstorm-demo.myshopify.com",
+            "X-Shopify-API-Version": "2026-10",
+            "X-Shopify-Triggered-At": "2026-11-01T00:00:00Z",
         },
         "payload": {
             "id": 1001,
@@ -131,15 +138,27 @@ def render_scenario(
     event_id = event_id or defaults["event_id"]
     signature_provider = signature_provider or defaults["signature_provider"]
     payload = defaults["payload"] if payload is None else payload
-    headers = defaults.get("headers", {}) if headers is None else headers
-    if headers is not None:
-        if "X-GitHub-Event" in headers:
-            headers["X-GitHub-Event"] = event_type.split(".", 1)[0]
-        if "X-Shopify-Topic" in headers:
-            headers["X-Shopify-Topic"] = event_type
-        for header_name in ("X-GitHub-Delivery", "X-Shopify-Webhook-Id"):
-            if defaults["event_id"] == headers.get(header_name):
-                headers[header_name] = event_id
+    headers = dict(defaults.get("headers", {}) if headers is None else headers)
+    if "X-GitHub-Event" in headers:
+        headers["X-GitHub-Event"] = event_type.split(".", 1)[0]
+    if "X-GitHub-Delivery" in headers:
+        headers["X-GitHub-Delivery"] = str(
+            uuid.uuid5(
+                uuid.NAMESPACE_URL,
+                f"hookstorm:{template}:{event_id}:github-delivery",
+            )
+        )
+    if "X-Shopify-Topic" in headers:
+        headers["X-Shopify-Topic"] = event_type
+    if "X-Shopify-Webhook-Id" in headers:
+        headers["X-Shopify-Webhook-Id"] = str(
+            uuid.uuid5(
+                uuid.NAMESPACE_URL,
+                f"hookstorm:{template}:{event_id}:shopify-delivery",
+            )
+        )
+    if "X-Shopify-Event-Id" in headers:
+        headers["X-Shopify-Event-Id"] = event_id
     if signature_provider not in _SIGNATURE_PROVIDERS:
         choices = ", ".join(sorted(_SIGNATURE_PROVIDERS))
         raise ValueError(f"Unsupported signature provider '{signature_provider}'. Choose: {choices}")
