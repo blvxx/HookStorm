@@ -801,3 +801,34 @@ def test_history_rejects_unknown_injected_fault_markers(
 
     with pytest.raises(HistoryError, match="injected_fault"):
         save_run(result, tmp_path / "history.sqlite3")
+
+def test_history_rejects_deeply_nested_stored_json(tmp_path) -> None:
+    database = tmp_path / "history.sqlite3"
+    save_run(make_result("run_deep01"), database)
+    nested_json = "[" * 10_000 + "0" + "]" * 10_000
+
+    connection = sqlite3.connect(database)
+    try:
+        connection.execute(
+            "UPDATE runs SET result_json = ? WHERE run_id = ?",
+            (nested_json, "run_deep01"),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    with pytest.raises(HistoryError, match="Cannot read"):
+        get_run("run_deep01", database)
+    with pytest.raises(HistoryError, match="Cannot read"):
+        list_runs(database)
+
+
+def test_history_export_rejects_deeply_nested_json(tmp_path) -> None:
+    baseline = tmp_path / "deep.json"
+    baseline.write_text(
+        "[" * 10_000 + "0" + "]" * 10_000,
+        encoding="utf-8",
+    )
+
+    with pytest.raises(HistoryError, match="not valid JSON"):
+        load_history_export(baseline)
