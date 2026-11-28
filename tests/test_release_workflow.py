@@ -182,6 +182,7 @@ def test_published_release_attaches_validated_distributions_with_limited_permiss
 
     assert workflow["jobs"]["publish"]["permissions"] == {"id-token": "write"}
 
+
 def test_dependency_floors_include_patched_build_and_yaml_versions() -> None:
     import tomllib
 
