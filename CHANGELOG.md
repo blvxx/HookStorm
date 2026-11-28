@@ -12,6 +12,10 @@
 - Expand HTTP failure classification for conflicts, payload limits, media types, and redirects.
 - Preserve the source request correlation ID during MCP replay while storing the replay as a separate history run.
 
+### Audit fixes
+
+- Use provider-shaped GitHub delivery GUIDs and keep Shopify delivery IDs distinct from merchant-action event IDs in generated fixtures.
+- Refresh generated GitHub Actions and GitLab CI install pins to the latest reviewed main revision.
 
 ### UX and automation
 

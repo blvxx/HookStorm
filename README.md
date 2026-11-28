@@ -220,9 +220,10 @@ and run. Press Ctrl+C to stop. Interactive terminals also show live per-delivery
 
 `hookstorm init --template` supports `generic`, `stripe`, `github`, `shopify`, and
 `standard-webhooks`. These templates provide representative sample payloads and signature
-providers; they are starting points, not complete provider schemas. GitHub and Shopify
-also include representative provider-specific headers. Adapt payloads and assertions to
-your receiver.
+providers; they are starting points, not complete provider schemas. The GitHub template
+uses a GUID-shaped delivery ID. Shopify distinguishes the per-delivery webhook ID from the
+merchant-action event ID and includes representative shop domain, API version, and timestamp
+headers. Adapt payloads and assertions to your receiver.
 
 After intentionally upgrading HookStorm, run `hookstorm update-workflow` in the application
 repository. It updates only the pinned HookStorm commit in the generated workflow; it does
