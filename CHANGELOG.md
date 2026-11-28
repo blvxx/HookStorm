@@ -7,6 +7,7 @@
 - Add read-only GitHub repository webhook delivery listing and detail retrieval with a bounded, sanitized API response.
 - Add Stripe Event retrieval with canonical payload fingerprints while explicitly distinguishing Event objects from per-endpoint delivery attempt history.
 - Add Shopify webhook delivery log retrieval through the authenticated Shopify CLI 5.1+ JSON interface.
+- Extend Shopify webhook history inspection to the supported seven-day lookback using strictly bounded windows no longer than 24 hours per query.
 - Correlate provider records with local HookStorm runs only when stable event identity, payload fingerprint, event type/topic, target where available, and the saved scenario fingerprint agree.
 - Report observed provider outcomes separately from local fault-injection metadata; a local injected fault never masquerades as a confirmed root cause inside the provider's receiver.
 - Add a guarded local replay tool that requires explicit read-only pre- and post-replay business-state assertions, while preserving same-event identity and source-run correlation.
