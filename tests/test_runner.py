@@ -1040,3 +1040,16 @@ def test_deeply_nested_verification_response_fails_cleanly(
     assert result["verification"]["error"] == (
         "verification response JSON nesting exceeds the maximum depth of 128"
     )
+
+
+def test_runner_calls_progress_callback_after_each_duplicate_delivery(receiver) -> None:
+    base, _state = receiver
+    completed = []
+    data = scenario(delivery={"duplicate_count": 2})
+
+    result = asyncio.run(run_scenario(data, base, on_delivery=completed.append))
+
+    assert len(completed) == 3
+    assert [item["duplicate_index"] for item in completed] == [0, 1, 2]
+    assert [item["passed"] for item in completed] == [True, True, True]
+    assert completed == result["deliveries"]
