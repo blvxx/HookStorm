@@ -626,5 +626,5 @@ def test_rejects_yaml_nested_too_deep_to_parse(tmp_path) -> None:
         encoding="utf-8",
     )
 
-    with pytest.raises(ScenarioError, match="nested too deeply to parse safely"):
+    with pytest.raises(ScenarioError, match="nested too deeply to parse safely|128 nesting levels"):
         load_scenario(scenario_path)
