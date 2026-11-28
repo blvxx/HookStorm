@@ -1028,7 +1028,7 @@ def test_deeply_nested_verification_response_fails_cleanly(
         "name": "deeply nested verification response",
         "events": [{"id": "ping", "event_id": "evt_deep_verify", "payload": {}}],
         "verify": {
-            "url": f"{base}/__hookstorm/state",
+            "url": f"{base}/state",
             "expect_json": {"processed_events": 1},
         },
     })
