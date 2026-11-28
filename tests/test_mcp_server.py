@@ -657,7 +657,7 @@ def test_github_delivery_correlation_blocks_replay_candidate_when_payload_differ
     correlation = result["correlation"]
     assert correlation["status"] == "partial"
     assert correlation["payload_fingerprint_matches"] is False
-    assert correlation["replay_readiness"]["eligible_for_existing_loopback_replay"] is False
+    assert correlation["replay_readiness"]["eligible_for_guarded_replay"] is False
 
 
 def test_github_delivery_inspection_requires_run_and_scenario_together(
@@ -1001,3 +1001,47 @@ def test_guarded_replay_blocks_when_event_is_already_processed(
     assert result["blocked"] is True
     assert result["pre_replay_probe"]["passed"] is False
     assert state["requests"] == []
+
+def test_github_correlation_rejects_conflicting_provider_delivery_identifiers(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    scenario_path = _scenario_file(tmp_path)
+    db = tmp_path / "history.sqlite3"
+    run_id = _failed_run(
+        scenario_path,
+        "http://127.0.0.1:8000/webhook",
+        db,
+    )
+    detail = _github_delivery_detail({"private_value": "payload-must-not-leak"})
+    detail["request"]["headers"]["X-GitHub-Delivery"] = "different-provider-guid"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=detail)
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    monkeypatch.setenv("HOOKSTORM_GITHUB_TOKEN", "github-token-secret")
+    server = create_server(
+        history_db=db,
+        scenario_root=tmp_path,
+        enable_replay=False,
+        github_http_client=client,
+    )
+    result = _call_tool(
+        server,
+        "hookstorm_inspect_github_delivery",
+        {
+            "owner": "octocat",
+            "repo": "hello-world",
+            "hook_id": 42,
+            "delivery_id": 12345678,
+            "run_id": run_id,
+            "scenario_path": "scenarios/replay.yaml",
+        },
+    )
+    client.close()
+
+    correlation = result["correlation"]
+    assert correlation["status"] == "partial"
+    assert correlation["provider_guid_matches_request_header"] is False
+    assert correlation["replay_readiness"]["eligible_for_guarded_replay"] is False
