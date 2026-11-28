@@ -840,3 +840,54 @@ def test_list_shopify_deliveries_uses_cli_and_returns_sanitized_metadata(
     assert "--json" in command
     assert kwargs["shell"] is False
     assert kwargs["cwd"] == str(tmp_path.resolve())
+
+
+def test_shopify_log_correlation_requires_exact_payload_topic_target_and_scenario(
+    tmp_path: Path,
+) -> None:
+    from types import SimpleNamespace
+
+    scenario_path = _scenario_file(tmp_path)
+    target = "http://127.0.0.1:8000/webhook"
+    db = tmp_path / "history.sqlite3"
+    run_id = _failed_run(scenario_path, target, db)
+    record = {
+        "id": "delivery-1",
+        "eventId": "evt_replay",
+        "topic": "ping",
+        "status": "failure",
+        "statusCode": 503,
+        "uri": f"{target}?private=do-not-return",
+        "payload": {"private_value": "payload-must-not-leak"},
+    }
+
+    def fake_runner(command: list[str], **kwargs: object) -> SimpleNamespace:
+        return SimpleNamespace(returncode=0, stdout=json.dumps([record]), stderr="")
+
+    server = create_server(
+        history_db=db,
+        scenario_root=tmp_path,
+        enable_replay=False,
+        shopify_cli_runner=fake_runner,
+    )
+    result = _call_tool(
+        server,
+        "hookstorm_list_shopify_deliveries",
+        {
+            "run_id": run_id,
+            "scenario_path": "scenarios/replay.yaml",
+        },
+    )
+
+    correlation = result["deliveries"][0]["correlation"]
+    assert correlation["status"] == "confirmed"
+    assert correlation["shopify_event_id_matches_local_event_id"] is True
+    assert correlation["payload_fingerprint_matches"] is True
+    assert correlation["topic_matches"] is True
+    assert correlation["target_matches"] is True
+    assert correlation["root_cause"]["confirmed"] is False
+    assert correlation["replay_readiness"]["eligible_for_existing_loopback_replay"] is True
+    assert correlation["replay_readiness"]["idempotency_status"] == "not_proven_by_correlation"
+    serialized = json.dumps(result)
+    assert "payload-must-not-leak" not in serialized
+    assert "do-not-return" not in serialized
