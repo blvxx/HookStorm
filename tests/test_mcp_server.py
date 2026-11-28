@@ -7,7 +7,7 @@ from pathlib import Path
 import pytest
 
 mcp = pytest.importorskip("mcp")
-from mcp import Client
+from mcp import Client  # noqa: E402
 
 from hookstorm.config import load_scenario, scenario_fingerprint
 from hookstorm.history import save_run
@@ -28,6 +28,8 @@ events:
     payload:
       private_value: payload-must-not-leak
     expect_status: [200]
+    expect_json:
+      ok: true
 """,
         encoding="utf-8",
     )
@@ -100,15 +102,13 @@ def test_inspect_scenario_does_not_expose_payload_values(tmp_path: Path) -> None
     assert result["name"] == "Replay test"
     assert result["event_count"] == 1
     assert result["events"][0]["event_id"] == "evt_replay"
-    assert "private_value" in result["events"][0]["expected_json_top_level_keys"] or (
-        result["events"][0]["expected_json_top_level_keys"] == []
-    )
+    assert result["events"][0]["expected_json_top_level_keys"] == ["ok"]
     assert "payload-must-not-leak" not in json.dumps(result)
     assert scenario_path.is_file()
 
 
 def test_scenario_paths_cannot_escape_configured_root(tmp_path: Path) -> None:
-    outside = tmp_path.parent / "outside.yaml"
+    outside = tmp_path.parent / f"{tmp_path.name}-outside.yaml"
     outside.write_text("version: 1\nname: Outside\nevents:\n  - id: ping\n    event_id: outside\n", encoding="utf-8")
     server = create_server(scenario_root=tmp_path, enable_replay=False)
 
