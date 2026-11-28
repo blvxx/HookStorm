@@ -1,5 +1,16 @@
 # Changelog
 
+## Unreleased
+
+### UX and automation
+
+- Add a self-contained `hookstorm demo` that exercises retries and duplicate delivery against a temporary loopback-only receiver.
+- Allow `hookstorm run` and `watch` to use `HOOKSTORM_TARGET_URL` when `--target` is omitted.
+- Add provider-oriented starter scenario templates for generic HMAC, Stripe, GitHub, Shopify, and Standard Webhooks.
+- Add `hookstorm watch` to validate and rerun scenarios when their files change.
+- Add `hookstorm update-workflow` to refresh only the pinned HookStorm install SHA in generated CI workflows.
+- Add actionable hints for common delivery failures and document the new CLI workflows.
+
 ## 0.1.0a1 — First public alpha preview
 
 ### Reliability and safety hardening
