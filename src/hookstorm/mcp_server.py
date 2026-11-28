@@ -926,6 +926,140 @@ def _correlate_stripe_event(
     }
 
 
+
+
+
+def _correlate_shopify_delivery(
+    external: dict[str, Any],
+    run: dict[str, Any],
+    scenario: dict[str, Any],
+) -> dict[str, Any]:
+    """Match one Shopify CLI log entry to one local run using only stable evidence."""
+    scenario_matches = (
+        run.get("scenario") == scenario.get("name")
+        and isinstance(run.get("scenario_fingerprint"), str)
+        and run.get("scenario_fingerprint") == scenario_fingerprint(scenario)
+    )
+    external_event_id = external.get("event_id")
+    external_hash = external.get("payload_sha256")
+    external_topic = external.get("topic")
+    external_target = _normalized_target(external.get("target"))
+    candidates = [
+        item
+        for item in scenario.get("events", [])
+        if external_event_id is not None and item.get("event_id") == external_event_id
+    ]
+    match_basis = "shopify_event_id" if len(candidates) == 1 else None
+    if len(candidates) != 1 and isinstance(external_hash, str):
+        payload_matches = []
+        for item in scenario.get("events", []):
+            try:
+                fingerprint, _ = canonical_json_fingerprint(item.get("payload", {}))
+            except ValueError:
+                continue
+            topic_matches = (
+                external_topic is None
+                or item.get("id") == external_topic
+            )
+            if fingerprint == external_hash and topic_matches:
+                payload_matches.append(item)
+        candidates = payload_matches
+        if len(candidates) == 1:
+            match_basis = "payload_sha256_and_topic"
+
+    event = candidates[0] if len(candidates) == 1 else None
+    local_delivery = None
+    payload_matches = None
+    topic_matches = None
+    id_matches = False
+    target_matches = None
+    if event is not None:
+        id_matches = (
+            external_event_id is not None
+            and event.get("event_id") == external_event_id
+        )
+        try:
+            fingerprint, _ = canonical_json_fingerprint(event.get("payload", {}))
+            payload_matches = isinstance(external_hash, str) and fingerprint == external_hash
+        except ValueError:
+            payload_matches = False
+        topic_matches = external_topic is None or event.get("id") == external_topic
+        matches = [
+            item
+            for item in run.get("deliveries", [])
+            if item.get("event_id") == event.get("event_id")
+            and item.get("event_type") == event.get("id")
+        ]
+        if len(matches) == 1:
+            local_delivery = matches[0]
+        local_target = _normalized_target(run.get("target"))
+        target_matches = (
+            external_target == local_target
+            if external_target is not None and local_target is not None
+            else None
+        )
+
+    confirmed = bool(
+        scenario_matches
+        and event is not None
+        and local_delivery is not None
+        and id_matches
+        and payload_matches is True
+        and topic_matches is True
+        and target_matches is True
+    )
+    if confirmed:
+        status = "confirmed"
+    elif event is not None:
+        status = "partial"
+    else:
+        status = "unmatched"
+    provider_status = external.get("status_code")
+    return {
+        "status": status,
+        "match_basis": match_basis,
+        "scenario_matches_recorded_fingerprint": scenario_matches,
+        "shopify_event_id_matches_local_event_id": id_matches,
+        "payload_fingerprint_matches": payload_matches,
+        "topic_matches": topic_matches,
+        "target_matches": target_matches,
+        "provider_status_code": provider_status,
+        "local_event": (
+            {
+                "event_id": event.get("event_id"),
+                "event_type": event.get("id"),
+                "passed": bool(local_delivery.get("passed")),
+                "attempt_count": len(local_delivery.get("attempts", [])),
+                "diagnosis": (
+                    _diagnose_delivery(local_delivery)
+                    if not local_delivery.get("passed")
+                    else None
+                ),
+            }
+            if event is not None and local_delivery is not None
+            else None
+        ),
+        "root_cause": {
+            "confirmed": False,
+            "value": None,
+            "boundary": (
+                "A Shopify webhook log status is an observed delivery outcome. It does not "
+                "establish the internal application failure or whether a business effect committed."
+            ),
+        },
+        "replay_readiness": {
+            "eligible_for_existing_loopback_replay": bool(
+                confirmed
+                and local_delivery is not None
+                and not local_delivery.get("passed")
+            ),
+            "idempotency_status": "not_proven_by_correlation",
+            "requires_independent_business_state_check": True,
+            "provider_redelivery_performed": False,
+        },
+    }
+
+
 def create_server(
     *,
     history_db: str | Path | None = None,
@@ -1544,8 +1678,12 @@ def create_server(
         status: str | None = "failure",
         store: str | None = None,
         client_id: str | None = None,
+        run_id: str | None = None,
+        scenario_path: str | None = None,
     ) -> dict[str, Any]:
-        """Read Shopify webhook delivery logs using an authenticated local Shopify CLI session."""
+        """Read Shopify webhook logs and optionally correlate them with one local HookStorm run."""
+        if (run_id is None) != (scenario_path is None):
+            raise ValueError("run_id and scenario_path must be supplied together")
         adapter = ShopifyAppLogsAdapter(runner=shopify_cli_runner)
         deliveries = adapter.list_webhook_deliveries(
             since=since,
@@ -1555,17 +1693,28 @@ def create_server(
             client_id=client_id,
             cwd=str(root),
         )
+        if run_id is not None and scenario_path is not None:
+            run = get_run(run_id, history_db)
+            _, scenario = _load_scenario(scenario_path, root)
+            for item in deliveries:
+                item["correlation"] = _correlate_shopify_delivery(
+                    item,
+                    run,
+                    scenario,
+                )
         return {
             "provider": "shopify",
             "source": "shopify_cli_app_logs",
             "count": len(deliveries),
             "deliveries": deliveries,
             "read_only": True,
+            "correlation_requested": run_id is not None,
             "limitations": [
-                "Requires Shopify CLI 5.1+ and an existing interactive Shopify account session.",
+                "Requires Shopify CLI 5.1+ and an existing authenticated Shopify account session.",
                 "The CLI log query is limited to a 24-hour window per call and 1,000 records.",
                 "CI automation tokens are not supported by this CLI log command.",
                 "Shopify CLI log records can omit or truncate bodies; missing payload fingerprints prevent payload-based correlation.",
+                "Correlation is confirmed only when the local scenario fingerprint, event identity, payload, topic, and target agree.",
                 "This tool reads logs only and does not request Shopify to redeliver an event.",
             ],
         }
