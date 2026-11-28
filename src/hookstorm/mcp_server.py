@@ -244,7 +244,6 @@ def _scenario_summary(path: Path, scenario: dict[str, Any]) -> dict[str, Any]:
     }
 
 
-
 def _scenario_event_context(
     event: dict[str, Any],
     scenario: dict[str, Any],
