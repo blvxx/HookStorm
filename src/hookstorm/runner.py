@@ -23,6 +23,7 @@ from hookstorm.standard_webhooks import (
     decode_standard_webhooks_secret,
     standard_webhooks_headers,
 )
+from hookstorm.json_safety import JSONNestingError, ensure_json_nesting_depth
 from hookstorm.verify_auth import (
     resolve_verification_auth_headers,
     validate_verification_auth_transport,
@@ -410,9 +411,14 @@ async def run_scenario(
                                     outcome["error"] = body_error or "response body could not be read safely"
                                 elif expected_json is not None:
                                     try:
+                                        ensure_json_nesting_depth(
+                                            response_body, label="response JSON"
+                                        )
                                         matched, mismatch = _matches_subset(
                                             json.loads(response_body), expected_json
                                         )
+                                    except JSONNestingError as exc:
+                                        matched, mismatch = False, str(exc)
                                     except RecursionError:
                                         matched, mismatch = (
                                             False,
@@ -546,9 +552,14 @@ async def run_scenario(
                                     )
                                 else:
                                     try:
+                                        ensure_json_nesting_depth(
+                                            response_body, label="verification response JSON"
+                                        )
                                         matched, mismatch = _matches_subset(
                                             json.loads(response_body), verify_config["expect_json"]
                                         )
+                                    except JSONNestingError as exc:
+                                        matched, mismatch = False, str(exc)
                                     except RecursionError:
                                         matched, mismatch = (
                                             False,
