@@ -7,6 +7,10 @@ from pathlib import Path
 
 import pytest
 
+from hookstorm.config import load_scenario, scenario_fingerprint
+from hookstorm.history import save_run
+from hookstorm.mcp_server import create_server
+
 try:
     Client = import_module("mcp").Client
 except ImportError:
@@ -16,10 +20,6 @@ pytestmark = pytest.mark.skipif(
     Client is None,
     reason="the optional MCP extra is not installed",
 )
-
-from hookstorm.config import load_scenario, scenario_fingerprint
-from hookstorm.history import save_run
-from hookstorm.mcp_server import create_server
 
 
 def _scenario_file(root: Path) -> Path:
