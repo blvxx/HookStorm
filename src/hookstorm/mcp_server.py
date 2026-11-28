@@ -834,7 +834,7 @@ def create_server(
             # A full-scenario state assertion may not be valid for a one-event replay.
             "verify": None,
         }
-        result = await run_scenario(selected_scenario, safe_target)
+        result = await run_scenario(selected_scenario, safe_target, correlation_run_id=run_id)
         history_saved = True
         history_warning = None
         try:
@@ -848,6 +848,7 @@ def create_server(
             "replay_enabled": True,
             "source_run_id": run_id,
             "run_id": result["run_id"],
+            "correlation_run_id": result["correlation_run_id"],
             "scenario": result["scenario"],
             "target": result["target"],
             "summary": result["summary"],
@@ -924,7 +925,7 @@ def create_server(
             ],
             "verify": None,
         }
-        result = await run_scenario(selected_scenario, safe_target)
+        result = await run_scenario(selected_scenario, safe_target, correlation_run_id=run_id)
         try:
             save_run(result, history_db)
             history_saved = True
