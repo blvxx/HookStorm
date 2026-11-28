@@ -22,9 +22,11 @@ hookstorm init --template github --no-workflow
 ~~~
 
 Available templates are `generic`, `stripe`, `github`, `shopify`, and `standard-webhooks`.
-They generate representative payload examples and the matching signature provider. GitHub
-and Shopify templates also include typical provider-specific headers. Customize the event
-fields and expected response for your receiver before using the scenario.
+They generate representative payload examples and the matching signature provider. The
+GitHub template uses a GUID-shaped `X-GitHub-Delivery` value. The Shopify template keeps the
+per-delivery `X-Shopify-Webhook-Id` separate from the merchant-action `X-Shopify-Event-Id`
+and includes representative shop-domain, API-version, and trigger-time headers. Customize
+the event fields and expected response for your receiver before using the scenario.
 
 Customize the event contract directly from the command line:
 
