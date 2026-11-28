@@ -152,7 +152,13 @@ class GitHubWebhookAdapter:
             "User-Agent": "HookStorm-MCP",
         }
         try:
-            with self._client.stream("GET", url, params=params, headers=headers) as response:
+            with self._client.stream(
+                "GET",
+                url,
+                params=params,
+                headers=headers,
+                follow_redirects=False,
+            ) as response:
                 body = bytearray()
                 for chunk in response.iter_bytes():
                     if len(body) + len(chunk) > _MAX_API_RESPONSE_BYTES:
