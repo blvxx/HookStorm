@@ -2,6 +2,8 @@ from __future__ import annotations
 
 import asyncio
 import json
+
+import httpx
 from importlib import import_module
 from pathlib import Path
 
@@ -513,3 +515,171 @@ def test_find_deliveries_applies_status_and_lookback_limits(tmp_path: Path) -> N
             assert response.is_error
 
     asyncio.run(invalid_limit())
+
+def _github_delivery_detail(payload: dict) -> dict:
+    return {
+        "id": 12345678,
+        "guid": "evt_replay",
+        "delivered_at": "2026-11-28T10:00:00Z",
+        "redelivery": False,
+        "duration": 0.27,
+        "status": "Failed",
+        "status_code": 503,
+        "event": "ping",
+        "request": {
+            "method": "POST",
+            "url": "http://127.0.0.1:8000/webhook?private-query=must-not-leak",
+            "headers": {
+                "X-GitHub-Delivery": "evt_replay",
+                "X-GitHub-Event": "ping",
+                "Authorization": "api-header-secret",
+                "X-Hub-Signature-256": "signature-secret",
+            },
+            "payload": payload,
+        },
+        "response": {
+            "status_code": 503,
+            "headers": {
+                "Content-Type": "application/json",
+                "Set-Cookie": "response-cookie-secret",
+            },
+            "payload": {
+                "message": "internal-response-must-not-leak",
+            },
+        },
+    }
+
+
+def test_inspect_github_delivery_correlates_exact_local_event_without_leaking_data(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    scenario_path = _scenario_file(tmp_path)
+    db = tmp_path / "history.sqlite3"
+    target = "http://127.0.0.1:8000/webhook"
+    run_id = _failed_run(scenario_path, target, db)
+    payload = {"private_value": "payload-must-not-leak"}
+    detail = _github_delivery_detail(payload)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.method == "GET"
+        assert request.url.host == "api.github.com"
+        assert request.headers["Authorization"] == "Bearer github-token-secret"
+        return httpx.Response(200, json=detail)
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    monkeypatch.setenv("HOOKSTORM_GITHUB_TOKEN", "github-token-secret")
+    server = create_server(
+        history_db=db,
+        scenario_root=tmp_path,
+        enable_replay=False,
+        github_http_client=client,
+    )
+    result = _call_tool(
+        server,
+        "hookstorm_inspect_github_delivery",
+        {
+            "owner": "octocat",
+            "repo": "hello-world",
+            "hook_id": 42,
+            "delivery_id": 12345678,
+            "run_id": run_id,
+            "scenario_path": "scenarios/replay.yaml",
+        },
+    )
+    client.close()
+
+    correlation = result["correlation"]
+    assert correlation["status"] == "confirmed"
+    assert correlation["match_basis"] == "provider_delivery_guid"
+    assert correlation["scenario_matches_recorded_fingerprint"] is True
+    assert correlation["provider_event_guid_matches_local_event_id"] is True
+    assert correlation["payload_fingerprint_matches"] is True
+    assert correlation["event_type_matches"] is True
+    assert correlation["target_matches"] is True
+    assert correlation["status_codes_match"] is True
+    assert correlation["confirmed_facts"][0]["status_code"] == 503
+    assert correlation["root_cause"]["confirmed"] is False
+    assert correlation["replay_readiness"]["eligible_for_existing_loopback_replay"] is True
+    assert correlation["replay_readiness"]["idempotency_status"] == "not_proven_by_correlation"
+
+    serialized = json.dumps(result)
+    for secret in (
+        "github-token-secret",
+        "private-query",
+        "must-not-leak",
+        "api-header-secret",
+        "signature-secret",
+        "payload-must-not-leak",
+        "response-cookie-secret",
+        "internal-response-must-not-leak",
+    ):
+        assert secret not in serialized
+
+
+def test_github_delivery_correlation_blocks_replay_candidate_when_payload_differs(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    scenario_path = _scenario_file(tmp_path)
+    db = tmp_path / "history.sqlite3"
+    run_id = _failed_run(
+        scenario_path,
+        "http://127.0.0.1:8000/webhook",
+        db,
+    )
+    detail = _github_delivery_detail({"private_value": "different-payload"})
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=detail)
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    monkeypatch.setenv("HOOKSTORM_GITHUB_TOKEN", "github-token-secret")
+    server = create_server(
+        history_db=db,
+        scenario_root=tmp_path,
+        enable_replay=False,
+        github_http_client=client,
+    )
+    result = _call_tool(
+        server,
+        "hookstorm_inspect_github_delivery",
+        {
+            "owner": "octocat",
+            "repo": "hello-world",
+            "hook_id": 42,
+            "delivery_id": 12345678,
+            "run_id": run_id,
+            "scenario_path": "scenarios/replay.yaml",
+        },
+    )
+    client.close()
+
+    correlation = result["correlation"]
+    assert correlation["status"] == "partial"
+    assert correlation["payload_fingerprint_matches"] is False
+    assert correlation["replay_readiness"]["eligible_for_existing_loopback_replay"] is False
+
+
+def test_github_delivery_inspection_requires_run_and_scenario_together(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("HOOKSTORM_GITHUB_TOKEN", "github-token-secret")
+    server = create_server(scenario_root=tmp_path, enable_replay=False)
+
+    async def call() -> None:
+        async with Client(server) as client:
+            response = await client.call_tool(
+                "hookstorm_inspect_github_delivery",
+                {
+                    "owner": "octocat",
+                    "repo": "hello-world",
+                    "hook_id": 42,
+                    "delivery_id": 12345678,
+                    "run_id": "run-without-scenario",
+                },
+            )
+            assert response.is_error
+
+    asyncio.run(call())
