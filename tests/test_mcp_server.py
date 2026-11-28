@@ -408,3 +408,33 @@ def test_batch_replay_refuses_any_event_without_a_failed_delivery(
 
     asyncio.run(call())
     assert state["requests"] == []
+
+
+def test_replay_refuses_remote_and_query_string_targets(receiver, tmp_path: Path) -> None:
+    base, state = receiver
+    scenario_path = _scenario_file(tmp_path)
+    db = tmp_path / "history.sqlite3"
+    run_id = _failed_run(scenario_path, f"{base}/webhook", db)
+    server = create_server(
+        history_db=db,
+        scenario_root=tmp_path,
+        enable_replay=True,
+    )
+
+    async def call(target: str) -> None:
+        async with Client(server) as client:
+            response = await client.call_tool(
+                "hookstorm_replay_failed_delivery",
+                {
+                    "run_id": run_id,
+                    "scenario_path": "scenarios/replay.yaml",
+                    "event_id": "evt_replay",
+                    "target": target,
+                    "confirm": True,
+                },
+            )
+            assert response.is_error
+
+    asyncio.run(call("https://example.com/webhook"))
+    asyncio.run(call(f"{base}/webhook?token=must-not-be-in-url"))
+    assert state["requests"] == []
