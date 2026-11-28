@@ -2,6 +2,8 @@
 
 ## Unreleased
 
+## 0.1.0a1 — First public alpha preview (2026-11-28)
+
 ### MCP integration
 
 - Add an optional local MCP server for sanitized run inspection, scenario introspection, and failure diagnosis.
@@ -27,7 +29,6 @@
 - Generate an optional default-branch-only GitLab CI pipeline with serialized baseline comparison and JUnit artifacts.
 - Add actionable hints for common delivery failures and document the new CLI workflows.
 
-## 0.1.0a1 — First public alpha preview
 
 ### Reliability and safety hardening
 

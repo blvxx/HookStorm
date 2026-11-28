@@ -14,6 +14,12 @@ def test_release_workflow_only_publishes_after_a_published_release() -> None:
     assert workflow["jobs"]["build"]["steps"][4]["if"] == "github.event_name == 'release'"
     assert workflow["jobs"]["publish"]["needs"] == "build"
     assert workflow["jobs"]["publish"]["if"] == (
+        "github.event_name == 'release' && github.event.action == 'published' "
+        "&& vars.PUBLISH_TO_PYPI == 'true'"
+    )
+    # Publishing to GitHub Releases must not automatically publish to PyPI.
+    assert "vars.PUBLISH_TO_PYPI" in workflow["jobs"]["publish"]["if"]
+    assert workflow["jobs"]["attach"]["if"] == (
         "github.event_name == 'release' && github.event.action == 'published'"
     )
 

@@ -23,11 +23,14 @@ HookStorm is currently in the pre-release stage. Do not publish a stable release
 
 ## Optional PyPI publication
 
-PyPI publishing is not enabled by this checklist alone. Before enabling it:
+The GitHub Release workflow skips its PyPI job by default. It runs only when the repository Actions variable `PUBLISH_TO_PYPI` is set to `true`; leaving the variable unset publishes GitHub Release assets without attempting a PyPI upload.
+
+Before enabling PyPI publication:
 
 - Configure a PyPI Trusted Publisher for this repository and the dedicated publishing workflow.
 - Use GitHub Actions OIDC; do not store a long-lived PyPI API token in repository secrets.
 - Publish only from a GitHub Release event after verifying the tag points to the reviewed commit.
+- Set the repository Actions variable `PUBLISH_TO_PYPI` to `true` only after confirming the Trusted Publisher and project ownership; remove or set it to `false` to disable future PyPI uploads.
 - Verify the uploaded artifacts by installing the released version in a fresh environment.
 
 ## Post-release verification
