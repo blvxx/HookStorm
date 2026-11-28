@@ -353,6 +353,7 @@ webhook-regression:
           --secret-env HOOKSTORM_SECRET --history-db "$HOOKSTORM_HISTORY_DB" \
           --format junit --output test-results/webhook-regression.xml
       else
+        hookstorm doctor "$HOOKSTORM_SCENARIO" --connect --secret-env HOOKSTORM_SECRET
         hookstorm run "$HOOKSTORM_SCENARIO" --allow-remote \
           --secret-env HOOKSTORM_SECRET --history-db "$HOOKSTORM_HISTORY_DB" \
           --format junit --output test-results/webhook-regression.xml
