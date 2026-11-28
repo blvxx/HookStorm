@@ -2,12 +2,20 @@ from __future__ import annotations
 
 import asyncio
 import json
+from importlib import import_module
 from pathlib import Path
 
 import pytest
 
-mcp = pytest.importorskip("mcp")
-from mcp import Client  # noqa: E402
+try:
+    Client = import_module("mcp").Client
+except ImportError:
+    Client = None
+
+pytestmark = pytest.mark.skipif(
+    Client is None,
+    reason="the optional MCP extra is not installed",
+)
 
 from hookstorm.config import load_scenario, scenario_fingerprint
 from hookstorm.history import save_run
