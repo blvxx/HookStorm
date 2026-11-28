@@ -192,6 +192,7 @@ HookStorm sends an `X-HookStorm-Run` header so the receiver can return state for
 |---|---|
 | `hookstorm demo` | Run a local retry and duplicate demo; no external endpoint required |
 | `hookstorm init --template stripe` | Generate a provider-oriented starter scenario and GitHub Actions workflow |
+| `hookstorm init --ci-provider gitlab` | Generate a GitLab CI pipeline instead of GitHub Actions |
 | `hookstorm update-workflow` | Refresh the HookStorm commit pin in a generated workflow after upgrading |
 | `hookstorm watch FILE.yaml` | Rerun a scenario whenever its YAML file changes |
 | `hookstorm init` | Generate a starter scenario and a GitHub Actions workflow |
@@ -224,8 +225,16 @@ assertions to your receiver.
 
 After intentionally upgrading HookStorm, run `hookstorm update-workflow` in the application
 repository. It updates only the pinned HookStorm commit in the generated workflow; it does
-not overwrite other workflow customizations. The installed HookStorm version determines the
-new pin.
+not overwrite other workflow customizations. For GitLab CI, pass `--path .gitlab-ci.yml`.
+The installed HookStorm version determines the new pin.
+
+To generate GitLab CI rather than GitHub Actions, run `hookstorm init --ci-provider gitlab`.
+The generated `.gitlab-ci.yml` intentionally runs only on the default branch. Configure
+`HOOKSTORM_TARGET_URL` and (for signed scenarios) `HOOKSTORM_SECRET` as GitLab CI/CD variables;
+use masked and protected settings for secrets and protect the default branch. The pipeline
+runs preflight, executes the scenario, compares and advances a cached baseline only after a
+successful run, and publishes a JUnit report. It does not run against feature branches or
+merge requests by default.
 
 ## Reports and history
 
