@@ -13,7 +13,6 @@ from hookstorm.providers import (
     canonical_json_fingerprint,
 )
 
-
 GUID = "0b989ba4-242f-11e5-81e1-c7b6966d2516"
 
 
