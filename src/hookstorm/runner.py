@@ -10,8 +10,8 @@ import json
 import os
 import time
 import uuid
-from datetime import UTC, datetime
 from collections.abc import Callable
+from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
