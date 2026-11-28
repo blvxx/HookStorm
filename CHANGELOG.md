@@ -4,6 +4,10 @@
 
 ### Reliability and safety hardening
 
+- Require setuptools 84.1.0 or newer for package builds, avoiding the affected range in the Windows legacy wheel-installation advisory (GHSA-xmj3-9gf7-h52w).
+- Require PyYAML 6.0.4 or newer to avoid exponential YAML merge-key expansion when loading scenarios.
+- Limit JSON object/array nesting to 128 levels and convert excessively nested YAML, response, and history input into controlled validation or assertion errors.
+
 - Reject case-insensitive duplicate event request headers to avoid ambiguous HTTP field values.
 
 - Keep the `:memory:` SQLite history database alive across save/list/show operations within one process.

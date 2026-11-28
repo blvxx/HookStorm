@@ -587,3 +587,44 @@ def test_fault_injection_attempts_cannot_exceed_retry_budget() -> None:
 
     with pytest.raises(ScenarioError, match="must not exceed retry.max_attempts=2"):
         validate_scenario(data)
+
+
+def test_rejects_payload_nested_too_deep_to_encode() -> None:
+    data = valid_scenario()
+    nested_payload: object = 0
+    for _ in range(10_000):
+        nested_payload = [nested_payload]
+    data["events"][0]["payload"] = {"nested": nested_payload}
+
+    with pytest.raises(ScenarioError, match="payload must be valid JSON-compatible"):
+        validate_scenario(data)
+
+
+
+def test_rejects_expected_json_nested_too_deep_to_encode() -> None:
+    data = valid_scenario()
+    nested_expectation: object = True
+    for _ in range(10_000):
+        nested_expectation = {"nested": nested_expectation}
+    data["events"][0]["expect_json"] = nested_expectation
+
+    with pytest.raises(ScenarioError, match="expect_json must contain JSON-compatible values"):
+        validate_scenario(data)
+
+
+
+def test_rejects_yaml_nested_too_deep_to_parse(tmp_path) -> None:
+    scenario_path = tmp_path / "deep.yaml"
+    nested_value = "[" * 3_000 + "0" + "]" * 3_000
+    scenario_path.write_text(
+        "version: 1\n"
+        "name: deeply nested input\n"
+        "events:\n"
+        "  - id: ping\n"
+        "    event_id: evt_deep_yaml\n"
+        f"    payload: {nested_value}\n",
+        encoding="utf-8",
+    )
+
+    with pytest.raises(ScenarioError, match="nested too deeply to parse safely|128 nesting levels"):
+        load_scenario(scenario_path)

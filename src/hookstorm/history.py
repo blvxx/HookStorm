@@ -10,6 +10,8 @@ import threading
 from pathlib import Path
 from typing import Any
 
+from hookstorm.json_safety import JSONNestingError, ensure_json_nesting_depth
+
 _DEFAULT_DB = Path.home() / ".hookstorm" / "history.sqlite3"
 _MEMORY_DB_URI = "file:hookstorm_history?mode=memory&cache=shared"
 _MEMORY_DB_KEEPER: sqlite3.Connection | None = None
@@ -530,14 +532,16 @@ def list_runs(
         output = []
         for row in rows:
             item = dict(row)
-            result = json.loads(item.pop("result_json"))
+            stored_json = item.pop("result_json")
+            ensure_json_nesting_depth(stored_json, label="Stored run JSON")
+            result = json.loads(stored_json)
             _validate_run_result(result, "Stored run")
             _validate_stored_row_metadata(row, result)
             item["success"] = bool(item["success"])
             item.update(result_metrics(result))
             output.append(item)
         return output
-    except (sqlite3.Error, json.JSONDecodeError) as exc:
+    except (JSONNestingError, RecursionError, sqlite3.Error, json.JSONDecodeError) as exc:
         raise HistoryError(f"Cannot read HookStorm history: {exc}") from exc
     finally:
         connection.close()
@@ -560,7 +564,9 @@ def get_run(run_id: str, path: str | Path | None = None) -> dict[str, Any]:
         ).fetchone()
         if row is None:
             raise HistoryError(f"Run '{run_id}' was not found in local history")
-        result = json.loads(row["result_json"])
+        stored_json = row["result_json"]
+        ensure_json_nesting_depth(stored_json, label="Stored run JSON")
+        result = json.loads(stored_json)
         _validate_run_result(result, "Stored run")
         _validate_stored_row_metadata(row, result)
         result["history"] = {
@@ -568,7 +574,7 @@ def get_run(run_id: str, path: str | Path | None = None) -> dict[str, Any]:
             "database_run_id": row["run_id"],
         }
         return result
-    except (sqlite3.Error, json.JSONDecodeError) as exc:
+    except (JSONNestingError, RecursionError, sqlite3.Error, json.JSONDecodeError) as exc:
         raise HistoryError(f"Cannot read run '{run_id}': {exc}") from exc
     finally:
         connection.close()
@@ -854,14 +860,16 @@ def load_history_export(source: str | Path) -> dict[str, Any]:
         return parsed
 
     try:
+        source_text = location.read_text(encoding="utf-8")
+        ensure_json_nesting_depth(source_text, label="Baseline JSON")
         document = json.loads(
-            location.read_text(encoding="utf-8"),
+            source_text,
             parse_constant=reject_non_standard_number,
             object_pairs_hook=reject_duplicate_keys,
         )
     except OSError as exc:
         raise HistoryError(f"Cannot read baseline file '{location}': {exc}") from exc
-    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+    except (JSONNestingError, RecursionError, json.JSONDecodeError, UnicodeDecodeError) as exc:
         raise HistoryError(f"Baseline file '{location}' is not valid JSON: {exc}") from exc
 
     if not isinstance(document, dict):
@@ -890,7 +898,7 @@ def load_history_export(source: str | Path) -> dict[str, Any]:
     try:
         safe_result = _sanitize_result(result)
         result_metrics(safe_result)
-    except (KeyError, TypeError, ValueError) as exc:
+    except (KeyError, RecursionError, TypeError, ValueError) as exc:
         raise HistoryError(f"Baseline run contains invalid metrics: {exc}") from exc
     return safe_result
 

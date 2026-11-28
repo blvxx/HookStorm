@@ -18,6 +18,7 @@ import httpx
 
 from hookstorm import __version__
 from hookstorm.config import scenario_fingerprint
+from hookstorm.json_safety import JSONNestingError, ensure_json_nesting_depth
 from hookstorm.safety import validate_target
 from hookstorm.standard_webhooks import (
     decode_standard_webhooks_secret,
@@ -410,8 +411,18 @@ async def run_scenario(
                                     outcome["error"] = body_error or "response body could not be read safely"
                                 elif expected_json is not None:
                                     try:
+                                        ensure_json_nesting_depth(
+                                            response_body, label="response JSON"
+                                        )
                                         matched, mismatch = _matches_subset(
                                             json.loads(response_body), expected_json
+                                        )
+                                    except JSONNestingError as exc:
+                                        matched, mismatch = False, str(exc)
+                                    except RecursionError:
+                                        matched, mismatch = (
+                                            False,
+                                            "response JSON is nested too deeply to compare safely",
                                         )
                                     except ValueError:
                                         matched, mismatch = (
@@ -541,8 +552,18 @@ async def run_scenario(
                                     )
                                 else:
                                     try:
+                                        ensure_json_nesting_depth(
+                                            response_body, label="verification response JSON"
+                                        )
                                         matched, mismatch = _matches_subset(
                                             json.loads(response_body), verify_config["expect_json"]
+                                        )
+                                    except JSONNestingError as exc:
+                                        matched, mismatch = False, str(exc)
+                                    except RecursionError:
+                                        matched, mismatch = (
+                                            False,
+                                            "verification response JSON is nested too deeply to compare safely",
                                         )
                                     except ValueError:
                                         matched, mismatch = (

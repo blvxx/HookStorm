@@ -11,6 +11,8 @@ from urllib.parse import urlsplit
 
 import yaml
 
+from hookstorm.json_safety import ensure_json_nesting_depth
+
 
 class ScenarioError(ValueError):
     """Raised when a scenario file is invalid."""
@@ -315,12 +317,12 @@ def _validate_verify(value: Any) -> dict[str, Any] | None:
     if not isinstance(expected_json, dict):
         raise ScenarioError("verify.expect_json must be a JSON object")
     try:
-        expected_json = json.loads(
-            json.dumps(
-                expected_json, ensure_ascii=False, separators=(",", ":"), allow_nan=False
-            )
+        encoded_expected = json.dumps(
+            expected_json, ensure_ascii=False, separators=(",", ":"), allow_nan=False
         )
-    except (TypeError, ValueError, UnicodeEncodeError) as exc:
+        ensure_json_nesting_depth(encoded_expected, label="verify.expect_json")
+        expected_json = json.loads(encoded_expected)
+    except (RecursionError, TypeError, ValueError, UnicodeEncodeError) as exc:
         raise ScenarioError("verify.expect_json must contain JSON-compatible values") from exc
 
     timeout_ms = _integer(
@@ -392,11 +394,16 @@ def validate_scenario(data: Any) -> dict[str, Any]:
         seen_event_ids.add(event_id)
         payload = event.get("payload", {})
         try:
-            encoded_payload = json.dumps(
+            encoded_payload_text = json.dumps(
                 payload, ensure_ascii=False, separators=(",", ":"), allow_nan=False
-            ).encode("utf-8")
-        except (TypeError, ValueError, UnicodeEncodeError) as exc:
-            raise ScenarioError(f"{where}.payload must be valid JSON-compatible data") from exc
+            )
+            ensure_json_nesting_depth(encoded_payload_text, label=f"{where}.payload")
+            encoded_payload = encoded_payload_text.encode("utf-8")
+        except (RecursionError, TypeError, ValueError, UnicodeEncodeError) as exc:
+            raise ScenarioError(
+                f"{where}.payload must be valid JSON-compatible data with no more than "
+                f"128 nesting levels"
+            ) from exc
         if len(encoded_payload) > 1_048_576:
             raise ScenarioError(f"{where}.payload exceeds the 1 MiB limit")
         headers = event.get("headers", {})
@@ -449,14 +456,17 @@ def validate_scenario(data: Any) -> dict[str, Any]:
             if not isinstance(expected, dict):
                 raise ScenarioError(f"{where}.{expectation_key} must be a JSON object")
             try:
-                expectations[expectation_key] = json.loads(
-                    json.dumps(
-                        expected, ensure_ascii=False, separators=(",", ":"), allow_nan=False
-                    )
+                encoded_expected = json.dumps(
+                    expected, ensure_ascii=False, separators=(",", ":"), allow_nan=False
                 )
-            except (TypeError, ValueError, UnicodeEncodeError) as exc:
+                ensure_json_nesting_depth(
+                    encoded_expected, label=f"{where}.{expectation_key}"
+                )
+                expectations[expectation_key] = json.loads(encoded_expected)
+            except (RecursionError, TypeError, ValueError, UnicodeEncodeError) as exc:
                 raise ScenarioError(
-                    f"{where}.{expectation_key} must contain JSON-compatible values"
+                    f"{where}.{expectation_key} must contain JSON-compatible values "
+                    "with no more than 128 nesting levels"
                 ) from exc
         schedule_after_ms = _integer(
             event.get("schedule_after_ms", 0),
@@ -559,7 +569,8 @@ def scenario_fingerprint(scenario: dict[str, Any]) -> str:
             separators=(",", ":"),
             allow_nan=False,
         ).encode("utf-8")
-    except (TypeError, ValueError, UnicodeEncodeError) as exc:
+        ensure_json_nesting_depth(canonical, label="Scenario fingerprint")
+    except (RecursionError, TypeError, ValueError, UnicodeEncodeError) as exc:
         raise ScenarioError("Scenario configuration cannot be fingerprinted as JSON") from exc
     return hashlib.sha256(canonical).hexdigest()
 
@@ -576,6 +587,10 @@ def load_scenario(path: str | Path) -> dict[str, Any]:
         raise ScenarioError(f"Scenario file not found: {scenario_path}") from exc
     except yaml.YAMLError as exc:
         raise ScenarioError(f"Invalid YAML in {scenario_path}: {exc}") from exc
+    except RecursionError as exc:
+        raise ScenarioError(
+            f"Scenario in {scenario_path} is nested too deeply to parse safely"
+        ) from exc
     except OSError as exc:
         raise ScenarioError(f"Cannot read scenario file {scenario_path}: {exc}") from exc
     return validate_scenario(raw)
