@@ -1843,6 +1843,14 @@ def create_server(
         return {
             "provider": "shopify",
             "source": "shopify_cli_app_logs",
+            "query": {
+                "since": since,
+                "until": until,
+                "limit": limit,
+                "status": status,
+                "store": store,
+                "client_id": client_id,
+            },
             "count": len(deliveries),
             "deliveries": deliveries,
             "read_only": True,
