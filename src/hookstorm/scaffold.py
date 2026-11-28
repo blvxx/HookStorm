@@ -133,6 +133,10 @@ def render_scenario(
     payload = defaults["payload"] if payload is None else payload
     headers = defaults.get("headers", {}) if headers is None else headers
     if headers is not None:
+        if "X-GitHub-Event" in headers:
+            headers["X-GitHub-Event"] = event_type.split(".", 1)[0]
+        if "X-Shopify-Topic" in headers:
+            headers["X-Shopify-Topic"] = event_type
         for header_name in ("X-GitHub-Delivery", "X-Shopify-Webhook-Id"):
             if defaults["event_id"] == headers.get(header_name):
                 headers[header_name] = event_id
