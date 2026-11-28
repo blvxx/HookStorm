@@ -2,6 +2,16 @@
 
 ## Unreleased
 
+### MCP integration
+
+- Add an optional local MCP server for sanitized run inspection, scenario introspection, and failure diagnosis.
+- Add an explicitly opt-in, loopback-only replay tool that checks the failed run, scenario fingerprint, and target before sending one selected event.
+- Add a dedicated Python 3.12 CI job for MCP server tools and replay safeguards.
+- Add scenario-aware MCP run analysis with privacy-preserving payload/header metadata and evidence-bounded recommendations.
+- Add atomic batch replay for up to 50 explicitly selected failed events, retaining loopback-only and per-call confirmation safeguards.
+- Expand HTTP failure classification for conflicts, payload limits, media types, and redirects.
+- Preserve the source request correlation ID during MCP replay while storing the replay as a separate history run.
+
 ### Audit fixes
 
 - Use provider-shaped GitHub delivery GUIDs and keep Shopify delivery IDs distinct from merchant-action event IDs in generated fixtures.

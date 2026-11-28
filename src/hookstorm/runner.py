@@ -209,6 +209,7 @@ async def run_scenario(
     allow_remote: bool = False,
     allow_insecure_http: bool = False,
     secret: str | None = None,
+    correlation_run_id: str | None = None,
     on_delivery: Callable[[dict[str, Any]], None] | None = None,
 ) -> dict[str, Any]:
     """Execute a validated scenario and return a privacy-conscious result document."""
@@ -239,6 +240,15 @@ async def run_scenario(
     started = datetime.now(UTC)
     monotonic_started = time.perf_counter()
     run_id = uuid.uuid4().hex
+    if correlation_run_id is not None and (
+        not isinstance(correlation_run_id, str)
+        or not correlation_run_id
+        or len(correlation_run_id) > 128
+        or not correlation_run_id.isascii()
+        or any(ord(character) < 33 or ord(character) > 126 for character in correlation_run_id)
+    ):
+        raise ValueError("correlation_run_id must contain 1–128 printable ASCII characters")
+    request_correlation_id = correlation_run_id or run_id
     target_parts = urlsplit(target)
     # Query strings often contain API keys or signed tokens; never copy them into reports.
     reported_target = urlunsplit(
@@ -300,7 +310,7 @@ async def run_scenario(
                 "Content-Type": "application/json",
                 "Accept-Encoding": "identity",
                 "User-Agent": f"HookStorm/{__version__} (+https://github.com/blvxx/HookStorm)",
-                "X-HookStorm-Run": run_id,
+                "X-HookStorm-Run": request_correlation_id,
                 "X-Event-ID": event["event_id"],
                 "X-Event-Type": event["id"],
             }
@@ -531,7 +541,7 @@ async def run_scenario(
                                 headers={
                                     "Accept-Encoding": "identity",
                                     "User-Agent": f"HookStorm/{__version__} (+https://github.com/blvxx/HookStorm)",
-                                    "X-HookStorm-Run": run_id,
+                                    "X-HookStorm-Run": request_correlation_id,
                                     **verification_auth_headers,
                                 },
                                 timeout=verify_config["timeout_ms"] / 1000,
@@ -610,6 +620,7 @@ async def run_scenario(
         "tool": "HookStorm",
         "version": __version__,
         "run_id": run_id,
+        "correlation_run_id": request_correlation_id,
         "scenario": scenario["name"],
         "scenario_fingerprint": config_fingerprint,
         "target": reported_target,

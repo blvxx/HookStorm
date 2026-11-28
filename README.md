@@ -238,6 +238,14 @@ runs preflight, executes the scenario, compares and advances a cached baseline o
 successful run, and publishes a JUnit report. It does not run against feature branches or
 merge requests by default.
 
+## MCP server (optional)
+
+Install the optional MCP integration with `python -m pip install -e ".[mcp]"`, then run `hookstorm-mcp`. It exposes local tools to list and inspect run history, inspect scenarios without revealing payload values, analyze failures with scenario context, and (when explicitly enabled) replay one or several selected failed events.
+
+The server uses the local stdio transport and does not open a network port. Replay is disabled by default, requires `HOOKSTORM_MCP_ENABLE_REPLAY=1` and per-call `confirm=true`, and is restricted to loopback targets. It also checks that the source scenario and destination match the failed run unless explicit overrides are supplied.
+
+See [HookStorm MCP server](docs/mcp-server.md) for setup, tool details, and safety controls.
+
 ## Reports and history
 
 Choose a report format with `--format html|json|junit`. HTML is the default. JUnit produces a testcase for each delivery, including duplicates, so it can be consumed by CI systems.

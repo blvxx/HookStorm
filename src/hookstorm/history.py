@@ -176,7 +176,7 @@ def _sanitize_result(result: dict[str, Any]) -> dict[str, Any]:
     sanitized = {
         key: result[key]
         for key in (
-            "schema_version", "tool", "version", "run_id", "scenario",
+            "schema_version", "tool", "version", "run_id", "correlation_run_id", "scenario",
             "scenario_fingerprint", "target", "started_at", "duration_ms",
         )
         if key in result
@@ -272,6 +272,17 @@ def _validate_run_result(result: dict[str, Any], label: str) -> None:
         value = result.get(key)
         if not isinstance(value, str) or not value.strip():
             raise HistoryError(f"{label} {key} must be a non-empty string")
+    correlation_run_id = result.get("correlation_run_id")
+    if correlation_run_id is not None and (
+        not isinstance(correlation_run_id, str)
+        or not correlation_run_id
+        or len(correlation_run_id) > 128
+        or not correlation_run_id.isascii()
+        or any(ord(character) < 33 or ord(character) > 126 for character in correlation_run_id)
+    ):
+        raise HistoryError(
+            f"{label} correlation_run_id must contain 1–128 printable ASCII characters"
+        )
 
     if "duration_ms" in result:
         _require_finite_non_negative_number(result["duration_ms"], f"{label} duration_ms")
