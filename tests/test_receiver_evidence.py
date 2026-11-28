@@ -181,3 +181,17 @@ def test_receiver_evidence_rejects_paths_outside_root_and_oversized_files(
             root=root,
             event_id="evt_1A2B3C",
         )
+
+
+def test_receiver_evidence_rejects_boolean_schema_version(tmp_path: Path) -> None:
+    record = _record()
+    record["schema_version"] = True
+    _write(tmp_path, [record])
+    result = inspect_receiver_evidence(
+        "receiver.jsonl",
+        root=tmp_path,
+        event_id="evt_1A2B3C",
+    )
+    assert result["status"] == "unmatched"
+    assert result["evidence_integrity"]["ignored_records"] == 1
+    assert result["root_cause"]["confirmed"] is False
