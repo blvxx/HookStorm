@@ -10,6 +10,9 @@
 - Correlate provider records with local HookStorm runs only when stable event identity, payload fingerprint, event type/topic, target where available, and the saved scenario fingerprint agree.
 - Report observed provider outcomes separately from local fault-injection metadata; a local injected fault never masquerades as a confirmed root cause inside the provider's receiver.
 - Add a guarded local replay tool that requires explicit read-only pre- and post-replay business-state assertions, while preserving same-event identity and source-run correlation.
+- Add bounded Stripe Event listing with event-type/time filters, pagination, and the account-wide `delivery_success` filter; explicitly distinguish Event discovery from endpoint-specific delivery-attempt history.
+- Add a privacy-preserving structured receiver JSONL/NDJSON evidence reader that joins exact provider/event/request identifiers with local HookStorm runs and confirms only one consistent allowlisted receiver failure code from a complete source.
+- Keep receiver-side root-cause confirmation separate from provider HTTP observations and local HookStorm fault injection; unknown, mixed, conflicting, malformed, or truncated evidence remains unconfirmed.
 - Keep provider adapters read-only; retain explicit opt-in and loopback-only replay, and document the remaining receiver-side atomic-deduplication requirement.
 
 ## Unreleased
