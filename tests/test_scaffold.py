@@ -210,3 +210,78 @@ def test_update_workflow_install_ref_rejects_unrecognized_workflows(tmp_path) ->
 
     with pytest.raises(ValueError, match="exactly one pinned HookStorm install URL"):
         update_workflow_install_ref(workflow_path)
+
+
+def test_initialize_project_creates_gitlab_ci_config_on_default_branch_only(tmp_path) -> None:
+    written = initialize_project(root=tmp_path, ci_provider="gitlab")
+
+    scenario_path = tmp_path / "scenarios" / "webhook.yaml"
+    workflow_path = tmp_path / ".gitlab-ci.yml"
+    assert scenario_path in written
+    assert workflow_path in written
+    scenario = load_scenario(scenario_path)
+    assert scenario["events"][0]["id"] == "test.ping"
+
+    workflow = yaml.load(workflow_path.read_text(encoding="utf-8"), Loader=yaml.BaseLoader)
+    assert workflow["workflow"]["rules"][0]["if"] == (
+        "$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH"
+    )
+    assert workflow["workflow"]["rules"][1]["when"] == "never"
+    job = workflow["webhook-regression"]
+    assert job["image"] == "python:3.12-slim"
+    assert job["resource_group"] == "hookstorm-webhook-regression-baseline"
+    assert job["environment"]["name"] == "staging"
+    assert ".hookstorm-baselines/" in job["cache"]["paths"]
+    script = job["script"][0]
+    assert "HOOKSTORM_TARGET_URL" in script
+    assert "hookstorm doctor" in script
+    assert "hookstorm run" in script
+    assert "history compare-file" in script
+    assert "history export latest" in script
+    assert "junit: test-results/webhook-regression.xml" in workflow_path.read_text(
+        encoding="utf-8"
+    )
+    assert f"git+https://github.com/blvxx/HookStorm.git@{HOOKSTORM_INSTALL_REF}" in script
+
+
+def test_generated_gitlab_script_has_valid_shell_syntax(tmp_path) -> None:
+    bash = shutil.which("bash")
+    if bash is None:
+        pytest.skip("bash is not installed on this runner")
+
+    initialize_project(root=tmp_path, ci_provider="gitlab")
+    workflow = yaml.load(
+        (tmp_path / ".gitlab-ci.yml").read_text(encoding="utf-8"),
+        Loader=yaml.BaseLoader,
+    )
+    script = workflow["webhook-regression"]["script"][0]
+    result = subprocess.run(
+        [bash, "-n"],
+        input=script,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+
+
+def test_gitlab_ci_requires_root_config_path(tmp_path) -> None:
+    with pytest.raises(ValueError, match="project root as .gitlab-ci.yml"):
+        initialize_project(
+            root=tmp_path,
+            ci_provider="gitlab",
+            workflow_path="ci/gitlab.yml",
+        )
+
+
+def test_update_workflow_install_ref_supports_gitlab_config(tmp_path) -> None:
+    from hookstorm.scaffold import update_workflow_install_ref
+
+    initialize_project(root=tmp_path, ci_provider="gitlab")
+    workflow_path = tmp_path / ".gitlab-ci.yml"
+    original = workflow_path.read_text(encoding="utf-8")
+    new_ref = "c" * 40
+
+    assert update_workflow_install_ref(workflow_path, install_ref=new_ref) is True
+    updated = workflow_path.read_text(encoding="utf-8")
+    assert updated == original.replace(HOOKSTORM_INSTALL_REF, new_ref)
