@@ -3,12 +3,92 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 from pathlib import Path, PureWindowsPath
 
 HOOKSTORM_INSTALL_REF = "660240e1fe1b612da6ca64c2cf17f6daf0c9bac2"
 _SIGNATURE_PROVIDERS = {"generic", "stripe", "github", "shopify", "standard_webhooks"}
 _SAFE_PATH = re.compile(r"^[A-Za-z0-9._/-]+$")
+_INSTALL_REF_PATTERN = re.compile(
+    r"(git\+https://github\.com/blvxx/HookStorm\.git@)([0-9a-f]{40})"
+)
+_TEMPLATES = {
+    "generic": {
+        "signature_provider": "generic",
+        "event_type": "test.ping",
+        "event_id": "evt_hookstorm_generic_001",
+        "payload": {"test": True, "source": "hookstorm"},
+    },
+    "stripe": {
+        "signature_provider": "stripe",
+        "event_type": "payment_intent.succeeded",
+        "event_id": "evt_hookstorm_stripe_001",
+        "payload": {
+            "id": "evt_hookstorm_stripe_001",
+            "type": "payment_intent.succeeded",
+            "data": {"object": {
+                "id": "pi_hookstorm_test_001",
+                "object": "payment_intent",
+                "amount": 1250,
+                "currency": "usd",
+                "status": "succeeded",
+            }},
+        },
+    },
+    "github": {
+        "signature_provider": "github",
+        "event_type": "issues.opened",
+        "event_id": "evt_hookstorm_github_001",
+        "headers": {
+            "X-GitHub-Event": "issues",
+            "X-GitHub-Delivery": "evt_hookstorm_github_001",
+        },
+        "payload": {
+            "action": "opened",
+            "issue": {"number": 42, "title": "HookStorm integration test", "state": "open"},
+            "repository": {"full_name": "example/integration-tests"},
+        },
+    },
+    "shopify": {
+        "signature_provider": "shopify",
+        "event_type": "orders/create",
+        "event_id": "evt_hookstorm_shopify_001",
+        "headers": {
+            "X-Shopify-Topic": "orders/create",
+            "X-Shopify-Webhook-Id": "evt_hookstorm_shopify_001",
+            "X-Shopify-Shop-Domain": "example.invalid",
+        },
+        "payload": {
+            "id": 1001,
+            "email": "buyer@example.invalid",
+            "total_price": "12.50",
+            "currency": "USD",
+            "financial_status": "paid",
+        },
+    },
+    "standard-webhooks": {
+        "signature_provider": "standard_webhooks",
+        "event_type": "invoice.created",
+        "event_id": "evt_hookstorm_standard_001",
+        "payload": {
+            "type": "invoice.created",
+            "data": {"invoice_id": "inv_hookstorm_test_001", "amount": 1250},
+        },
+    },
+}
+
+
+def template_defaults(template: str) -> dict:
+    """Return a defensive copy of the selected starter template defaults."""
+    try:
+        defaults = _TEMPLATES[template]
+    except KeyError as exc:
+        choices = ", ".join(sorted(_TEMPLATES))
+        raise ValueError(f"Unknown template '{template}'. Choose: {choices}") from exc
+    return json.loads(json.dumps(defaults))
+
+
 
 
 def _relative_project_path(value: str, label: str) -> Path:
@@ -37,12 +117,29 @@ def _bounded_integer(value: object, label: str, *, minimum: int, maximum: int) -
 
 def render_scenario(
     *,
-    event_type: str = "test.ping",
-    event_id: str = "evt_hookstorm_init_001",
-    signature_provider: str = "generic",
+    template: str = "generic",
+    event_type: str | None = None,
+    event_id: str | None = None,
+    signature_provider: str | None = None,
+    payload: dict | None = None,
+    headers: dict | None = None,
     max_attempts: int = 1,
     duplicate_count: int = 0,
 ) -> str:
+    defaults = template_defaults(template)
+    event_type = event_type or defaults["event_type"]
+    event_id = event_id or defaults["event_id"]
+    signature_provider = signature_provider or defaults["signature_provider"]
+    payload = defaults["payload"] if payload is None else payload
+    headers = defaults.get("headers", {}) if headers is None else headers
+    if headers is not None:
+        if "X-GitHub-Event" in headers:
+            headers["X-GitHub-Event"] = event_type.split(".", 1)[0]
+        if "X-Shopify-Topic" in headers:
+            headers["X-Shopify-Topic"] = event_type
+        for header_name in ("X-GitHub-Delivery", "X-Shopify-Webhook-Id"):
+            if defaults["event_id"] == headers.get(header_name):
+                headers[header_name] = event_id
     if signature_provider not in _SIGNATURE_PROVIDERS:
         choices = ", ".join(sorted(_SIGNATURE_PROVIDERS))
         raise ValueError(f"Unsupported signature provider '{signature_provider}'. Choose: {choices}")
@@ -61,10 +158,19 @@ def render_scenario(
         f"  duplicate_count: {duplicate_count}\n" if duplicate_count else ""
     )
     backoff_setting = "  backoff_ms: 100\n" if max_attempts > 1 else ""
+    payload_json = json.dumps(payload, ensure_ascii=False, indent=2)
+    payload_block = "\n".join(f"      {line}" for line in payload_json.splitlines())
+    headers_block = ""
+    if headers:
+        headers_block = "\n    headers:\n" + "\n".join(
+            f"      {json.dumps(key, ensure_ascii=False)}: "
+            f"{json.dumps(value, ensure_ascii=False)}"
+            for key, value in headers.items()
+        )
 
     return f"""version: 1
-name: HookStorm webhook contract
-description: Replace the sample event and assertions with your staging webhook contract.
+name: HookStorm {template} webhook contract
+description: Review the sample payload and assertions, then adapt them to your receiver.
 delivery:
   signature: valid
   signature_provider: {signature_provider}
@@ -73,10 +179,9 @@ delivery:
   max_attempts: {max_attempts}
 {backoff_setting}events:
   - id: {json.dumps(event_type, ensure_ascii=False)}
-    event_id: {json.dumps(event_id, ensure_ascii=False)}
+    event_id: {json.dumps(event_id, ensure_ascii=False)}{headers_block}
     payload:
-      test: true
-      source: hookstorm
+{payload_block}
     expect_status: [200, 201, 202]
     expect_json:
       accepted: true
@@ -166,7 +271,6 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p .hookstorm .hookstorm-baselines test-results
-
           ALLOW_INSECURE_HTTP_ARGS=()
           if [[ "${{HOOKSTORM_ALLOW_INSECURE_HTTP:-0}}" == "1" ]]; then
             ALLOW_INSECURE_HTTP_ARGS+=(--allow-insecure-http)
@@ -228,26 +332,111 @@ jobs:
 """
 
 
+def render_gitlab_workflow(*, scenario_path: str) -> str:
+    """Render a GitLab CI pipeline restricted to the default branch.
+
+    Protected staging variables are therefore not exposed to untrusted feature
+    branches or merge-request pipelines by this generated starter configuration.
+    """
+    install = (
+        "git+https://github.com/blvxx/HookStorm.git@"
+        f"{HOOKSTORM_INSTALL_REF}"
+    )
+    return f"""workflow:
+  rules:
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+    - when: never
+
+stages:
+  - test
+
+webhook-regression:
+  stage: test
+  image: python:3.12-slim
+  resource_group: hookstorm-webhook-regression-baseline
+  environment:
+    name: staging
+  variables:
+    HOOKSTORM_SCENARIO: "{scenario_path}"
+    HOOKSTORM_LATENCY_THRESHOLD_PCT: "20"
+    HOOKSTORM_HISTORY_DB: ".hookstorm/history.sqlite3"
+    HOOKSTORM_BASELINE_FILE: ".hookstorm-baselines/webhook.json"
+    PIP_DISABLE_PIP_VERSION_CHECK: "1"
+  cache:
+    key: "hookstorm-baseline-$CI_DEFAULT_BRANCH"
+    paths:
+      - .hookstorm-baselines/
+  script:
+    - |
+      set -e
+      python -m pip install --disable-pip-version-check "{install}"
+      mkdir -p .hookstorm .hookstorm-baselines test-results
+      : "${{HOOKSTORM_TARGET_URL:?Set HOOKSTORM_TARGET_URL in GitLab CI/CD variables}}"
+
+      if [ "${{HOOKSTORM_ALLOW_INSECURE_HTTP:-0}}" = "1" ]; then
+        hookstorm doctor "$HOOKSTORM_SCENARIO" --connect --secret-env HOOKSTORM_SECRET --allow-insecure-http
+        hookstorm run "$HOOKSTORM_SCENARIO" --target "$HOOKSTORM_TARGET_URL" --allow-remote --allow-insecure-http \
+          --secret-env HOOKSTORM_SECRET --history-db "$HOOKSTORM_HISTORY_DB" \
+          --format junit --output test-results/webhook-regression.xml
+      else
+        hookstorm doctor "$HOOKSTORM_SCENARIO" --connect --secret-env HOOKSTORM_SECRET
+        hookstorm run "$HOOKSTORM_SCENARIO" --target "$HOOKSTORM_TARGET_URL" --allow-remote \
+          --secret-env HOOKSTORM_SECRET --history-db "$HOOKSTORM_HISTORY_DB" \
+          --format junit --output test-results/webhook-regression.xml
+      fi
+
+      if [ -f "$HOOKSTORM_BASELINE_FILE" ]; then
+        hookstorm history compare-file "$HOOKSTORM_BASELINE_FILE" \
+          --db "$HOOKSTORM_HISTORY_DB" \
+          --latency-threshold-pct "$HOOKSTORM_LATENCY_THRESHOLD_PCT"
+      else
+        echo "No baseline exists yet; creating the initial default-branch baseline."
+      fi
+
+      # Advance the cached baseline only after delivery assertions and comparison pass.
+      hookstorm history export latest --output "$HOOKSTORM_BASELINE_FILE" \
+        --db "$HOOKSTORM_HISTORY_DB"
+  artifacts:
+    when: always
+    expire_in: 14 days
+    reports:
+      junit: test-results/webhook-regression.xml
+    paths:
+      - test-results/webhook-regression.xml
+"""
+
 def initialize_project(
     *,
     root: str | Path = ".",
     scenario_path: str = "scenarios/webhook.yaml",
-    workflow_path: str = ".github/workflows/webhook-regression.yml",
-    event_type: str = "test.ping",
-    event_id: str = "evt_hookstorm_init_001",
-    signature_provider: str = "generic",
+    workflow_path: str | None = None,
+    ci_provider: str = "github",
+    template: str = "generic",
+    event_type: str | None = None,
+    event_id: str | None = None,
+    signature_provider: str | None = None,
     max_attempts: int = 1,
     duplicate_count: int = 0,
     include_workflow: bool = True,
     force: bool = False,
 ) -> list[Path]:
-    """Create a starter scenario and optional GitHub Actions workflow."""
+    """Create a starter scenario and optional GitHub Actions or GitLab CI workflow."""
+    if ci_provider not in {"github", "gitlab"}:
+        raise ValueError("ci_provider must be 'github' or 'gitlab'")
+    if workflow_path is None:
+        workflow_path = (
+            ".github/workflows/webhook-regression.yml"
+            if ci_provider == "github"
+            else ".gitlab-ci.yml"
+        )
     scenario_rel = _relative_project_path(scenario_path, "scenario path")
     workflow_rel = _relative_project_path(workflow_path, "workflow path")
     if scenario_rel == workflow_rel:
         raise ValueError("Scenario and workflow paths must be different")
-    if include_workflow and not workflow_rel.as_posix().startswith(".github/workflows/"):
-        raise ValueError("workflow path must be inside .github/workflows/")
+    if include_workflow and ci_provider == "github" and not workflow_rel.as_posix().startswith(".github/workflows/"):
+        raise ValueError("GitHub Actions workflow path must be inside .github/workflows/")
+    if include_workflow and ci_provider == "gitlab" and workflow_rel.as_posix() != ".gitlab-ci.yml":
+        raise ValueError("GitLab CI configuration must be written to the project root as .gitlab-ci.yml")
     if scenario_rel.suffix.lower() not in {".yaml", ".yml"}:
         raise ValueError("scenario path must end in .yaml or .yml")
     if include_workflow and workflow_rel.suffix.lower() not in {".yaml", ".yml"}:
@@ -261,6 +450,7 @@ def initialize_project(
     ):
         raise ValueError("Generated files must stay inside the current project directory")
     outputs = [(scenario_file, render_scenario(
+        template=template,
         event_type=event_type,
         event_id=event_id,
         signature_provider=signature_provider,
@@ -270,9 +460,13 @@ def initialize_project(
     if include_workflow:
         outputs.append((
             workflow_file,
-            render_workflow(
-                scenario_path=scenario_rel.as_posix(),
-                workflow_path=workflow_rel.as_posix(),
+            (
+                render_workflow(
+                    scenario_path=scenario_rel.as_posix(),
+                    workflow_path=workflow_rel.as_posix(),
+                )
+                if ci_provider == "github"
+                else render_gitlab_workflow(scenario_path=scenario_rel.as_posix())
             ),
         ))
 
@@ -298,3 +492,46 @@ def initialize_project(
                     pass
         raise
     return written
+
+
+
+def update_workflow_install_ref(
+    path: str | Path = ".github/workflows/webhook-regression.yml",
+    *,
+    install_ref: str = HOOKSTORM_INSTALL_REF,
+) -> bool:
+    """Refresh only the pinned HookStorm VCS reference in a generated workflow.
+
+    Returns True when the file changed and False when it was already current.
+    The operation preserves every other byte of the workflow.
+    """
+    if not re.fullmatch(r"[0-9a-f]{40}", install_ref):
+        raise ValueError("install_ref must be a full 40-character lowercase Git commit SHA")
+    workflow_path = Path(path)
+    try:
+        with workflow_path.open("r", encoding="utf-8", newline="") as source:
+            original = source.read()
+    except OSError as exc:
+        raise ValueError(f"Cannot read workflow file {workflow_path}: {exc}") from exc
+    matches = list(_INSTALL_REF_PATTERN.finditer(original))
+    if len(matches) != 1:
+        raise ValueError(
+            "Expected exactly one pinned HookStorm install URL "
+            f"in {workflow_path}, found {len(matches)}"
+        )
+    current_ref = matches[0].group(2)
+    if current_ref == install_ref:
+        return False
+    updated = _INSTALL_REF_PATTERN.sub(rf"\g<1>{install_ref}", original, count=1)
+    temporary_path = workflow_path.with_name(workflow_path.name + ".hookstorm.tmp")
+    try:
+        with temporary_path.open("w", encoding="utf-8", newline="") as destination:
+            destination.write(updated)
+        os.replace(temporary_path, workflow_path)
+    except OSError as exc:
+        try:
+            temporary_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise ValueError(f"Cannot update workflow file {workflow_path}: {exc}") from exc
+    return True

@@ -43,6 +43,14 @@ HookStorm помогает воспроизводить такие ситуац�
 
 **Требования:** Python 3.11 или новее.
 
+После установки попробуйте автономную демонстрацию. Она поднимает временный receiver на
+loopback, показывает повторную попытку и дублирующую доставку и сохраняет HTML-отчёт —
+внешний endpoint не нужен:
+
+```bash
+hookstorm demo
+```
+
 ### 1. Установка из исходников
 
 ```bash
@@ -182,12 +190,17 @@ HookStorm передаёт заголовок `X-HookStorm-Run`, чтобы rece
 
 | Команда | Назначение |
 |---|---|
+| `hookstorm demo` | Запустить локальную демонстрацию retry и duplicate без внешнего endpoint |
+| `hookstorm init --template stripe` | Создать стартовый сценарий с примером события и подписи провайдера |
+| `hookstorm init --ci-provider gitlab` | Создать pipeline для GitLab CI вместо GitHub Actions |
+| `hookstorm update-workflow` | Обновить SHA HookStorm в сгенерированном workflow после обновления |
+| `hookstorm watch FILE.yaml` | Перезапускать сценарий при изменении YAML-файла |
 | `hookstorm init` | Создать стартовый сценарий и GitHub Actions workflow |
 | `hookstorm init --no-workflow` | Создать только сценарий |
 | `hookstorm validate FILE.yaml` | Проверить YAML без отправки запросов |
 | `hookstorm doctor FILE.yaml` | Проверить конфигурацию и обязательные переменные окружения |
 | `hookstorm doctor FILE.yaml --connect` | Дополнительно проверить DNS/TCP и TLS; HTTP-запрос не отправляется |
-| `hookstorm run FILE.yaml --target URL` | Выполнить сценарий |
+| `hookstorm run FILE.yaml` | Выполнить сценарий с использованием `HOOKSTORM_TARGET_URL` (или указать `--target URL`) |
 | `hookstorm export-pytest FILE.yaml` | Сгенерировать pytest-интеграционный тест |
 | `hookstorm history list` | Показать последние локальные запуски |
 | `hookstorm history show RUN_ID` | Посмотреть подробности запуска |
@@ -195,6 +208,32 @@ HookStorm передаёт заголовок `X-HookStorm-Run`, чтобы rece
 | `hookstorm history export latest --output baseline.json` | Экспортировать очищенный переносимый baseline |
 
 Коды завершения: `0` — проверки пройдены, `1` — сценарий завершился, но одна или несколько проверок не прошли, `2` — ошибка конфигурации или выполнения.
+
+Для локальной разработки задайте `HOOKSTORM_TARGET_URL` один раз и не передавайте
+`--target` при каждом запуске `run` или `watch`. Явный `--target` имеет приоритет.
+HookStorm не загружает `.env` автоматически: передавайте переменные через shell
+или менеджер секретов.
+
+`hookstorm watch scenarios/webhook.yaml` выполняет запуск сразу, а затем отслеживает
+изменения файла с указанным интервалом (`--interval`, от 0.2 до 60 секунд). Ошибочные
+изменения отображаются, но не завершают watch; после следующего изменения проверки
+запустятся снова. Для остановки нажмите Ctrl+C. В интерактивном терминале также отображается прогресс каждой доставки; в CI и при перенаправлении вывода он не засоряет логи.
+
+`hookstorm init --template` поддерживает `generic`, `stripe`, `github`, `shopify`
+и `standard-webhooks`. Шаблоны содержат типичные примеры payload и формат подписи.
+GitHub- и Shopify-шаблоны также содержат типичные заголовки соответствующих провайдеров.
+Это отправная точка, а не полная спецификация: адаптируйте данные и проверки под свой receiver.
+
+После осознанного обновления HookStorm выполните `hookstorm update-workflow` в репозитории
+приложения. Команда меняет только SHA HookStorm в сгенерированном workflow и сохраняет
+остальные настройки. Для GitLab CI укажите `--path .gitlab-ci.yml`.
+
+Чтобы создать GitLab CI вместо GitHub Actions, выполните `hookstorm init --ci-provider gitlab`.
+Сгенерированный `.gitlab-ci.yml` намеренно запускается только в default branch. Добавьте
+`HOOKSTORM_TARGET_URL` и (для сценариев с подписью) `HOOKSTORM_SECRET` в GitLab CI/CD variables;
+секреты храните как masked и protected, а default branch защитите. Pipeline выполняет
+preflight, запускает сценарий, сравнивает и обновляет baseline только после успешной проверки
+и публикует JUnit-отчёт. По умолчанию feature branches и merge requests не запускают этот job.
 
 ## Отчёты и история
 

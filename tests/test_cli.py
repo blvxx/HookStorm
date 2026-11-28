@@ -442,3 +442,127 @@ events:
     assert "Injected faults: 1" in details
     assert "Connect fault" in details
     assert "before request reached the endpoint" in details
+
+
+def test_run_uses_hookstorm_target_url_when_target_flag_is_omitted(
+    receiver, tmp_path, monkeypatch, capsys
+) -> None:
+    base, _state = receiver
+    monkeypatch.setenv("HOOKSTORM_TARGET_URL", base)
+    scenario = _scenario_file(tmp_path)
+
+    assert main([
+        "run", scenario, "--format", "json", "--no-history",
+    ]) == 0
+    output = capsys.readouterr().out
+    assert '"success": true' in output
+
+
+def test_run_explains_how_to_configure_a_missing_target(
+    tmp_path, monkeypatch, capsys
+) -> None:
+    monkeypatch.delenv("HOOKSTORM_TARGET_URL", raising=False)
+    scenario = _scenario_file(tmp_path)
+
+    assert main(["run", scenario]) == 2
+    assert "Set HOOKSTORM_TARGET_URL or pass --target URL" in capsys.readouterr().err
+
+
+def test_demo_runs_locally_and_writes_a_report(tmp_path, capsys) -> None:
+    report = tmp_path / "demo.html"
+
+    assert main(["demo", "--output", str(report)]) == 0
+
+    output = capsys.readouterr().out
+    assert "HookStorm demo · PASS" in output
+    assert "Deliveries: 2/2 passed" in output
+    assert "HTTP attempts: 4" in output
+    assert report.is_file()
+
+
+def test_init_template_flag_selects_provider_and_event(tmp_path, monkeypatch, capsys) -> None:
+    from hookstorm.config import load_scenario
+
+    monkeypatch.chdir(tmp_path)
+    assert main(["init", "--template", "stripe", "--no-workflow"]) == 0
+
+    scenario = load_scenario(tmp_path / "scenarios" / "webhook.yaml")
+    assert scenario["delivery"]["signature_provider"] == "stripe"
+    assert scenario["events"][0]["id"] == "payment_intent.succeeded"
+    assert scenario["events"][0]["payload"]["type"] == "payment_intent.succeeded"
+    capsys.readouterr()
+
+
+def test_update_workflow_command_refreshes_only_the_install_pin(
+    tmp_path, monkeypatch, capsys
+) -> None:
+    from hookstorm.scaffold import HOOKSTORM_INSTALL_REF, initialize_project
+
+    monkeypatch.chdir(tmp_path)
+    initialize_project()
+    workflow = tmp_path / ".github" / "workflows" / "webhook-regression.yml"
+    old_ref = "b" * 40
+    original = workflow.read_text(encoding="utf-8").replace(HOOKSTORM_INSTALL_REF, old_ref)
+    workflow.write_text(original, encoding="utf-8")
+
+    assert main(["update-workflow"]) == 0
+    updated = workflow.read_text(encoding="utf-8")
+    assert HOOKSTORM_INSTALL_REF in updated
+    assert updated == original.replace(old_ref, HOOKSTORM_INSTALL_REF)
+    capsys.readouterr()
+
+
+def test_watch_executes_once_then_stops_cleanly_on_keyboard_interrupt(
+    receiver, tmp_path, monkeypatch, capsys
+) -> None:
+    base, _state = receiver
+    monkeypatch.setenv("HOOKSTORM_TARGET_URL", base)
+    scenario = _scenario_file(tmp_path)
+    report = tmp_path / "watch.html"
+
+    def stop_watching(_interval: float) -> None:
+        raise KeyboardInterrupt
+
+    monkeypatch.setattr("hookstorm.cli.time.sleep", stop_watching)
+    assert main([
+        "watch", scenario, "--no-history", "--output", str(report),
+    ]) == 130
+    assert report.is_file()
+    assert "Change detected" in capsys.readouterr().out
+
+
+def test_run_shows_live_delivery_progress_in_interactive_terminal(
+    receiver, tmp_path, monkeypatch
+) -> None:
+    import io
+
+    class TerminalStream(io.StringIO):
+        def isatty(self) -> bool:
+            return True
+
+    base, _state = receiver
+    monkeypatch.setenv("HOOKSTORM_TARGET_URL", base)
+    scenario = _scenario_file(tmp_path)
+    terminal = TerminalStream()
+    monkeypatch.setattr("hookstorm.cli.sys.stderr", terminal)
+
+    assert main([
+        "run", scenario, "--no-history", "--output", str(tmp_path / "progress.html"),
+    ]) == 0
+    assert "1/1" in terminal.getvalue()
+    assert "CLI history smoke" not in terminal.getvalue()
+
+
+def test_init_can_generate_gitlab_ci_config(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.chdir(tmp_path)
+
+    assert main(["init", "--ci-provider", "gitlab"]) == 0
+
+    scenario = tmp_path / "scenarios" / "webhook.yaml"
+    workflow = tmp_path / ".gitlab-ci.yml"
+    assert scenario.is_file()
+    assert workflow.is_file()
+    output = capsys.readouterr().out
+    assert "GitLab CI/CD variables" in output
+    assert "HOOKSTORM_TARGET_URL" in output
+    assert ".gitlab-ci.yml" in output

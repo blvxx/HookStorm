@@ -163,3 +163,158 @@ def test_initialize_project_rejects_invalid_retry_and_duplicate_options(
             max_attempts=max_attempts,
             duplicate_count=duplicate_count,
         )
+
+
+@pytest.mark.parametrize(
+    ("template", "provider", "event_type"),
+    [
+        ("generic", "generic", "test.ping"),
+        ("stripe", "stripe", "payment_intent.succeeded"),
+        ("github", "github", "issues.opened"),
+        ("shopify", "shopify", "orders/create"),
+        ("standard-webhooks", "standard_webhooks", "invoice.created"),
+    ],
+)
+def test_initialize_project_templates_create_valid_provider_payloads(
+    tmp_path, template: str, provider: str, event_type: str
+) -> None:
+    initialize_project(root=tmp_path, template=template, include_workflow=False)
+
+    scenario = load_scenario(tmp_path / "scenarios" / "webhook.yaml")
+    event = scenario["events"][0]
+    assert scenario["delivery"]["signature_provider"] == provider
+    assert event["id"] == event_type
+    assert isinstance(event["payload"], dict)
+    assert event["payload"]
+    if template == "github":
+        assert event["headers"]["X-GitHub-Event"] == "issues"
+        assert event["headers"]["X-GitHub-Delivery"] == event["event_id"]
+    if template == "shopify":
+        assert event["headers"]["X-Shopify-Topic"] == "orders/create"
+        assert event["headers"]["X-Shopify-Webhook-Id"] == event["event_id"]
+
+
+def test_update_workflow_install_ref_changes_only_the_hookstorm_pin(tmp_path) -> None:
+    from hookstorm.scaffold import update_workflow_install_ref
+
+    initialize_project(root=tmp_path)
+    workflow_path = tmp_path / ".github" / "workflows" / "webhook-regression.yml"
+    original = workflow_path.read_text(encoding="utf-8")
+    new_ref = "a" * 40
+
+    assert update_workflow_install_ref(workflow_path, install_ref=new_ref) is True
+    updated = workflow_path.read_text(encoding="utf-8")
+    assert updated == original.replace(HOOKSTORM_INSTALL_REF, new_ref)
+    assert update_workflow_install_ref(workflow_path, install_ref=new_ref) is False
+
+
+def test_update_workflow_install_ref_rejects_unrecognized_workflows(tmp_path) -> None:
+    from hookstorm.scaffold import update_workflow_install_ref
+
+    workflow_path = tmp_path / "custom.yml"
+    workflow_path.write_text("name: custom workflow\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="exactly one pinned HookStorm install URL"):
+        update_workflow_install_ref(workflow_path)
+
+
+def test_initialize_project_creates_gitlab_ci_config_on_default_branch_only(tmp_path) -> None:
+    written = initialize_project(root=tmp_path, ci_provider="gitlab")
+
+    scenario_path = tmp_path / "scenarios" / "webhook.yaml"
+    workflow_path = tmp_path / ".gitlab-ci.yml"
+    assert scenario_path in written
+    assert workflow_path in written
+    scenario = load_scenario(scenario_path)
+    assert scenario["events"][0]["id"] == "test.ping"
+
+    workflow = yaml.load(workflow_path.read_text(encoding="utf-8"), Loader=yaml.BaseLoader)
+    assert workflow["workflow"]["rules"][0]["if"] == (
+        "$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH"
+    )
+    assert workflow["workflow"]["rules"][1]["when"] == "never"
+    job = workflow["webhook-regression"]
+    assert job["image"] == "python:3.12-slim"
+    assert job["resource_group"] == "hookstorm-webhook-regression-baseline"
+    assert job["environment"]["name"] == "staging"
+    assert ".hookstorm-baselines/" in job["cache"]["paths"]
+    script = job["script"][0]
+    assert "HOOKSTORM_TARGET_URL" in script
+    assert '--target "$HOOKSTORM_TARGET_URL"' in script
+    assert "hookstorm doctor" in script
+    assert "hookstorm run" in script
+    assert "history compare-file" in script
+    assert "history export latest" in script
+    assert "junit: test-results/webhook-regression.xml" in workflow_path.read_text(
+        encoding="utf-8"
+    )
+    assert f"git+https://github.com/blvxx/HookStorm.git@{HOOKSTORM_INSTALL_REF}" in script
+
+
+def test_generated_gitlab_script_has_valid_shell_syntax(tmp_path) -> None:
+    bash = shutil.which("bash")
+    if bash is None:
+        pytest.skip("bash is not installed on this runner")
+
+    initialize_project(root=tmp_path, ci_provider="gitlab")
+    workflow = yaml.load(
+        (tmp_path / ".gitlab-ci.yml").read_text(encoding="utf-8"),
+        Loader=yaml.BaseLoader,
+    )
+    script = workflow["webhook-regression"]["script"][0]
+    result = subprocess.run(
+        [bash, "-n"],
+        input=script,
+        text=True,
+        capture_output=True,
+        check=False,
+    )
+    assert result.returncode == 0, result.stderr
+
+
+def test_gitlab_ci_requires_root_config_path(tmp_path) -> None:
+    with pytest.raises(ValueError, match="project root as .gitlab-ci.yml"):
+        initialize_project(
+            root=tmp_path,
+            ci_provider="gitlab",
+            workflow_path="ci/gitlab.yml",
+        )
+
+
+def test_update_workflow_install_ref_supports_gitlab_config(tmp_path) -> None:
+    from hookstorm.scaffold import update_workflow_install_ref
+
+    initialize_project(root=tmp_path, ci_provider="gitlab")
+    workflow_path = tmp_path / ".gitlab-ci.yml"
+    original = workflow_path.read_text(encoding="utf-8")
+    new_ref = "c" * 40
+
+    assert update_workflow_install_ref(workflow_path, install_ref=new_ref) is True
+    updated = workflow_path.read_text(encoding="utf-8")
+    assert updated == original.replace(HOOKSTORM_INSTALL_REF, new_ref)
+
+
+def test_provider_delivery_headers_follow_an_overridden_event_id(tmp_path) -> None:
+    initialize_project(
+        root=tmp_path,
+        template="shopify",
+        event_id="evt_custom_shopify_001",
+        include_workflow=False,
+    )
+
+    event = load_scenario(tmp_path / "scenarios" / "webhook.yaml")["events"][0]
+    assert event["event_id"] == "evt_custom_shopify_001"
+    assert event["headers"]["X-Shopify-Webhook-Id"] == "evt_custom_shopify_001"
+
+
+def test_provider_headers_follow_custom_event_types(tmp_path) -> None:
+    initialize_project(
+        root=tmp_path,
+        template="github",
+        event_type="pull_request.opened",
+        include_workflow=False,
+    )
+
+    event = load_scenario(tmp_path / "scenarios" / "webhook.yaml")["events"][0]
+    assert event["id"] == "pull_request.opened"
+    assert event["headers"]["X-GitHub-Event"] == "pull_request"

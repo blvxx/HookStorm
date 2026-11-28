@@ -43,6 +43,14 @@ Each retry and duplicate delivery reuses the event ID and request body. Timestam
 
 **Requirements:** Python 3.11 or newer.
 
+After installation, try the self-contained demo. It starts a temporary receiver on loopback,
+exercises retry and duplicate delivery, and writes an HTML report without contacting an
+external service:
+
+```bash
+hookstorm demo
+```
+
 ### 1. Install from source
 
 ```bash
@@ -182,12 +190,17 @@ HookStorm sends an `X-HookStorm-Run` header so the receiver can return state for
 
 | Command | Purpose |
 |---|---|
+| `hookstorm demo` | Run a local retry and duplicate demo; no external endpoint required |
+| `hookstorm init --template stripe` | Generate a provider-oriented starter scenario and GitHub Actions workflow |
+| `hookstorm init --ci-provider gitlab` | Generate a GitLab CI pipeline instead of GitHub Actions |
+| `hookstorm update-workflow` | Refresh the HookStorm commit pin in a generated workflow after upgrading |
+| `hookstorm watch FILE.yaml` | Rerun a scenario whenever its YAML file changes |
 | `hookstorm init` | Generate a starter scenario and a GitHub Actions workflow |
 | `hookstorm init --no-workflow` | Generate only a scenario |
 | `hookstorm validate FILE.yaml` | Validate YAML without sending requests |
 | `hookstorm doctor FILE.yaml` | Check configuration and required environment variables |
 | `hookstorm doctor FILE.yaml --connect` | Also check DNS/TCP and TLS connectivity; sends no HTTP request |
-| `hookstorm run FILE.yaml --target URL` | Execute the scenario |
+| `hookstorm run FILE.yaml` | Execute using `HOOKSTORM_TARGET_URL` (or override with `--target URL`) |
 | `hookstorm export-pytest FILE.yaml` | Generate a pytest integration test |
 | `hookstorm history list` | List recent local runs |
 | `hookstorm history show RUN_ID` | Inspect one stored run |
@@ -195,6 +208,34 @@ HookStorm sends an `X-HookStorm-Run` header so the receiver can return state for
 | `hookstorm history export latest --output baseline.json` | Export a portable sanitized baseline |
 
 Run exit codes: `0` means assertions passed, `1` means the run completed but an assertion failed, and `2` means a configuration or execution error occurred.
+
+Set `HOOKSTORM_TARGET_URL` once for local development and omit `--target` on subsequent
+`run` or `watch` commands. An explicit `--target` takes precedence. HookStorm does not
+automatically read `.env` files; load environment variables through your shell or secret manager.
+
+`hookstorm watch scenarios/webhook.yaml` runs immediately, then watches the scenario file
+using a configurable polling interval (`--interval`, 0.2–60 seconds). Invalid edits are
+reported without terminating watch mode; the next file change triggers another validation
+and run. Press Ctrl+C to stop. Interactive terminals also show live per-delivery progress; redirected and CI output stays concise.
+
+`hookstorm init --template` supports `generic`, `stripe`, `github`, `shopify`, and
+`standard-webhooks`. These templates provide representative sample payloads and signature
+providers; they are starting points, not complete provider schemas. GitHub and Shopify
+also include representative provider-specific headers. Adapt payloads and assertions to
+your receiver.
+
+After intentionally upgrading HookStorm, run `hookstorm update-workflow` in the application
+repository. It updates only the pinned HookStorm commit in the generated workflow; it does
+not overwrite other workflow customizations. For GitLab CI, pass `--path .gitlab-ci.yml`.
+The installed HookStorm version determines the new pin.
+
+To generate GitLab CI rather than GitHub Actions, run `hookstorm init --ci-provider gitlab`.
+The generated `.gitlab-ci.yml` intentionally runs only on the default branch. Configure
+`HOOKSTORM_TARGET_URL` and (for signed scenarios) `HOOKSTORM_SECRET` as GitLab CI/CD variables;
+use masked and protected settings for secrets and protect the default branch. The pipeline
+runs preflight, executes the scenario, compares and advances a cached baseline only after a
+successful run, and publishes a JUnit report. It does not run against feature branches or
+merge requests by default.
 
 ## Reports and history
 
