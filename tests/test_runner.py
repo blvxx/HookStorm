@@ -1006,7 +1006,7 @@ def test_deeply_nested_webhook_response_fails_cleanly(receiver, monkeypatch) -> 
     assert result["summary"]["success"] is False
     assert attempt["status_code"] == 200
     assert attempt["error"] == (
-        "response JSON is nested too deeply to compare safely"
+        "response JSON nesting exceeds the maximum depth of 128"
     )
 
 
@@ -1038,5 +1038,5 @@ def test_deeply_nested_verification_response_fails_cleanly(
     assert result["summary"]["success"] is False
     assert result["verification"]["status_code"] == 200
     assert result["verification"]["error"] == (
-        "verification response JSON is nested too deeply to compare safely"
+        "verification response JSON nesting exceeds the maximum depth of 128"
     )
