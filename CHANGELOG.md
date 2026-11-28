@@ -4,6 +4,8 @@
 
 ### Reliability and safety hardening
 
+- Require setuptools 84.1.0 or newer for package builds, avoiding the affected range in the Windows legacy wheel-installation advisory (GHSA-xmj3-9gf7-h52w).
+
 - Reject case-insensitive duplicate event request headers to avoid ambiguous HTTP field values.
 
 - Keep the `:memory:` SQLite history database alive across save/list/show operations within one process.
