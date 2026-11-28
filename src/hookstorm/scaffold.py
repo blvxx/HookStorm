@@ -11,7 +11,7 @@ HOOKSTORM_INSTALL_REF = "660240e1fe1b612da6ca64c2cf17f6daf0c9bac2"
 _SIGNATURE_PROVIDERS = {"generic", "stripe", "github", "shopify", "standard_webhooks"}
 _SAFE_PATH = re.compile(r"^[A-Za-z0-9._/-]+$")
 _INSTALL_REF_PATTERN = re.compile(
-    r"(git\\+https://github\\.com/blvxx/HookStorm\\.git@)([0-9a-f]{40})"
+    r"(git\+https://github\.com/blvxx/HookStorm\.git@)([0-9a-f]{40})"
 )
 _TEMPLATES = {
     "generic": {
