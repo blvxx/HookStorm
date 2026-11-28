@@ -537,7 +537,7 @@ def list_runs(
             item.update(result_metrics(result))
             output.append(item)
         return output
-    except (sqlite3.Error, json.JSONDecodeError) as exc:
+    except (RecursionError, sqlite3.Error, json.JSONDecodeError) as exc:
         raise HistoryError(f"Cannot read HookStorm history: {exc}") from exc
     finally:
         connection.close()
@@ -568,7 +568,7 @@ def get_run(run_id: str, path: str | Path | None = None) -> dict[str, Any]:
             "database_run_id": row["run_id"],
         }
         return result
-    except (sqlite3.Error, json.JSONDecodeError) as exc:
+    except (RecursionError, sqlite3.Error, json.JSONDecodeError) as exc:
         raise HistoryError(f"Cannot read run '{run_id}': {exc}") from exc
     finally:
         connection.close()
@@ -861,7 +861,7 @@ def load_history_export(source: str | Path) -> dict[str, Any]:
         )
     except OSError as exc:
         raise HistoryError(f"Cannot read baseline file '{location}': {exc}") from exc
-    except (json.JSONDecodeError, UnicodeDecodeError) as exc:
+    except (RecursionError, json.JSONDecodeError, UnicodeDecodeError) as exc:
         raise HistoryError(f"Baseline file '{location}' is not valid JSON: {exc}") from exc
 
     if not isinstance(document, dict):
@@ -890,7 +890,7 @@ def load_history_export(source: str | Path) -> dict[str, Any]:
     try:
         safe_result = _sanitize_result(result)
         result_metrics(safe_result)
-    except (KeyError, TypeError, ValueError) as exc:
+    except (KeyError, RecursionError, TypeError, ValueError) as exc:
         raise HistoryError(f"Baseline run contains invalid metrics: {exc}") from exc
     return safe_result
 
