@@ -304,3 +304,16 @@ def test_provider_delivery_headers_follow_an_overridden_event_id(tmp_path) -> No
     event = load_scenario(tmp_path / "scenarios" / "webhook.yaml")["events"][0]
     assert event["event_id"] == "evt_custom_shopify_001"
     assert event["headers"]["X-Shopify-Webhook-Id"] == "evt_custom_shopify_001"
+
+
+def test_provider_headers_follow_custom_event_types(tmp_path) -> None:
+    initialize_project(
+        root=tmp_path,
+        template="github",
+        event_type="pull_request.opened",
+        include_workflow=False,
+    )
+
+    event = load_scenario(tmp_path / "scenarios" / "webhook.yaml")["events"][0]
+    assert event["id"] == "pull_request.opened"
+    assert event["headers"]["X-GitHub-Event"] == "pull_request"
