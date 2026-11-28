@@ -661,7 +661,21 @@ class StripeEventAdapter:
 class ShopifyAppLogsAdapter:
     """Read Shopify webhook log entries through the authenticated Shopify CLI 5.1+."""
 
-    _ALLOWED_SINCE = {"1h", "6h", "12h", "24h"}
+    _MAX_LOOKBACK_HOURS = 168
+    _MAX_WINDOW_HOURS = 24
+
+    @classmethod
+    def _duration_hours(cls, value: Any, name: str) -> int:
+        if not isinstance(value, str):
+            raise ProviderSourceError(f"{name} must be a relative duration such as 24h or 2d")
+        match = re.fullmatch(r"(0|[1-9][0-9]*)(h|d)", value)
+        if match is None:
+            raise ProviderSourceError(f"{name} must use whole hours or days, e.g. 24h or 2d")
+        amount = int(match.group(1))
+        hours = amount * (24 if match.group(2) == "d" else 1)
+        if hours < 1 or hours > cls._MAX_LOOKBACK_HOURS:
+            raise ProviderSourceError(f"{name} must be between 1 hour and 7 days")
+        return hours
 
     def __init__(
         self,
@@ -789,6 +803,7 @@ class ShopifyAppLogsAdapter:
         self,
         *,
         since: str = "1h",
+        until: str | None = None,
         limit: int = 20,
         status: str | None = None,
         store: str | None = None,
@@ -799,8 +814,18 @@ class ShopifyAppLogsAdapter:
         import subprocess
         from pathlib import Path
 
-        if since not in self._ALLOWED_SINCE:
-            raise ProviderSourceError("since must be one of: 1h, 6h, 12h, 24h")
+        since_hours = self._duration_hours(since, "since")
+        if until is None:
+            if since_hours > self._MAX_WINDOW_HOURS:
+                raise ProviderSourceError(
+                    "since windows may be at most 24 hours; set until to query older periods"
+                )
+        else:
+            until_hours = self._duration_hours(until, "until")
+            if since_hours <= until_hours:
+                raise ProviderSourceError("since must be earlier than until")
+            if since_hours - until_hours > self._MAX_WINDOW_HOURS:
+                raise ProviderSourceError("Shopify log query windows may not exceed 24 hours")
         if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 1000:
             raise ProviderSourceError("limit must be an integer between 1 and 1000")
         if status not in {None, "success", "failure"}:
@@ -833,6 +858,8 @@ class ShopifyAppLogsAdapter:
             "--json",
             "--no-input",
         ]
+        if until is not None:
+            command.extend(["--until", until])
         if status is not None:
             command.extend(["--status", status])
         if store is not None:
