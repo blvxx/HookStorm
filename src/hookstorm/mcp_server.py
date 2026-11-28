@@ -6,12 +6,18 @@ import json
 import os
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, urlunsplit
 
 from hookstorm import __version__
 from hookstorm.config import load_scenario, scenario_fingerprint
 from hookstorm.history import HistoryError, get_run, list_runs, save_run
-from hookstorm.runner import run_scenario
+from hookstorm.providers import (
+    GitHubWebhookAdapter,
+    ShopifyAppLogsAdapter,
+    StripeEventAdapter,
+    canonical_json_fingerprint,
+)
+from hookstorm.runner import probe_business_state, run_scenario
 from hookstorm.safety import validate_target
 
 _MAX_SCENARIO_FILE_BYTES = 2 * 1024 * 1024
@@ -488,6 +494,262 @@ def _target_matches_history(target: str, historical_target: str) -> bool:
     return target == historical_target
 
 
+def _normalized_target(value: str | None) -> str | None:
+    """Normalize a target for comparison without retaining query strings."""
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        parsed = urlsplit(value)
+        if parsed.scheme.lower() not in {"http", "https"} or not parsed.hostname:
+            return None
+        if parsed.username or parsed.password:
+            return None
+        hostname = parsed.hostname.encode("idna").decode("ascii").lower()
+        port = parsed.port
+    except (UnicodeError, ValueError):
+        return None
+    netloc = f"[{hostname}]" if ":" in hostname else hostname
+    if port is not None and not (
+        (parsed.scheme.lower() == "http" and port == 80)
+        or (parsed.scheme.lower() == "https" and port == 443)
+    ):
+        netloc = f"{netloc}:{port}"
+    return urlunsplit((parsed.scheme.lower(), netloc, parsed.path, "", ""))
+
+
+def _correlate_github_delivery(
+    external: dict[str, Any],
+    run: dict[str, Any],
+    scenario: dict[str, Any],
+) -> dict[str, Any]:
+    """Join provider evidence to one local run only when stable evidence agrees."""
+    request = external.get("request", {})
+    request_headers = request.get("headers", {})
+    provider_guid = external.get("guid")
+    header_guid = request_headers.get("x-github-delivery")
+    provider_identifiers_match = (
+        provider_guid is None
+        or header_guid is None
+        or provider_guid == header_guid
+    )
+    payload_fingerprint = request.get("payload_sha256")
+    provider_event = request_headers.get("x-github-event")
+    provider_action = external.get("action")
+    provider_event_type = (
+        f"{provider_event}.{provider_action}"
+        if provider_event and provider_action
+        else provider_event
+    )
+
+    exact_id_events = [
+        event
+        for event in scenario.get("events", [])
+        if provider_identifiers_match
+        and provider_guid is not None
+        and event.get("event_id") == provider_guid
+    ]
+    payload_events = []
+    if isinstance(payload_fingerprint, str):
+        for event in scenario.get("events", []):
+            try:
+                event_fingerprint, _ = canonical_json_fingerprint(event.get("payload", {}))
+            except ValueError:
+                continue
+            type_matches = (
+                provider_event_type is None
+                or event.get("id") == provider_event_type
+                or event.get("id") == provider_event
+            )
+            if event_fingerprint == payload_fingerprint and type_matches:
+                payload_events.append(event)
+
+    candidates = exact_id_events if exact_id_events else payload_events
+    event = candidates[0] if len(candidates) == 1 else None
+    scenario_matches = (
+        run.get("scenario") == scenario.get("name")
+        and isinstance(run.get("scenario_fingerprint"), str)
+        and run.get("scenario_fingerprint") == scenario_fingerprint(scenario)
+    )
+    event_id_matches_provider = bool(
+        event is not None
+        and provider_identifiers_match
+        and provider_guid is not None
+        and event.get("event_id") == provider_guid
+    )
+    payload_matches = None
+    event_type_matches = None
+    local_delivery = None
+    if event is not None:
+        try:
+            event_fingerprint, _ = canonical_json_fingerprint(event.get("payload", {}))
+            payload_matches = (
+                isinstance(payload_fingerprint, str)
+                and event_fingerprint == payload_fingerprint
+            )
+        except ValueError:
+            payload_matches = False
+        event_type_matches = (
+            provider_event_type is None
+            or event.get("id") == provider_event_type
+            or event.get("id") == provider_event
+        )
+        local_matches = [
+            item
+            for item in run.get("deliveries", [])
+            if item.get("event_id") == event.get("event_id")
+            and item.get("event_type") == event.get("id")
+        ]
+        if len(local_matches) == 1:
+            local_delivery = local_matches[0]
+
+    provider_target = _normalized_target(request.get("target"))
+    local_target = _normalized_target(run.get("target"))
+    target_matches = (
+        provider_target == local_target
+        if provider_target is not None and local_target is not None
+        else None
+    )
+    local_attempts = local_delivery.get("attempts", []) if local_delivery else []
+    latest_attempt = local_attempts[-1] if local_attempts else {}
+    local_status = latest_attempt.get("status_code")
+    provider_status = external.get("status_code")
+    status_codes_match = (
+        local_status == provider_status
+        if isinstance(local_status, int) and isinstance(provider_status, int)
+        else None
+    )
+
+    confirmed_correlation = bool(
+        event is not None
+        and local_delivery is not None
+        and scenario_matches
+        and event_id_matches_provider
+        and payload_matches is True
+        and event_type_matches is True
+        and target_matches is True
+        and provider_identifiers_match
+    )
+    if confirmed_correlation:
+        correlation_status = "confirmed"
+    elif event is not None or local_delivery is not None or payload_events:
+        correlation_status = "partial"
+    else:
+        correlation_status = "unmatched"
+
+    confirmed_facts = []
+    if isinstance(provider_status, int):
+        confirmed_facts.append(
+            {
+                "source": "github_webhook_delivery_api",
+                "fact": "GitHub recorded an HTTP response status for this delivery",
+                "status_code": provider_status,
+                "delivered_at": external.get("delivered_at"),
+            }
+        )
+    if isinstance(local_status, int):
+        confirmed_facts.append(
+            {
+                "source": "hookstorm_local_history",
+                "fact": "HookStorm recorded this HTTP status for the matched local event",
+                "status_code": local_status,
+                "run_id": run.get("run_id"),
+                "event_id": event.get("event_id") if event else None,
+            }
+        )
+
+    injected_fault = latest_attempt.get("injected_fault")
+    if injected_fault:
+        root_cause_confirmed = True
+        root_cause = (
+            "HookStorm recorded an explicitly configured client-side fault: "
+            f"{injected_fault}."
+        )
+        root_cause_source = "hookstorm_local_history"
+    else:
+        root_cause_confirmed = False
+        root_cause = None
+        root_cause_source = None
+
+    replay_target = run.get("target", "")
+    try:
+        _validate_replay_target(replay_target)
+        loopback_target = True
+    except (TypeError, ValueError):
+        loopback_target = False
+
+    replay_candidate = bool(
+        confirmed_correlation
+        and event_id_matches_provider
+        and local_delivery is not None
+        and not local_delivery.get("passed")
+        and loopback_target
+    )
+    return {
+        "status": correlation_status,
+        "match_basis": (
+            "provider_delivery_guid"
+            if event_id_matches_provider
+            else "canonical_payload_sha256_and_event_type"
+            if event is not None and payload_matches is True
+            else None
+        ),
+        "scenario_matches_recorded_fingerprint": scenario_matches,
+        "provider_event_guid_matches_local_event_id": event_id_matches_provider,
+        "provider_guid_matches_request_header": provider_identifiers_match,
+        "payload_fingerprint_matches": payload_matches,
+        "event_type_matches": event_type_matches,
+        "provider_event_type": provider_event_type,
+        "local_event": (
+            {
+                "event_id": event.get("event_id"),
+                "event_type": event.get("id"),
+                "passed": bool(local_delivery.get("passed")),
+                "attempt_count": len(local_attempts),
+                "last_status_code": local_status,
+                "diagnosis": (
+                    _diagnose_delivery(local_delivery)
+                    if not local_delivery.get("passed")
+                    else None
+                ),
+            }
+            if event is not None and local_delivery is not None
+            else None
+        ),
+        "target_matches": target_matches,
+        "status_codes_match": status_codes_match,
+        "confirmed_facts": confirmed_facts,
+        "root_cause": {
+            "confirmed": root_cause_confirmed,
+            "value": root_cause,
+            "source": root_cause_source,
+            "boundary": (
+                "Provider and HTTP status records establish what response was observed, "
+                "not the internal application failure that produced it. A status code alone "
+                "does not prove a signature, database, queue, or business-logic defect."
+            ),
+        },
+        "replay_readiness": {
+            "eligible_for_guarded_replay": replay_candidate,
+            "target_is_loopback": loopback_target,
+            "requires_server_opt_in": "HOOKSTORM_MCP_ENABLE_REPLAY=1",
+            "requires_per_call_confirmation": True,
+            "preserves_event_id_and_run_correlation": True,
+            "idempotency_status": "requires_pre_and_post_state_probes",
+            "guarded_tool": "hookstorm_replay_with_idempotency_guard",
+            "note": (
+                "Correlation does not prove receiver-side idempotency. The guarded replay tool "
+                "requires a read-only precondition and postcondition from the scenario's verify endpoint. "
+                "Provider redelivery is not triggered by this read-only adapter."
+            ),
+        },
+        "limitations": [
+            "A confirmed match requires the original scenario fingerprint and canonical payload fingerprint to match.",
+            "Payload fingerprints are used for comparison; payload values are never returned.",
+            "Provider delivery metadata does not expose the receiver's internal logs or prove its root cause.",
+        ],
+    }
+
+
 def _prepare_replay(
     *,
     run: dict[str, Any],
@@ -561,11 +823,253 @@ def _prepare_replay(
     }
 
 
+
+
+
+def _correlate_stripe_event(
+    external: dict[str, Any],
+    run: dict[str, Any],
+    scenario: dict[str, Any],
+) -> dict[str, Any]:
+    """Match a canonical Stripe event to local test data without calling it a delivery match."""
+    scenario_matches = (
+        run.get("scenario") == scenario.get("name")
+        and isinstance(run.get("scenario_fingerprint"), str)
+        and run.get("scenario_fingerprint") == scenario_fingerprint(scenario)
+    )
+    event_id = external.get("event_id")
+    event_type = external.get("event_type")
+    event_hash = external.get("payload", {}).get("sha256")
+    event_candidates = [
+        item
+        for item in scenario.get("events", [])
+        if item.get("event_id") == event_id
+    ]
+    if len(event_candidates) == 1:
+        event = event_candidates[0]
+    elif not event_candidates and isinstance(event_hash, str):
+        matches = []
+        for item in scenario.get("events", []):
+            try:
+                fingerprint, _ = canonical_json_fingerprint(item.get("payload", {}))
+            except ValueError:
+                continue
+            if fingerprint == event_hash and item.get("id") == event_type:
+                matches.append(item)
+        event = matches[0] if len(matches) == 1 else None
+    else:
+        event = None
+
+    payload_matches = None
+    event_type_matches = None
+    local_delivery = None
+    if event is not None:
+        try:
+            fingerprint, _ = canonical_json_fingerprint(event.get("payload", {}))
+            payload_matches = fingerprint == event_hash
+        except ValueError:
+            payload_matches = False
+        event_type_matches = event.get("id") == event_type
+        local_matches = [
+            item
+            for item in run.get("deliveries", [])
+            if item.get("event_id") == event.get("event_id")
+            and item.get("event_type") == event.get("id")
+        ]
+        if len(local_matches) == 1:
+            local_delivery = local_matches[0]
+
+    id_matches = bool(event is not None and event.get("event_id") == event_id)
+    confirmed = bool(
+        scenario_matches
+        and event is not None
+        and local_delivery is not None
+        and id_matches
+        and payload_matches is True
+        and event_type_matches is True
+    )
+    return {
+        "status": "confirmed" if confirmed else "partial" if event is not None else "unmatched",
+        "match_basis": (
+            "stripe_event_id_and_payload_sha256"
+            if id_matches and payload_matches is True
+            else "payload_sha256_and_event_type"
+            if payload_matches is True and event_type_matches is True
+            else None
+        ),
+        "scenario_matches_recorded_fingerprint": scenario_matches,
+        "stripe_event_id_matches_local_event_id": id_matches,
+        "payload_fingerprint_matches": payload_matches,
+        "event_type_matches": event_type_matches,
+        "local_event": (
+            {
+                "event_id": event.get("event_id"),
+                "event_type": event.get("id"),
+                "passed": bool(local_delivery.get("passed")),
+                "attempt_count": len(local_delivery.get("attempts", [])),
+                "diagnosis": (
+                    _diagnose_delivery(local_delivery)
+                    if not local_delivery.get("passed")
+                    else None
+                ),
+            }
+            if event is not None and local_delivery is not None
+            else None
+        ),
+        "delivery_attempt_correlation": "not_available_from_stripe_events_api",
+        "root_cause": {
+            "confirmed": False,
+            "value": None,
+            "boundary": (
+                "The Stripe Events API confirms event identity and content, not whether a "
+                "specific endpoint delivery failed or why the receiver behaved as it did."
+            ),
+        },
+    }
+
+
+
+
+
+def _correlate_shopify_delivery(
+    external: dict[str, Any],
+    run: dict[str, Any],
+    scenario: dict[str, Any],
+) -> dict[str, Any]:
+    """Match one Shopify CLI log entry to one local run using only stable evidence."""
+    scenario_matches = (
+        run.get("scenario") == scenario.get("name")
+        and isinstance(run.get("scenario_fingerprint"), str)
+        and run.get("scenario_fingerprint") == scenario_fingerprint(scenario)
+    )
+    external_event_id = external.get("event_id")
+    external_hash = external.get("payload_sha256")
+    external_topic = external.get("topic")
+    external_target = _normalized_target(external.get("target"))
+    candidates = [
+        item
+        for item in scenario.get("events", [])
+        if external_event_id is not None and item.get("event_id") == external_event_id
+    ]
+    match_basis = "shopify_event_id" if len(candidates) == 1 else None
+    if len(candidates) != 1 and isinstance(external_hash, str):
+        payload_matches = []
+        for item in scenario.get("events", []):
+            try:
+                fingerprint, _ = canonical_json_fingerprint(item.get("payload", {}))
+            except ValueError:
+                continue
+            topic_matches = (
+                external_topic is None
+                or item.get("id") == external_topic
+            )
+            if fingerprint == external_hash and topic_matches:
+                payload_matches.append(item)
+        candidates = payload_matches
+        if len(candidates) == 1:
+            match_basis = "payload_sha256_and_topic"
+
+    event = candidates[0] if len(candidates) == 1 else None
+    local_delivery = None
+    payload_matches = None
+    topic_matches = None
+    id_matches = False
+    target_matches = None
+    if event is not None:
+        id_matches = (
+            external_event_id is not None
+            and event.get("event_id") == external_event_id
+        )
+        try:
+            fingerprint, _ = canonical_json_fingerprint(event.get("payload", {}))
+            payload_matches = isinstance(external_hash, str) and fingerprint == external_hash
+        except ValueError:
+            payload_matches = False
+        topic_matches = external_topic is None or event.get("id") == external_topic
+        matches = [
+            item
+            for item in run.get("deliveries", [])
+            if item.get("event_id") == event.get("event_id")
+            and item.get("event_type") == event.get("id")
+        ]
+        if len(matches) == 1:
+            local_delivery = matches[0]
+        local_target = _normalized_target(run.get("target"))
+        target_matches = (
+            external_target == local_target
+            if external_target is not None and local_target is not None
+            else None
+        )
+
+    confirmed = bool(
+        scenario_matches
+        and event is not None
+        and local_delivery is not None
+        and id_matches
+        and payload_matches is True
+        and topic_matches is True
+        and target_matches is True
+    )
+    if confirmed:
+        status = "confirmed"
+    elif event is not None:
+        status = "partial"
+    else:
+        status = "unmatched"
+    provider_status = external.get("status_code")
+    return {
+        "status": status,
+        "match_basis": match_basis,
+        "scenario_matches_recorded_fingerprint": scenario_matches,
+        "shopify_event_id_matches_local_event_id": id_matches,
+        "payload_fingerprint_matches": payload_matches,
+        "topic_matches": topic_matches,
+        "target_matches": target_matches,
+        "provider_status_code": provider_status,
+        "local_event": (
+            {
+                "event_id": event.get("event_id"),
+                "event_type": event.get("id"),
+                "passed": bool(local_delivery.get("passed")),
+                "attempt_count": len(local_delivery.get("attempts", [])),
+                "diagnosis": (
+                    _diagnose_delivery(local_delivery)
+                    if not local_delivery.get("passed")
+                    else None
+                ),
+            }
+            if event is not None and local_delivery is not None
+            else None
+        ),
+        "root_cause": {
+            "confirmed": False,
+            "value": None,
+            "boundary": (
+                "A Shopify webhook log status is an observed delivery outcome. It does not "
+                "establish the internal application failure or whether a business effect committed."
+            ),
+        },
+        "replay_readiness": {
+            "eligible_for_guarded_replay": bool(
+                confirmed
+                and local_delivery is not None
+                and not local_delivery.get("passed")
+            ),
+            "idempotency_status": "requires_pre_and_post_state_probes",
+            "guarded_tool": "hookstorm_replay_with_idempotency_guard",
+            "provider_redelivery_performed": False,
+        },
+    }
+
+
 def create_server(
     *,
     history_db: str | Path | None = None,
     scenario_root: str | Path | None = None,
     enable_replay: bool | None = None,
+    github_http_client: Any | None = None,
+    stripe_http_client: Any | None = None,
+    shopify_cli_runner: Any | None = None,
 ):
     """Create the local MCP server; injected paths make its tools testable."""
     try:
@@ -590,7 +1094,12 @@ def create_server(
             "History contains sanitized metadata, not request payloads or response bodies. "
             "Webhook replay is disabled unless explicitly enabled in the server environment, "
             "requires failed events, an explicit target, and per-call confirmation. "
-            "Replay targets are loopback-only."
+            "Replay targets are loopback-only. If HOOKSTORM_GITHUB_TOKEN is configured, "
+            "read-only tools can inspect repository webhook delivery records from GitHub. "
+            "Provider HTTP statuses are evidence of observed responses, not automatic proof "
+            "of an internal root cause. Use the guarded replay tool when a scenario has a read-only "
+            "verify endpoint; it requires pre- and post-replay state assertions and keeps the same "
+            "event ID and source-run correlation value."
         ),
     )
 
@@ -1061,6 +1570,308 @@ def create_server(
                 "Search is limited to the newest lookback_runs records in local HookStorm history.",
                 "History contains sanitized attempt metadata, not request payloads, header values, or response bodies.",
             ],
+        }
+
+
+    @server.tool()
+    def hookstorm_list_github_deliveries(
+        owner: str,
+        repo: str,
+        hook_id: int,
+        limit: int = 20,
+        status: str | None = None,
+    ) -> dict[str, Any]:
+        """List external GitHub repository webhook deliveries; performs read-only API calls."""
+        with GitHubWebhookAdapter(client=github_http_client) as adapter:
+            deliveries = adapter.list_deliveries(
+                owner,
+                repo,
+                hook_id,
+                limit=limit,
+                status=status,
+            )
+        return {
+            "provider": "github",
+            "source": "github_repository_webhook_delivery_api",
+            "count": len(deliveries),
+            "deliveries": deliveries,
+            "read_only": True,
+            "limitations": [
+                "The tool reads delivery metadata only; it does not redeliver provider events.",
+                "Use hookstorm_inspect_github_delivery for one delivery's request/response metadata.",
+            ],
+        }
+
+    @server.tool()
+    def hookstorm_inspect_github_delivery(
+        owner: str,
+        repo: str,
+        hook_id: int,
+        delivery_id: int,
+        run_id: str | None = None,
+        scenario_path: str | None = None,
+    ) -> dict[str, Any]:
+        """Inspect one GitHub delivery and optionally correlate it with a local HookStorm run."""
+        if (run_id is None) != (scenario_path is None):
+            raise ValueError("run_id and scenario_path must be supplied together")
+
+        with GitHubWebhookAdapter(client=github_http_client) as adapter:
+            external = adapter.get_delivery(
+                owner,
+                repo,
+                hook_id,
+                delivery_id,
+            )
+
+        result: dict[str, Any] = {
+            "provider": "github",
+            "source": "github_repository_webhook_delivery_api",
+            "delivery": external,
+            "read_only": True,
+        }
+        if run_id is not None and scenario_path is not None:
+            run = get_run(run_id, history_db)
+            _, scenario = _load_scenario(scenario_path, root)
+            result["correlation"] = _correlate_github_delivery(
+                external,
+                run,
+                scenario,
+            )
+        else:
+            result["correlation"] = {
+                "status": "not_requested",
+                "instruction": "Pass both run_id and scenario_path to attempt evidence-based correlation.",
+            }
+        return result
+
+
+    @server.tool()
+    def hookstorm_retrieve_stripe_event(
+        event_id: str,
+        run_id: str | None = None,
+        scenario_path: str | None = None,
+    ) -> dict[str, Any]:
+        """Retrieve one Stripe Event object; it does not retrieve endpoint delivery attempts."""
+        if (run_id is None) != (scenario_path is None):
+            raise ValueError("run_id and scenario_path must be supplied together")
+        with StripeEventAdapter(client=stripe_http_client) as adapter:
+            external = adapter.get_event(event_id)
+        result: dict[str, Any] = {
+            **external,
+            "read_only": True,
+        }
+        if run_id is not None and scenario_path is not None:
+            run = get_run(run_id, history_db)
+            _, scenario = _load_scenario(scenario_path, root)
+            result["correlation"] = _correlate_stripe_event(
+                external,
+                run,
+                scenario,
+            )
+        else:
+            result["correlation"] = {
+                "status": "not_requested",
+                "instruction": "Pass both run_id and scenario_path to compare the event with one local HookStorm run.",
+            }
+        return result
+
+    @server.tool()
+    def hookstorm_list_shopify_deliveries(
+        since: str = "1h",
+        limit: int = 20,
+        status: str | None = "failure",
+        store: str | None = None,
+        client_id: str | None = None,
+        run_id: str | None = None,
+        scenario_path: str | None = None,
+    ) -> dict[str, Any]:
+        """Read Shopify webhook logs and optionally correlate them with one local HookStorm run."""
+        if (run_id is None) != (scenario_path is None):
+            raise ValueError("run_id and scenario_path must be supplied together")
+        adapter = ShopifyAppLogsAdapter(runner=shopify_cli_runner)
+        deliveries = adapter.list_webhook_deliveries(
+            since=since,
+            limit=limit,
+            status=status,
+            store=store,
+            client_id=client_id,
+            cwd=str(root),
+        )
+        if run_id is not None and scenario_path is not None:
+            run = get_run(run_id, history_db)
+            _, scenario = _load_scenario(scenario_path, root)
+            for item in deliveries:
+                item["correlation"] = _correlate_shopify_delivery(
+                    item,
+                    run,
+                    scenario,
+                )
+        return {
+            "provider": "shopify",
+            "source": "shopify_cli_app_logs",
+            "count": len(deliveries),
+            "deliveries": deliveries,
+            "read_only": True,
+            "correlation_requested": run_id is not None,
+            "limitations": [
+                "Requires Shopify CLI 5.1+ and an existing authenticated Shopify account session.",
+                "The CLI log query is limited to a 24-hour window per call and 1,000 records.",
+                "CI automation tokens are not supported by this CLI log command.",
+                "Shopify CLI log records can omit or truncate bodies; missing payload fingerprints prevent payload-based correlation.",
+                "Correlation is confirmed only when the local scenario fingerprint, event identity, payload, topic, and target agree.",
+                "This tool reads logs only and does not request Shopify to redeliver an event.",
+            ],
+        }
+
+
+    @server.tool()
+    async def hookstorm_replay_with_idempotency_guard(
+        run_id: str,
+        scenario_path: str,
+        event_id: str,
+        target: str,
+        expected_unprocessed_json: dict[str, Any],
+        expected_processed_json: dict[str, Any],
+        confirm: bool = False,
+    ) -> dict[str, Any]:
+        """Preview or replay one failed event only after explicit read-only before/after state assertions."""
+        run = get_run(run_id, history_db)
+        path, scenario = _load_scenario(scenario_path, root)
+        safe_target = _validate_replay_target(target)
+        event, checks = _prepare_replay(
+            run=run,
+            scenario=scenario,
+            event_id=event_id,
+            target=safe_target,
+            allow_scenario_change=False,
+            allow_target_change=False,
+        )
+        verify_config = scenario.get("verify")
+        if verify_config is None:
+            raise ValueError(
+                "The scenario must define a read-only verify.url and environment-backed auth, "
+                "so idempotency can be checked before and after replay."
+            )
+        if verify_config.get("url", "").find("?") >= 0:
+            raise ValueError("The idempotency probe URL must not contain a query string")
+        for label, expected in (
+            ("expected_unprocessed_json", expected_unprocessed_json),
+            ("expected_processed_json", expected_processed_json),
+        ):
+            if not isinstance(expected, dict):
+                raise ValueError(f"{label} must be a JSON object")
+            canonical_json_fingerprint(expected)
+        before_fingerprint, _ = canonical_json_fingerprint(expected_unprocessed_json)
+        after_fingerprint, _ = canonical_json_fingerprint(expected_processed_json)
+        if before_fingerprint == after_fingerprint:
+            raise ValueError(
+                "The expected unprocessed and processed states must be different"
+            )
+
+        preview = {
+            "executed": False,
+            "replay_enabled": replay_allowed,
+            "requires_confirmation": True,
+            "source_run_id": run_id,
+            "scenario": path.name,
+            "event_type": event["id"],
+            "event_id": event_id,
+            "target": safe_target,
+            "failed_deliveries_found": checks["failed_deliveries_found"],
+            "scenario_changed": checks["scenario_changed"],
+            "target_changed": checks["target_changed"],
+            "idempotency_guard": {
+                "enabled": True,
+                "probe_target": verify_config["url"].split("?", 1)[0],
+                "expected_unprocessed_state": expected_unprocessed_json,
+                "expected_processed_state": expected_processed_json,
+                "receiver_must_deduplicate_by_event_id": True,
+            },
+        }
+        before = await probe_business_state(
+            verify_config,
+            run_id,
+            event_id=event_id,
+            event_type=event["id"],
+            expected_json=expected_unprocessed_json,
+        )
+        preview["pre_replay_probe"] = before
+        if not before["passed"]:
+            preview["blocked"] = True
+            preview["message"] = (
+                "No webhook request was sent. The read-only pre-replay probe did not match "
+                "the expected unprocessed state. Investigate the state endpoint; do not retry blindly."
+            )
+            return preview
+        preview["blocked"] = False
+        if not replay_allowed:
+            preview["message"] = (
+                "The pre-replay idempotency check passed, but replay is disabled. Set "
+                "HOOKSTORM_MCP_ENABLE_REPLAY=1 in the MCP server environment after reviewing "
+                "the loopback test boundary."
+            )
+            return preview
+        if not confirm:
+            preview["message"] = (
+                "The read-only pre-replay state matches. No webhook request was sent. "
+                "Set confirm=true only after reviewing the event, destination, and both state assertions."
+            )
+            return preview
+
+        selected_scenario = {
+            **scenario,
+            "events": [{**event, "schedule_after_ms": 0}],
+            "verify": None,
+        }
+        result = await run_scenario(
+            selected_scenario,
+            safe_target,
+            correlation_run_id=run_id,
+        )
+        try:
+            save_run(result, history_db)
+            history_saved = True
+            history_warning = None
+        except HistoryError as exc:
+            history_saved = False
+            history_warning = str(exc)
+
+        after = await probe_business_state(
+            verify_config,
+            run_id,
+            event_id=event_id,
+            event_type=event["id"],
+            expected_json=expected_processed_json,
+        )
+        return {
+            "executed": True,
+            "replay_enabled": True,
+            "source_run_id": run_id,
+            "run_id": result["run_id"],
+            "correlation_run_id": result["correlation_run_id"],
+            "scenario": result["scenario"],
+            "target": result["target"],
+            "summary": result["summary"],
+            "delivery": [
+                {
+                    "event_type": item["event_type"],
+                    "event_id": item["event_id"],
+                    "duplicate_index": item["duplicate_index"],
+                    "passed": item["passed"],
+                    "attempts": [_attempt_summary(attempt) for attempt in item["attempts"]],
+                }
+                for item in result["deliveries"]
+            ],
+            "history_saved": history_saved,
+            "history_warning": history_warning,
+            "pre_replay_probe": before,
+            "post_replay_probe": after,
+            "idempotency_verified": bool(after["passed"]),
+            "idempotency_boundary": (
+                "The supplied read-only assertions matched before and after this replay. "
+                "The receiver must still enforce atomic deduplication by event ID to protect "
+                "against concurrent requests between the preflight probe and the POST."
+            ),
         }
 
     return server

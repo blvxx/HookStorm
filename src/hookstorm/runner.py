@@ -228,6 +228,118 @@ async def _read_limited_response_body(
     return bytes(body), None
 
 
+async def probe_business_state(
+    verify_config: dict[str, Any],
+    correlation_run_id: str,
+    *,
+    event_id: str,
+    event_type: str,
+    expected_json: dict[str, Any],
+) -> dict[str, Any]:
+    """Run one bounded, read-only loopback state probe for an event identity."""
+    if not isinstance(expected_json, dict):
+        raise ValueError("expected_json must be a JSON object")
+    if not isinstance(event_id, str) or not event_id or len(event_id) > 256:
+        raise ValueError("event_id must be a non-empty string of at most 256 characters")
+    if not isinstance(event_type, str) or not event_type or len(event_type) > 256:
+        raise ValueError("event_type must be a non-empty string of at most 256 characters")
+    if (
+        not isinstance(correlation_run_id, str)
+        or not correlation_run_id
+        or len(correlation_run_id) > 128
+        or not correlation_run_id.isascii()
+        or any(ord(character) < 33 or ord(character) > 126 for character in correlation_run_id)
+    ):
+        raise ValueError("correlation_run_id must contain 1–128 printable ASCII characters")
+
+    validate_verification_auth_transport(verify_config["url"], verify_config.get("auth"))
+    target_resolution = resolve_target(verify_config["url"])
+    auth_headers = resolve_verification_auth_headers(verify_config.get("auth"))
+    parsed = urlsplit(target_resolution.url)
+    reported_target = urlunsplit((parsed.scheme, parsed.netloc, parsed.path, "", ""))
+    timeout_ms = verify_config["timeout_ms"]
+    result: dict[str, Any] = {
+        "performed": True,
+        "method": "GET",
+        "target": reported_target,
+        "status_code": None,
+        "latency_ms": 0.0,
+        "expected_status": False,
+        "expected_json": False,
+        "passed": False,
+        "error": None,
+        "event_id": event_id,
+        "event_type": event_type,
+        "correlation_run_id": correlation_run_id,
+    }
+    started = time.perf_counter()
+    try:
+        async with httpx.AsyncClient(
+            transport=_FaultInjectingTransport((target_resolution,)),
+            follow_redirects=False,
+            trust_env=False,
+        ) as client:
+            async with asyncio.timeout(timeout_ms / 1000):
+                async with client.stream(
+                    "GET",
+                    target_resolution.url,
+                    headers={
+                        "Accept-Encoding": "identity",
+                        "User-Agent": f"HookStorm/{__version__} (+https://github.com/blvxx/HookStorm)",
+                        "X-HookStorm-Run": correlation_run_id,
+                        "X-Event-ID": event_id,
+                        "X-Event-Type": event_type,
+                        **auth_headers,
+                    },
+                    timeout=timeout_ms / 1000,
+                ) as response:
+                    result["status_code"] = response.status_code
+                    response_body, body_error = await _read_limited_response_body(response)
+                    result["latency_ms"] = round((time.perf_counter() - started) * 1000, 2)
+                    result["expected_status"] = (
+                        response.status_code in verify_config["expect_status"]
+                    )
+                    if response_body is None:
+                        matched, mismatch = (
+                            False,
+                            body_error or "verification response body could not be read safely",
+                        )
+                    else:
+                        try:
+                            ensure_json_nesting_depth(
+                                response_body,
+                                label="idempotency probe response JSON",
+                            )
+                            matched, mismatch = _matches_subset(
+                                json.loads(response_body),
+                                expected_json,
+                            )
+                        except JSONNestingError as exc:
+                            matched, mismatch = False, str(exc)
+                        except (RecursionError, ValueError):
+                            matched, mismatch = (
+                                False,
+                                "verification response body is not valid bounded JSON",
+                            )
+                    result["expected_json"] = matched
+                    if mismatch:
+                        result["error"] = mismatch
+                    elif not result["expected_status"]:
+                        result["error"] = (
+                            f"verification returned unexpected HTTP status {response.status_code}"
+                        )
+                    result["passed"] = (
+                        result["expected_status"] and result["expected_json"]
+                    )
+    except (httpx.TimeoutException, TimeoutError):
+        result["latency_ms"] = round((time.perf_counter() - started) * 1000, 2)
+        result["error"] = "verification request timed out"
+    except httpx.RequestError as exc:
+        result["latency_ms"] = round((time.perf_counter() - started) * 1000, 2)
+        result["error"] = f"verification request error: {type(exc).__name__}"
+    return result
+
+
 _SIGNATURE_HEADERS = {
     "generic": "X-HookStorm-Signature",
     "stripe": "Stripe-Signature",

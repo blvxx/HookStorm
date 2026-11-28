@@ -5,6 +5,7 @@ import json
 from importlib import import_module
 from pathlib import Path
 
+import httpx
 import pytest
 
 from hookstorm.config import load_scenario, scenario_fingerprint
@@ -513,3 +514,534 @@ def test_find_deliveries_applies_status_and_lookback_limits(tmp_path: Path) -> N
             assert response.is_error
 
     asyncio.run(invalid_limit())
+
+def _github_delivery_detail(payload: dict) -> dict:
+    return {
+        "id": 12345678,
+        "guid": "evt_replay",
+        "delivered_at": "2026-11-28T10:00:00Z",
+        "redelivery": False,
+        "duration": 0.27,
+        "status": "Failed",
+        "status_code": 503,
+        "event": "ping",
+        "request": {
+            "method": "POST",
+            "url": "http://127.0.0.1:8000/webhook?private-query=must-not-leak",
+            "headers": {
+                "X-GitHub-Delivery": "evt_replay",
+                "X-GitHub-Event": "ping",
+                "Authorization": "api-header-secret",
+                "X-Hub-Signature-256": "signature-secret",
+            },
+            "payload": payload,
+        },
+        "response": {
+            "status_code": 503,
+            "headers": {
+                "Content-Type": "application/json",
+                "Set-Cookie": "response-cookie-secret",
+            },
+            "payload": {
+                "message": "internal-response-must-not-leak",
+            },
+        },
+    }
+
+
+def test_inspect_github_delivery_correlates_exact_local_event_without_leaking_data(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    scenario_path = _scenario_file(tmp_path)
+    db = tmp_path / "history.sqlite3"
+    target = "http://127.0.0.1:8000/webhook"
+    run_id = _failed_run(scenario_path, target, db)
+    payload = {"private_value": "payload-must-not-leak"}
+    detail = _github_delivery_detail(payload)
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.method == "GET"
+        assert request.url.host == "api.github.com"
+        assert request.headers["Authorization"] == "Bearer github-token-secret"
+        return httpx.Response(200, json=detail)
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    monkeypatch.setenv("HOOKSTORM_GITHUB_TOKEN", "github-token-secret")
+    server = create_server(
+        history_db=db,
+        scenario_root=tmp_path,
+        enable_replay=False,
+        github_http_client=client,
+    )
+    result = _call_tool(
+        server,
+        "hookstorm_inspect_github_delivery",
+        {
+            "owner": "octocat",
+            "repo": "hello-world",
+            "hook_id": 42,
+            "delivery_id": 12345678,
+            "run_id": run_id,
+            "scenario_path": "scenarios/replay.yaml",
+        },
+    )
+    client.close()
+
+    correlation = result["correlation"]
+    assert correlation["status"] == "confirmed"
+    assert correlation["match_basis"] == "provider_delivery_guid"
+    assert correlation["scenario_matches_recorded_fingerprint"] is True
+    assert correlation["provider_event_guid_matches_local_event_id"] is True
+    assert correlation["payload_fingerprint_matches"] is True
+    assert correlation["event_type_matches"] is True
+    assert correlation["target_matches"] is True
+    assert correlation["status_codes_match"] is True
+    assert correlation["confirmed_facts"][0]["status_code"] == 503
+    assert correlation["root_cause"]["confirmed"] is False
+    assert correlation["replay_readiness"]["eligible_for_guarded_replay"] is True
+    assert correlation["replay_readiness"]["idempotency_status"] == "requires_pre_and_post_state_probes"
+
+    serialized = json.dumps(result)
+    for secret in (
+        "github-token-secret",
+        "private-query",
+        "must-not-leak",
+        "api-header-secret",
+        "signature-secret",
+        "payload-must-not-leak",
+        "response-cookie-secret",
+        "internal-response-must-not-leak",
+    ):
+        assert secret not in serialized
+
+
+def test_github_delivery_correlation_blocks_replay_candidate_when_payload_differs(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    scenario_path = _scenario_file(tmp_path)
+    db = tmp_path / "history.sqlite3"
+    run_id = _failed_run(
+        scenario_path,
+        "http://127.0.0.1:8000/webhook",
+        db,
+    )
+    detail = _github_delivery_detail({"private_value": "different-payload"})
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=detail)
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    monkeypatch.setenv("HOOKSTORM_GITHUB_TOKEN", "github-token-secret")
+    server = create_server(
+        history_db=db,
+        scenario_root=tmp_path,
+        enable_replay=False,
+        github_http_client=client,
+    )
+    result = _call_tool(
+        server,
+        "hookstorm_inspect_github_delivery",
+        {
+            "owner": "octocat",
+            "repo": "hello-world",
+            "hook_id": 42,
+            "delivery_id": 12345678,
+            "run_id": run_id,
+            "scenario_path": "scenarios/replay.yaml",
+        },
+    )
+    client.close()
+
+    correlation = result["correlation"]
+    assert correlation["status"] == "partial"
+    assert correlation["payload_fingerprint_matches"] is False
+    assert correlation["replay_readiness"]["eligible_for_guarded_replay"] is False
+
+
+def test_github_delivery_inspection_requires_run_and_scenario_together(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    monkeypatch.setenv("HOOKSTORM_GITHUB_TOKEN", "github-token-secret")
+    server = create_server(scenario_root=tmp_path, enable_replay=False)
+
+    async def call() -> None:
+        async with Client(server) as client:
+            response = await client.call_tool(
+                "hookstorm_inspect_github_delivery",
+                {
+                    "owner": "octocat",
+                    "repo": "hello-world",
+                    "hook_id": 42,
+                    "delivery_id": 12345678,
+                    "run_id": "run-without-scenario",
+                },
+            )
+            assert response.is_error
+
+    asyncio.run(call())
+
+
+def _stripe_scenario_file(root: Path, event: dict) -> Path:
+    path = root / "scenarios" / "stripe-event.yaml"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    import yaml
+
+    path.write_text(
+        yaml.safe_dump(
+            {
+                "version": 1,
+                "name": "Stripe event replay fixture",
+                "retry": {"max_attempts": 1},
+                "events": [
+                    {
+                        "id": event["type"],
+                        "event_id": event["id"],
+                        "payload": event,
+                        "expect_status": [200],
+                    }
+                ],
+            },
+            sort_keys=False,
+        ),
+        encoding="utf-8",
+    )
+    return path
+
+
+def test_retrieve_stripe_event_correlates_canonical_object_without_leaking_payload(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from hookstorm.providers import canonical_json_fingerprint
+
+    event = {
+        "id": "evt_1A2B3C",
+        "object": "event",
+        "type": "payment_intent.succeeded",
+        "created": 1795860000,
+        "api_version": "2025-09-30.clover",
+        "livemode": False,
+        "pending_webhooks": 1,
+        "request": {"id": "req_123"},
+        "data": {
+            "object": {
+                "id": "pi_private",
+                "metadata": {"secret": "payload-must-not-leak"},
+            }
+        },
+    }
+    scenario_path = _stripe_scenario_file(tmp_path, event)
+    db = tmp_path / "history.sqlite3"
+    run_id = _failed_run(
+        scenario_path,
+        "http://127.0.0.1:8000/webhook",
+        db,
+        ["evt_1A2B3C"],
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.method == "GET"
+        assert request.url.host == "api.stripe.com"
+        assert request.headers["Authorization"].startswith("Basic ")
+        return httpx.Response(200, json=event)
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    monkeypatch.setenv("HOOKSTORM_STRIPE_API_KEY", "sk_test_secret")
+    server = create_server(
+        history_db=db,
+        scenario_root=tmp_path,
+        enable_replay=False,
+        stripe_http_client=client,
+    )
+    result = _call_tool(
+        server,
+        "hookstorm_retrieve_stripe_event",
+        {
+            "event_id": "evt_1A2B3C",
+            "run_id": run_id,
+            "scenario_path": "scenarios/stripe-event.yaml",
+        },
+    )
+    client.close()
+
+    correlation = result["correlation"]
+    assert correlation["status"] == "confirmed"
+    assert correlation["stripe_event_id_matches_local_event_id"] is True
+    assert correlation["payload_fingerprint_matches"] is True
+    assert correlation["event_type_matches"] is True
+    assert correlation["delivery_attempt_correlation"] == "not_available_from_stripe_events_api"
+    assert correlation["root_cause"]["confirmed"] is False
+    expected_hash, _ = canonical_json_fingerprint(event)
+    assert result["payload"]["sha256"] == expected_hash
+    serialized = json.dumps(result)
+    assert "sk_test_secret" not in serialized
+    assert "payload-must-not-leak" not in serialized
+    assert "pi_private" not in serialized
+
+
+def test_list_shopify_deliveries_uses_cli_and_returns_sanitized_metadata(
+    tmp_path: Path,
+) -> None:
+    from types import SimpleNamespace
+
+    calls: list[tuple[list[str], dict]] = []
+
+    def fake_runner(command: list[str], **kwargs: object) -> SimpleNamespace:
+        calls.append((command, kwargs))
+        return SimpleNamespace(
+            returncode=0,
+            stdout=json.dumps(
+                [
+                    {
+                        "id": "shopify-delivery-1",
+                        "topic": "orders/create",
+                        "status": "failure",
+                        "statusCode": 502,
+                        "shop": "store.myshopify.com",
+                        "uri": "http://127.0.0.1:8000/webhook?private=secret",
+                        "payload": {"private": "shopify-payload-secret"},
+                        "responseBody": "shopify-response-secret",
+                    }
+                ]
+            ),
+            stderr="",
+        )
+
+    server = create_server(
+        scenario_root=tmp_path,
+        enable_replay=False,
+        shopify_cli_runner=fake_runner,
+    )
+    result = _call_tool(
+        server,
+        "hookstorm_list_shopify_deliveries",
+        {
+            "since": "6h",
+            "limit": 10,
+            "status": "failure",
+            "store": "store.myshopify.com",
+            "client_id": "client_123",
+        },
+    )
+
+    assert result["provider"] == "shopify"
+    assert result["count"] == 1
+    delivery = result["deliveries"][0]
+    assert delivery["status_code"] == 502
+    assert delivery["target"] == "http://127.0.0.1:8000/webhook"
+    assert "shopify-payload-secret" not in json.dumps(result)
+    assert "shopify-response-secret" not in json.dumps(result)
+    assert "private=secret" not in json.dumps(result)
+    command, kwargs = calls[0]
+    assert command[1:5] == ["app", "logs", "--type", "webhook"]
+    assert "--json" in command
+    assert kwargs["shell"] is False
+    assert kwargs["cwd"] == str(tmp_path.resolve())
+
+
+def test_shopify_log_correlation_requires_exact_payload_topic_target_and_scenario(
+    tmp_path: Path,
+) -> None:
+    from types import SimpleNamespace
+
+    scenario_path = _scenario_file(tmp_path)
+    target = "http://127.0.0.1:8000/webhook"
+    db = tmp_path / "history.sqlite3"
+    run_id = _failed_run(scenario_path, target, db)
+    record = {
+        "id": "delivery-1",
+        "eventId": "evt_replay",
+        "topic": "ping",
+        "status": "failure",
+        "statusCode": 503,
+        "uri": f"{target}?private=do-not-return",
+        "payload": {"private_value": "payload-must-not-leak"},
+    }
+
+    def fake_runner(command: list[str], **kwargs: object) -> SimpleNamespace:
+        return SimpleNamespace(returncode=0, stdout=json.dumps([record]), stderr="")
+
+    server = create_server(
+        history_db=db,
+        scenario_root=tmp_path,
+        enable_replay=False,
+        shopify_cli_runner=fake_runner,
+    )
+    result = _call_tool(
+        server,
+        "hookstorm_list_shopify_deliveries",
+        {
+            "run_id": run_id,
+            "scenario_path": "scenarios/replay.yaml",
+        },
+    )
+
+    correlation = result["deliveries"][0]["correlation"]
+    assert correlation["status"] == "confirmed"
+    assert correlation["shopify_event_id_matches_local_event_id"] is True
+    assert correlation["payload_fingerprint_matches"] is True
+    assert correlation["topic_matches"] is True
+    assert correlation["target_matches"] is True
+    assert correlation["root_cause"]["confirmed"] is False
+    assert correlation["replay_readiness"]["eligible_for_guarded_replay"] is True
+    assert correlation["replay_readiness"]["idempotency_status"] == "requires_pre_and_post_state_probes"
+    serialized = json.dumps(result)
+    assert "payload-must-not-leak" not in serialized
+    assert "do-not-return" not in serialized
+
+def _guarded_replay_scenario(root: Path, state_url: str) -> Path:
+    path = root / "scenarios" / "guarded-replay.yaml"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        f"""version: 1
+name: Guarded replay
+retry:
+  max_attempts: 1
+events:
+  - id: ping
+    event_id: evt_replay
+    payload:
+      private_value: payload-must-not-leak
+    expect_status: [200]
+verify:
+  url: {state_url}
+  expect_status: [200]
+  expect_json:
+    processed_events: 1
+""",
+        encoding="utf-8",
+    )
+    return path
+
+
+def test_guarded_replay_checks_state_before_and_after_and_preserves_idempotency(
+    tmp_path: Path,
+    receiver,
+) -> None:
+    base, state = receiver
+    scenario_path = _guarded_replay_scenario(tmp_path, f"{base}/state")
+    db = tmp_path / "history.sqlite3"
+    run_id = _failed_run(
+        scenario_path,
+        base,
+        db,
+    )
+    server = create_server(
+        history_db=db,
+        scenario_root=tmp_path,
+        enable_replay=True,
+    )
+    arguments = {
+        "run_id": run_id,
+        "scenario_path": "scenarios/guarded-replay.yaml",
+        "event_id": "evt_replay",
+        "target": base,
+        "expected_unprocessed_json": {"processed_events": 0},
+        "expected_processed_json": {"processed_events": 1},
+        "confirm": False,
+    }
+
+    preview = _call_tool(
+        server,
+        "hookstorm_replay_with_idempotency_guard",
+        arguments,
+    )
+    assert preview["executed"] is False
+    assert preview["pre_replay_probe"]["passed"] is True
+    assert state["requests"] == []
+
+    arguments["confirm"] = True
+    result = _call_tool(
+        server,
+        "hookstorm_replay_with_idempotency_guard",
+        arguments,
+    )
+    assert result["executed"] is True
+    assert result["pre_replay_probe"]["passed"] is True
+    assert result["post_replay_probe"]["passed"] is True
+    assert result["idempotency_verified"] is True
+    assert result["correlation_run_id"] == run_id
+    assert len(state["requests"]) == 1
+    assert state["requests"][0]["event_id"] == "evt_replay"
+    assert state["requests"][0]["run_id"] == run_id
+    assert len(state["effects"]) == 1
+
+
+def test_guarded_replay_blocks_when_event_is_already_processed(
+    tmp_path: Path,
+    receiver,
+) -> None:
+    base, state = receiver
+    scenario_path = _guarded_replay_scenario(tmp_path, f"{base}/state")
+    db = tmp_path / "history.sqlite3"
+    run_id = _failed_run(scenario_path, base, db)
+    state["effects"].add((run_id, "evt_replay"))
+    server = create_server(
+        history_db=db,
+        scenario_root=tmp_path,
+        enable_replay=True,
+    )
+    result = _call_tool(
+        server,
+        "hookstorm_replay_with_idempotency_guard",
+        {
+            "run_id": run_id,
+            "scenario_path": "scenarios/guarded-replay.yaml",
+            "event_id": "evt_replay",
+            "target": base,
+            "expected_unprocessed_json": {"processed_events": 0},
+            "expected_processed_json": {"processed_events": 1},
+            "confirm": True,
+        },
+    )
+    assert result["executed"] is False
+    assert result["blocked"] is True
+    assert result["pre_replay_probe"]["passed"] is False
+    assert state["requests"] == []
+
+def test_github_correlation_rejects_conflicting_provider_delivery_identifiers(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    scenario_path = _scenario_file(tmp_path)
+    db = tmp_path / "history.sqlite3"
+    run_id = _failed_run(
+        scenario_path,
+        "http://127.0.0.1:8000/webhook",
+        db,
+    )
+    detail = _github_delivery_detail({"private_value": "payload-must-not-leak"})
+    detail["request"]["headers"]["X-GitHub-Delivery"] = "different-provider-guid"
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        return httpx.Response(200, json=detail)
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    monkeypatch.setenv("HOOKSTORM_GITHUB_TOKEN", "github-token-secret")
+    server = create_server(
+        history_db=db,
+        scenario_root=tmp_path,
+        enable_replay=False,
+        github_http_client=client,
+    )
+    result = _call_tool(
+        server,
+        "hookstorm_inspect_github_delivery",
+        {
+            "owner": "octocat",
+            "repo": "hello-world",
+            "hook_id": 42,
+            "delivery_id": 12345678,
+            "run_id": run_id,
+            "scenario_path": "scenarios/replay.yaml",
+        },
+    )
+    client.close()
+
+    correlation = result["correlation"]
+    assert correlation["status"] == "partial"
+    assert correlation["provider_guid_matches_request_header"] is False
+    assert correlation["replay_readiness"]["eligible_for_guarded_replay"] is False
