@@ -666,7 +666,7 @@ class ShopifyAppLogsAdapter:
 
     @classmethod
     def _duration_hours(cls, value: Any, name: str) -> int:
-        if not isinstance(value, str):
+        if not isinstance(value, str) or len(value) > 4:
             raise ProviderSourceError(f"{name} must be a relative duration such as 24h or 2d")
         match = re.fullmatch(r"(0|[1-9][0-9]*)(h|d)", value)
         if match is None:
