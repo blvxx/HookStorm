@@ -66,6 +66,24 @@ def test_rejects_invalid_headers() -> None:
         validate_scenario(data)
 
 
+def test_rejects_case_insensitive_duplicate_event_headers() -> None:
+    data = valid_scenario()
+    data["events"][0]["headers"] = {
+        "X-Request-Source": "hookstorm",
+        "x-request-source": "test",
+    }
+    with pytest.raises(ScenarioError, match="duplicate header names"):
+        validate_scenario(data)
+
+
+
+def test_accept_encoding_is_a_managed_header() -> None:
+    data = valid_scenario()
+    data["events"][0]["headers"] = {"Accept-Encoding": "gzip"}
+    with pytest.raises(ScenarioError, match="may not override"):
+        validate_scenario(data)
+
+
 @pytest.mark.parametrize("value", ["snowman \u2603", "bad\x00value", "bad\x1fvalue", "bad\x7fvalue"])
 def test_rejects_non_ascii_or_control_header_values(value: str) -> None:
     data = valid_scenario()
@@ -395,6 +413,7 @@ def test_validates_api_key_verification_auth_defaults() -> None:
         {"type": "bearer", "token_env": ""},
         {"type": "api_key", "key_env": "HOOKSTORM_KEY", "header": "bad header"},
         {"type": "api_key", "key_env": "HOOKSTORM_KEY", "header": "Authorization"},
+        {"type": "api_key", "key_env": "HOOKSTORM_KEY", "header": "Accept-Encoding"},
         {"type": "api_key", "key_env": "HOOKSTORM_KEY", "header": "X-HookStorm-Run"},
         {"type": "api_key", "key_env": "HOOKSTORM_KEY", "unexpected": "value"},
     ],

@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+- Reject case-insensitive duplicate event request headers to avoid ambiguous HTTP field values.
+
+- Keep the `:memory:` SQLite history database alive across save/list/show operations within one process.
+
+- Cancel and await sibling delivery workers if one concurrent worker exits with an unexpected exception, preventing requests from outliving the run's HTTP client.
+
+- Enforce absolute per-attempt and verification request deadlines so slow-drip responses cannot evade `timeout_ms`.
+- Request identity-encoded responses and reject unexpected compression before decompression, preventing compressed responses from bypassing the 2 MiB memory limit.
+- Preserve source scenario order in reports when deliveries are intentionally executed in reverse.
+- Validate consistency between final delivery attempts, delivery outcomes, verification outcomes, and the overall history success flag; verify all duplicated SQLite identifiers, status flags, and metric columns against the stored JSON record.
+
 ## 0.1.0a1 — First public alpha preview
 
 ### Delivery, diagnostics, and integration improvements

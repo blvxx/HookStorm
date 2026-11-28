@@ -21,7 +21,7 @@ Unknown keys and duplicate YAML mapping keys are rejected to catch typos and amb
 
 `run_timeout_ms` is a top-level limit covering event scheduling, delivery attempts, retry backoff, response reading, and the optional business-state verification request. Before sending traffic, HookStorm estimates a conservative worst-case request-time budget from event timeouts, delays, retries, duplicates, scheduling offsets, concurrency, and verification timeout. A scenario whose estimate exceeds `run_timeout_ms` is rejected before any request is sent.
 
-The same deadline is enforced while the run is active. If it expires, HookStorm cancels in-flight tasks and reports a CLI error. Cancellation cannot undo a business side effect that the receiver has already committed, so use idempotent test data and isolated endpoints. Increase `run_timeout_ms` deliberately for longer stress scenarios, up to 24 hours. The default budget preserves legacy scenario fingerprints; explicitly choosing a non-default budget changes the fingerprint and is detected by baseline comparisons.
+The same deadline is enforced while the run is active. If it expires, HookStorm cancels in-flight tasks and reports a CLI error. An unexpected exception in one concurrent delivery also cancels and joins its sibling workers before the HTTP client is closed. Cancellation cannot undo a business side effect that the receiver has already committed, so use idempotent test data and isolated endpoints. Increase `run_timeout_ms` deliberately for longer stress scenarios, up to 24 hours. The default budget preserves legacy scenario fingerprints; explicitly choosing a non-default budget changes the fingerprint and is detected by baseline comparisons.
 
 ## Delivery settings
 
@@ -31,7 +31,7 @@ The same deadline is enforced while the run is active. If it expires, HookStorm 
 | concurrency | 1 | Maximum number of independent events sent concurrently; 1–50. |
 | duplicate_count | 0 | Additional deliveries per event, 0–100. Reuses the same event ID and body. |
 | delay_ms | 0 | Delay before each HTTP attempt, 0–60,000 ms. |
-| timeout_ms | 5000 | HTTP request timeout, 1–300,000 ms. |
+| timeout_ms | 5000 | Absolute wall-clock deadline for each HTTP delivery attempt, including connection, request upload, and complete response reading; 1–300,000 ms. |
 | signature | none | none, valid, invalid, or missing. |
 | signature_provider | generic | generic, stripe, github, shopify, or standard_webhooks. |
 | signature_timestamp_offset_seconds | 0 | Stripe and Standard Webhooks; shifts the signed attempt timestamp by -86,400 to +86,400 seconds for replay-window tests. |
@@ -74,7 +74,7 @@ The optional top-level verify mapping runs once after all event deliveries have 
 | url | required | Absolute HTTP(S) URL. Localhost / loopback only by default. Remote HTTPS requires `--allow-remote`; non-loopback HTTP additionally requires `--allow-insecure-http`. Authenticated remote probes always require HTTPS. Embedded credentials and fragments are rejected. |
 | expect_status | [200] | Accepted HTTP status code or non-empty list of codes from 100 to 599. |
 | expect_json | required | JSON object checked with the same recursive subset-matching rules as event response assertions. |
-| timeout_ms | 5000 | GET timeout, 1–300,000 ms. |
+| timeout_ms | 5000 | Absolute wall-clock deadline for the complete GET verification request, including connection and response reading; 1–300,000 ms. |
 | auth | none | Optional environment-backed Bearer or API-key header authentication. |
 
 HookStorm sends the generated X-HookStorm-Run header with the GET so a receiver can isolate state for that run. The probe sends no webhook payload and does not mutate the receiver. A status, transport, or JSON assertion failure marks the overall run as failed. JSON and HTML reports include the probe result; JUnit adds a separate business-state probe testcase. Run history stores the sanitized outcome and compares it for regressions.
@@ -104,7 +104,7 @@ The probe is not a universal exactly-once guarantee: it verifies only the state 
 
 ## Response body safety limit
 
-Webhook delivery responses and the business-state verification response are streamed and capped at 2 MiB after HTTP content decoding. If a response exceeds this limit, HookStorm closes the response stream and marks the JSON assertion as failed with a clear size-limit error. The limit applies even when no JSON expectation is configured; HookStorm does not buffer arbitrarily large response bodies or persist response content.
+Webhook delivery responses and the business-state verification response are requested with `Accept-Encoding: identity` and streamed from raw response chunks under a 2 MiB limit. If a response exceeds this limit, HookStorm closes the response stream and marks the JSON assertion as failed with a clear size-limit error. Unexpected compressed responses are rejected before HTTP content decompression; this prevents a small compressed payload from expanding into an unbounded allocation. The limit applies even when no JSON expectation is configured; HookStorm does not buffer arbitrarily large response bodies or persist response content.
 
 ## Event fields
 
@@ -124,7 +124,7 @@ JSON object expectations are recursive subset matches: additional object keys ar
 
 ## Built-in request headers
 
-HookStorm sends Content-Type, User-Agent, X-HookStorm-Run, X-Event-ID, X-Event-Type, X-HookStorm-Attempt, and X-HookStorm-Duplicate-Index. Custom headers may not override transport-managed headers or Host, Content-Length, and Transfer-Encoding.
+HookStorm sends Content-Type, User-Agent, X-HookStorm-Run, X-Event-ID, X-Event-Type, X-HookStorm-Attempt, and X-HookStorm-Duplicate-Index. Custom headers may not override transport-managed headers or Host, Content-Length, and Transfer-Encoding. Header names are case-insensitive; a scenario that defines the same header more than once with different casing is rejected. Custom `Content-Type` and `User-Agent` values replace the built-in values case-insensitively rather than creating duplicate fields.
 
 
 ## CI reports

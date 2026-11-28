@@ -39,6 +39,46 @@ def test_retries_transient_server_error(receiver) -> None:
     assert state["attempts"][(run_id, "evt_test_1")] == 2
 
 
+def test_retry_on_controls_http_status_retries(receiver) -> None:
+    base, state = receiver
+    result = asyncio.run(run_scenario(
+        scenario(
+            retry={"max_attempts": 3, "backoff_ms": 1, "retry_on": [429]},
+        ),
+        f"{base}/flaky",
+    ))
+
+    attempts = result["deliveries"][0]["attempts"]
+    assert result["summary"]["success"] is False
+    assert [attempt["status_code"] for attempt in attempts] == [503]
+    assert state["attempts"][(state["requests"][0]["run_id"], "evt_test_1")] == 1
+
+
+def test_request_timeouts_are_retried_even_when_retry_on_excludes_statuses(
+    receiver,
+) -> None:
+    base, state = receiver
+    data = scenario(
+        delivery={"timeout_ms": 150},
+        retry={"max_attempts": 2, "backoff_ms": 1, "retry_on": [429]},
+    )
+    data["run_timeout_ms"] = 2_000
+
+    result = asyncio.run(run_scenario(data, f"{base}/slow-drip"))
+
+    attempts = result["deliveries"][0]["attempts"]
+    assert result["summary"]["success"] is False
+    assert len(attempts) == 2
+    assert [attempt["error"] for attempt in attempts] == [
+        "request timed out",
+        "request timed out",
+    ]
+    run_id = state["requests"][0]["run_id"]
+    assert state["attempts"][(run_id, "evt_test_1")] == 2
+
+
+
+
 def test_injected_connect_error_fails_before_request_reaches_receiver(receiver) -> None:
     base, state = receiver
     result = asyncio.run(run_scenario(
@@ -120,7 +160,12 @@ def test_reverse_order_is_applied(receiver) -> None:
     }
     result = asyncio.run(run_scenario(validate_scenario(data), base))
     assert result["summary"]["success"] is True
+    # Delivery.order reverses network arrival but JSON/JUnit data stays in source order.
     assert [request["event_id"] for request in state["requests"]] == ["evt_second", "evt_first"]
+    assert [delivery["event_id"] for delivery in result["deliveries"]] == [
+        "evt_first",
+        "evt_second",
+    ]
 
 
 def test_generates_and_sends_hmac_signature(receiver) -> None:
@@ -204,6 +249,47 @@ def test_oversized_business_verification_response_fails(receiver) -> None:
     )
 
 
+def test_rejects_compressed_webhook_response_before_decompression(receiver) -> None:
+    base, state = receiver
+    result = asyncio.run(
+        run_scenario(
+            scenario(event={"expect_json": {"ok": True}}),
+            f"{base}/compressed",
+        )
+    )
+
+    attempt = result["deliveries"][0]["attempts"][0]
+    assert result["summary"]["success"] is False
+    assert attempt["status_code"] == 200
+    assert attempt["error"] == (
+        "compressed response bodies are not supported; received Content-Encoding: gzip"
+    )
+    assert state["requests"][0]["headers"]["Accept-Encoding"] == "identity"
+
+
+def test_rejects_compressed_verification_response_before_decompression(receiver) -> None:
+    base, state = receiver
+    data = validate_scenario({
+        "version": 1,
+        "name": "compressed verification response",
+        "events": [{"id": "ping", "event_id": "evt_compressed_verify", "payload": {}}],
+        "verify": {
+            "url": f"{base}/state-compressed",
+            "expect_json": {"processed_events": 1},
+        },
+    })
+
+    result = asyncio.run(run_scenario(data, base))
+
+    assert result["summary"]["success"] is False
+    assert result["verification"]["status_code"] == 200
+    assert result["verification"]["error"] == (
+        "verification compressed response bodies are not supported; "
+        "received Content-Encoding: gzip"
+    )
+    assert state["verification_requests"][0]["headers"]["Accept-Encoding"] == "identity"
+
+
 def test_query_parameters_are_not_written_to_report_target(receiver) -> None:
     base, _ = receiver
     result = asyncio.run(run_scenario(
@@ -234,6 +320,23 @@ def test_json_boolean_does_not_match_integer(receiver) -> None:
     assert result["summary"]["success"] is False
     assert result["deliveries"][0]["attempts"][0]["expected_json"] is False
 
+def test_custom_content_type_replaces_default_without_duplicate_header(receiver) -> None:
+    base, state = receiver
+    result = asyncio.run(run_scenario(
+        scenario(event={"headers": {"content-type": "application/custom+json"}}),
+        base,
+    ))
+
+    assert result["summary"]["success"] is True
+    content_types = [
+        value
+        for key, value in state["requests"][0]["headers"].items()
+        if key.lower() == "content-type"
+    ]
+    assert content_types == ["application/custom+json"]
+
+
+
 
 def test_concurrency_limit_runs_events_in_parallel_and_keeps_report_order(receiver) -> None:
     base, state = receiver
@@ -253,6 +356,50 @@ def test_concurrency_limit_runs_events_in_parallel_and_keeps_report_order(receiv
     assert [item["event_id"] for item in result["deliveries"]] == [
         "evt_0", "evt_1", "evt_2", "evt_3"
     ]
+
+
+
+def test_unexpected_worker_failure_cancels_and_joins_sibling_deliveries(
+    receiver, monkeypatch
+) -> None:
+    base, _state = receiver
+    sibling_started = asyncio.Event()
+    sibling_cancelled = asyncio.Event()
+
+    async def fail_one_worker(response):
+        event_id = response.request.headers["X-Event-ID"]
+        if event_id == "evt_sibling":
+            sibling_started.set()
+            try:
+                await asyncio.Event().wait()
+            finally:
+                sibling_cancelled.set()
+        if event_id == "evt_boom":
+            await sibling_started.wait()
+            raise RuntimeError("unexpected response processing failure")
+        return b'{"ok":true}', None
+
+    monkeypatch.setattr(
+        "hookstorm.runner._read_limited_response_body", fail_one_worker
+    )
+    data = validate_scenario({
+        "version": 1,
+        "name": "cancel sibling on worker error",
+        "delivery": {"concurrency": 2},
+        "events": [
+            {"id": "boom", "event_id": "evt_boom", "payload": {}},
+            {"id": "sibling", "event_id": "evt_sibling", "payload": {}},
+        ],
+    })
+
+    async def exercise() -> None:
+        with pytest.raises(
+            RuntimeError, match="unexpected response processing failure"
+        ):
+            await run_scenario(data, f"{base}/slow")
+        assert sibling_cancelled.is_set()
+
+    asyncio.run(exercise())
 
 
 
@@ -549,6 +696,28 @@ def test_failed_business_state_verification_fails_the_run(receiver) -> None:
     assert result["summary"]["success"] is False
 
 
+def test_verification_timeout_is_an_absolute_deadline_for_slow_drip_responses(receiver) -> None:
+    base, _state = receiver
+    data = validate_scenario({
+        "version": 1,
+        "name": "absolute verification timeout",
+        "events": [{"id": "ping", "event_id": "evt_slow_verify", "payload": {}}],
+        "verify": {
+            "url": f"{base}/state-slow-drip",
+            "timeout_ms": 150,
+            "expect_json": {"processed_events": 1},
+        },
+    })
+
+    result = asyncio.run(run_scenario(data, base))
+
+    verification = result["verification"]
+    assert result["summary"]["success"] is False
+    assert verification["status_code"] == 200
+    assert verification["error"] == "verification request timed out"
+    assert verification["latency_ms"] < 300
+
+
 def test_verification_url_obeys_local_only_safety_before_delivery(receiver) -> None:
     base, state = receiver
     data = validate_scenario({
@@ -755,9 +924,30 @@ def test_run_timeout_cancels_in_flight_response_processing(receiver, monkeypatch
         "delivery": {"timeout_ms": 1_000},
         "events": [{"id": "ping", "event_id": "evt_timeout", "payload": {}}],
     })
+    # Bypass the schema budget check to isolate the runner-level hard deadline:
+    # an individual request is deliberately allowed more time than the whole run.
+    data["delivery"]["timeout_ms"] = 2_000
 
     with pytest.raises(ValueError, match="exceeded run_timeout_ms=1000"):
         asyncio.run(run_scenario(data, base))
+
+
+def test_delivery_timeout_is_an_absolute_deadline_for_slow_drip_responses(receiver) -> None:
+    base, _state = receiver
+    data = validate_scenario({
+        "version": 1,
+        "name": "absolute delivery timeout",
+        "run_timeout_ms": 1_000,
+        "delivery": {"timeout_ms": 150},
+        "events": [{"id": "ping", "event_id": "evt_slow_drip", "payload": {}}],
+    })
+
+    result = asyncio.run(run_scenario(data, f"{base}/slow-drip"))
+
+    attempt = result["deliveries"][0]["attempts"][0]
+    assert result["summary"]["success"] is False
+    assert attempt["error"] == "request timed out"
+    assert attempt["latency_ms"] < 300
 
 
 def test_deterministic_fault_injection_example_proves_single_effect(receiver) -> None:

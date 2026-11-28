@@ -107,18 +107,29 @@ class _FaultInjectingTransport(httpx.AsyncBaseTransport):
 MAX_RESPONSE_BODY_BYTES = 2 * 1024 * 1024
 
 
-async def _read_limited_response_body(response: httpx.Response) -> bytes | None:
-    """Read a decompressed response body up to the fixed memory-safety limit.
+async def _read_limited_response_body(
+    response: httpx.Response,
+) -> tuple[bytes | None, str | None]:
+    """Read an identity-encoded response without invoking unbounded decompression.
 
-    Return None when the body exceeds the limit. Streaming is used so an oversized
-    response is closed as soon as the limit is crossed instead of being buffered in full.
+    The byte cap is applied to raw response chunks before they are buffered. HookStorm
+    asks peers for identity encoding; if a peer sends a compressed body anyway, reject it
+    rather than handing it to HTTPX's automatic decompressor, which can expand one small
+    compressed chunk into an arbitrarily large allocation before the caller can check it.
     """
+    content_encoding = response.headers.get("content-encoding", "identity").strip().lower()
+    if content_encoding not in {"", "identity"}:
+        return None, (
+            "compressed response bodies are not supported; "
+            f"received Content-Encoding: {content_encoding}"
+        )
+
     body = bytearray()
-    async for chunk in response.aiter_bytes():
+    async for chunk in response.aiter_raw():
         if len(body) + len(chunk) > MAX_RESPONSE_BODY_BYTES:
-            return None
+            return None, f"response body exceeds the {MAX_RESPONSE_BODY_BYTES // (1024 * 1024)} MiB safety limit"
         body.extend(chunk)
-    return bytes(body)
+    return bytes(body), None
 
 
 _SIGNATURE_HEADERS = {
@@ -174,6 +185,19 @@ def _signature_headers(
             value = f"sha256={hex_digest}"
 
     return {_SIGNATURE_HEADERS[provider]: value}
+
+
+async def _gather_cancel_on_error(coroutines: list[Any]) -> list[Any]:
+    """Run concurrent workers and fully cancel siblings if any worker fails."""
+    tasks = [asyncio.create_task(coroutine) for coroutine in coroutines]
+    try:
+        return list(await asyncio.gather(*tasks))
+    except BaseException:
+        for task in tasks:
+            if not task.done():
+                task.cancel()
+        await asyncio.gather(*tasks, return_exceptions=True)
+        raise
 
 
 async def run_scenario(
@@ -242,7 +266,9 @@ async def run_scenario(
     retry = scenario["retry"]
     concurrency = scenario["delivery"].get("concurrency", 1)
     semaphore = asyncio.Semaphore(concurrency)
-    ordered_events = list(scenario["events"])
+    # Keep the source order for reporting; reverse only the execution sequence.
+    scenario_events = list(scenario["events"])
+    ordered_events = list(scenario_events)
     if scenario["delivery"].get("order", "in_order") == "reverse":
         ordered_events.reverse()
 
@@ -269,12 +295,14 @@ async def run_scenario(
             event_body = _json_bytes(event["payload"])
             base_headers = {
                 "Content-Type": "application/json",
+                "Accept-Encoding": "identity",
                 "User-Agent": f"HookStorm/{__version__} (+https://github.com/blvxx/HookStorm)",
                 "X-HookStorm-Run": run_id,
                 "X-Event-ID": event["event_id"],
                 "X-Event-Type": event["id"],
             }
             reserved = {
+                "accept-encoding",
                 "x-hookstorm-run",
                 "x-event-id",
                 "x-event-type",
@@ -289,8 +317,20 @@ async def run_scenario(
                 "webhook-signature",
             }
             for key, value in event["headers"].items():
-                if key.lower() not in reserved:
-                    base_headers[key] = value
+                normalized_key = key.lower()
+                if normalized_key in reserved:
+                    continue
+                existing_key = next(
+                    (
+                        existing
+                        for existing in base_headers
+                        if existing.lower() == normalized_key
+                    ),
+                    None,
+                )
+                if existing_key is not None:
+                    del base_headers[existing_key]
+                base_headers[key] = value
 
             event_deliveries: list[dict[str, Any]] = []
             for duplicate_index in range(delivery_config["duplicate_count"] + 1):
@@ -344,49 +384,48 @@ async def run_scenario(
                     if injected_fault is not None:
                         outcome["injected_fault"] = injected_fault
                     try:
-                        async with client.stream(
-                            "POST",
-                            target,
-                            content=event_body,
-                            headers=headers,
-                            timeout=delivery_config["timeout_ms"] / 1000,
-                            extensions=(
-                                {"hookstorm_fault_injection": injected_fault}
-                                if injected_fault is not None
-                                else None
-                            ),
-                        ) as response:
-                            outcome["status_code"] = response.status_code
-                            response_body = await _read_limited_response_body(response)
-                            outcome["latency_ms"] = round(
-                                (time.perf_counter() - started_attempt) * 1000, 2
-                            )
-                            outcome["expected_status"] = (
-                                response.status_code in event["expect_status"]
-                            )
-                            if response_body is None:
-                                outcome["expected_json"] = False
-                                outcome["error"] = (
-                                    "response body exceeds the 2 MiB safety limit"
+                        async with asyncio.timeout(delivery_config["timeout_ms"] / 1000):
+                            async with client.stream(
+                                "POST",
+                                target,
+                                content=event_body,
+                                headers=headers,
+                                timeout=delivery_config["timeout_ms"] / 1000,
+                                extensions=(
+                                    {"hookstorm_fault_injection": injected_fault}
+                                    if injected_fault is not None
+                                    else None
+                                ),
+                            ) as response:
+                                outcome["status_code"] = response.status_code
+                                response_body, body_error = await _read_limited_response_body(response)
+                                outcome["latency_ms"] = round(
+                                    (time.perf_counter() - started_attempt) * 1000, 2
                                 )
-                            elif expected_json is not None:
-                                try:
-                                    matched, mismatch = _matches_subset(
-                                        json.loads(response_body), expected_json
-                                    )
-                                except ValueError:
-                                    matched, mismatch = (
-                                        False,
-                                        "response body is not valid JSON",
-                                    )
-                                outcome["expected_json"] = matched
-                                if mismatch:
-                                    outcome["error"] = mismatch
-                            outcome["passed"] = (
-                                outcome["expected_status"] and outcome["expected_json"]
-                            )
-                            retryable = response.status_code in retry["retry_on"]
-                    except httpx.TimeoutException:
+                                outcome["expected_status"] = (
+                                    response.status_code in event["expect_status"]
+                                )
+                                if response_body is None:
+                                    outcome["expected_json"] = False
+                                    outcome["error"] = body_error or "response body could not be read safely"
+                                elif expected_json is not None:
+                                    try:
+                                        matched, mismatch = _matches_subset(
+                                            json.loads(response_body), expected_json
+                                        )
+                                    except ValueError:
+                                        matched, mismatch = (
+                                            False,
+                                            "response body is not valid JSON",
+                                        )
+                                    outcome["expected_json"] = matched
+                                    if mismatch:
+                                        outcome["error"] = mismatch
+                                outcome["passed"] = (
+                                    outcome["expected_status"] and outcome["expected_json"]
+                                )
+                                retryable = response.status_code in retry["retry_on"]
+                    except (httpx.TimeoutException, TimeoutError):
                         outcome["latency_ms"] = round(
                             (time.perf_counter() - started_attempt) * 1000, 2
                         )
@@ -443,17 +482,18 @@ async def run_scenario(
                     range(len(ordered_events)),
                     key=lambda index: ordered_events[index].get("schedule_after_ms", 0),
                 )
-                scheduled_groups = await asyncio.gather(
-                    *(process_event(ordered_events[index]) for index in execution_order)
-                )
-                groups_by_scenario_index = {
-                    index: group
+                scheduled_groups = await _gather_cancel_on_error([
+                    process_event(ordered_events[index]) for index in execution_order
+                ])
+                groups_by_event_id = {
+                    ordered_events[index]["event_id"]: group
                     for index, group in zip(execution_order, scheduled_groups, strict=True)
                 }
+                # Delivery order controls network scheduling, not report ordering.
                 all_deliveries = [
                     delivery
-                    for index in range(len(ordered_events))
-                    for delivery in groups_by_scenario_index[index]
+                    for event in scenario_events
+                    for delivery in groups_by_event_id[event["event_id"]]
                 ]
 
                 verification = None
@@ -470,39 +510,45 @@ async def run_scenario(
                         "passed": False,
                     }
                     try:
-                        async with client.stream(
-                            "GET",
-                            verification_url,
-                            headers={
-                                "User-Agent": f"HookStorm/{__version__} (+https://github.com/blvxx/HookStorm)",
-                                "X-HookStorm-Run": run_id,
-                                **verification_auth_headers,
-                            },
-                            timeout=verify_config["timeout_ms"] / 1000,
-                        ) as response:
-                            verification["status_code"] = response.status_code
-                            response_body = await _read_limited_response_body(response)
-                            verification["latency_ms"] = round(
-                                (time.perf_counter() - verify_started) * 1000, 2
-                            )
-                            verification["expected_status"] = (
-                                response.status_code in verify_config["expect_status"]
-                            )
-                            if response_body is None:
-                                matched, mismatch = (
-                                    False,
-                                    "verification response body exceeds the 2 MiB safety limit",
+                        async with asyncio.timeout(verify_config["timeout_ms"] / 1000):
+                            async with client.stream(
+                                "GET",
+                                verification_url,
+                                headers={
+                                    "Accept-Encoding": "identity",
+                                    "User-Agent": f"HookStorm/{__version__} (+https://github.com/blvxx/HookStorm)",
+                                    "X-HookStorm-Run": run_id,
+                                    **verification_auth_headers,
+                                },
+                                timeout=verify_config["timeout_ms"] / 1000,
+                            ) as response:
+                                verification["status_code"] = response.status_code
+                                response_body, body_error = await _read_limited_response_body(response)
+                                verification["latency_ms"] = round(
+                                    (time.perf_counter() - verify_started) * 1000, 2
                                 )
-                            else:
-                                try:
-                                    matched, mismatch = _matches_subset(
-                                        json.loads(response_body), verify_config["expect_json"]
-                                    )
-                                except ValueError:
+                                verification["expected_status"] = (
+                                    response.status_code in verify_config["expect_status"]
+                                )
+                                if response_body is None:
                                     matched, mismatch = (
                                         False,
-                                        "verification response body is not valid JSON",
+                                        (
+                                            f"verification {body_error}"
+                                            if body_error
+                                            else "verification response body could not be read safely"
+                                        ),
                                     )
+                                else:
+                                    try:
+                                        matched, mismatch = _matches_subset(
+                                            json.loads(response_body), verify_config["expect_json"]
+                                        )
+                                    except ValueError:
+                                        matched, mismatch = (
+                                            False,
+                                            "verification response body is not valid JSON",
+                                        )
                         verification["expected_json"] = matched
                         if mismatch:
                             verification["error"] = mismatch
@@ -513,7 +559,7 @@ async def run_scenario(
                         verification["passed"] = (
                             verification["expected_status"] and verification["expected_json"]
                         )
-                    except httpx.TimeoutException:
+                    except (httpx.TimeoutException, TimeoutError):
                         verification["latency_ms"] = round(
                             (time.perf_counter() - verify_started) * 1000, 2
                         )

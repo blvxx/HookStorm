@@ -6,10 +6,14 @@ import json
 import math
 import os
 import sqlite3
+import threading
 from pathlib import Path
 from typing import Any
 
 _DEFAULT_DB = Path.home() / ".hookstorm" / "history.sqlite3"
+_MEMORY_DB_URI = "file:hookstorm_history?mode=memory&cache=shared"
+_MEMORY_DB_KEEPER: sqlite3.Connection | None = None
+_MEMORY_DB_LOCK = threading.Lock()
 
 
 class HistoryError(RuntimeError):
@@ -30,7 +34,20 @@ def _connect(path: str | Path | None = None) -> sqlite3.Connection:
     location = resolve_history_db(path)
     is_default_location = path is None and not os.getenv("HOOKSTORM_HISTORY_DB")
     try:
-        if location != ":memory:":
+        if location == ":memory:":
+            global _MEMORY_DB_KEEPER
+            with _MEMORY_DB_LOCK:
+                if _MEMORY_DB_KEEPER is None:
+                    keeper = sqlite3.connect(
+                        _MEMORY_DB_URI,
+                        uri=True,
+                        timeout=10,
+                        check_same_thread=False,
+                    )
+                    keeper.execute("PRAGMA busy_timeout = 10000")
+                    _MEMORY_DB_KEEPER = keeper
+            connection = sqlite3.connect(_MEMORY_DB_URI, uri=True, timeout=10)
+        else:
             database_path = Path(location)
             database_path.parent.mkdir(
                 parents=True,
@@ -51,8 +68,7 @@ def _connect(path: str | Path | None = None) -> sqlite3.Connection:
                     os.fchmod(descriptor, 0o600)
                 finally:
                     os.close(descriptor)
-
-        connection = sqlite3.connect(location, timeout=10)
+            connection = sqlite3.connect(location, timeout=10)
         connection.row_factory = sqlite3.Row
         connection.execute("PRAGMA busy_timeout = 10000")
         return connection
@@ -248,6 +264,8 @@ def _require_finite_non_negative_number(value: Any, label: str) -> float:
 
 def _validate_run_result(result: dict[str, Any], label: str) -> None:
     """Validate the metrics and delivery identities used by history comparisons."""
+    if not isinstance(result, dict):
+        raise HistoryError(f"{label} must be a JSON object")
     for key in ("run_id", "scenario", "started_at", "target"):
         value = result.get(key)
         if not isinstance(value, str) or not value.strip():
@@ -333,6 +351,15 @@ def _validate_run_result(result: dict[str, Any], label: str) -> None:
                     f"{attempt_label}.injected_fault must be connect_error or response_loss"
                 )
 
+        final_attempt_passed = attempts[-1].get("passed")
+        if (
+            final_attempt_passed is not None
+            and final_attempt_passed is not item["passed"]
+        ):
+            raise HistoryError(
+                f"{label} delivery {index}.passed does not match its final attempt"
+            )
+
         if "schedule_after_ms" in item:
             _require_non_negative_integer(
                 item["schedule_after_ms"],
@@ -351,7 +378,7 @@ def _validate_run_result(result: dict[str, Any], label: str) -> None:
     if verification is not None:
         if not isinstance(verification, dict):
             raise HistoryError(f"{label} verification must be a JSON object or null")
-        if "passed" in verification and not isinstance(verification["passed"], bool):
+        if not isinstance(verification.get("passed"), bool):
             raise HistoryError(f"{label} verification.passed must be a boolean")
         if "latency_ms" in verification:
             _require_finite_non_negative_number(
@@ -367,6 +394,56 @@ def _validate_run_result(result: dict[str, Any], label: str) -> None:
                 raise HistoryError(
                     f"{label} verification.status_code must be null or an HTTP status code"
                 )
+
+    verification_passed = verification is None or verification.get("passed") is True
+    expected_success = actual_passed == len(deliveries) and verification_passed
+    if summary["success"] is not expected_success:
+        raise HistoryError(
+            f"{label} summary.success does not match delivery and verification outcomes"
+        )
+
+
+def _validate_stored_row_metadata(row: sqlite3.Row, result: dict[str, Any]) -> None:
+    """Ensure indexed SQLite columns still agree with the validated JSON result."""
+    for field in ("run_id", "scenario", "started_at", "target"):
+        if row[field] != result[field]:
+            raise HistoryError(
+                f"Stored run database {field} does not match its result data"
+            )
+
+    stored_success = row["success"]
+    if (
+        isinstance(stored_success, bool)
+        or not isinstance(stored_success, int)
+        or stored_success not in (0, 1)
+    ):
+        raise HistoryError("Stored run database success must be 0 or 1")
+    if bool(stored_success) is not result["summary"]["success"]:
+        raise HistoryError(
+            "Stored run database success does not match its result data"
+        )
+
+    metrics = result_metrics(result)
+    for field in ("total_deliveries", "passed", "failed", "attempts"):
+        stored_value = row[field]
+        if (
+            isinstance(stored_value, bool)
+            or not isinstance(stored_value, int)
+            or stored_value != metrics[field]
+        ):
+            raise HistoryError(
+                f"Stored run database {field} does not match its result data"
+            )
+    stored_duration = row["duration_ms"]
+    if (
+        isinstance(stored_duration, bool)
+        or not isinstance(stored_duration, (int, float))
+        or not math.isfinite(float(stored_duration))
+        or round(float(stored_duration), 2) != metrics["duration_ms"]
+    ):
+        raise HistoryError(
+            "Stored run database duration_ms does not match its result data"
+        )
 
 
 def save_run(result: dict[str, Any], path: str | Path | None = None) -> str:
@@ -454,6 +531,8 @@ def list_runs(
         for row in rows:
             item = dict(row)
             result = json.loads(item.pop("result_json"))
+            _validate_run_result(result, "Stored run")
+            _validate_stored_row_metadata(row, result)
             item["success"] = bool(item["success"])
             item.update(result_metrics(result))
             output.append(item)
@@ -472,12 +551,18 @@ def get_run(run_id: str, path: str | Path | None = None) -> dict[str, Any]:
     try:
         _initialize(connection)
         row = connection.execute(
-            "SELECT run_id, scenario, started_at, target, success, result_json FROM runs WHERE run_id = ?",
+            """
+            SELECT run_id, scenario, started_at, target, success,
+                   total_deliveries, passed, failed, attempts, duration_ms, result_json
+            FROM runs WHERE run_id = ?
+            """,
             (run_id,),
         ).fetchone()
         if row is None:
             raise HistoryError(f"Run '{run_id}' was not found in local history")
         result = json.loads(row["result_json"])
+        _validate_run_result(result, "Stored run")
+        _validate_stored_row_metadata(row, result)
         result["history"] = {
             "success": bool(row["success"]),
             "database_run_id": row["run_id"],

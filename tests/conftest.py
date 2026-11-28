@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import base64
+import gzip
 import hashlib
 import hmac
 import json
@@ -33,7 +34,7 @@ def receiver() -> Iterator[tuple[str, dict]]:
 
         def do_GET(self) -> None:  # noqa: N802
             path = self.path.split("?", 1)[0]
-            if path not in {"/state", "/state-large"}:
+            if path not in {"/state", "/state-large", "/state-slow-drip", "/state-compressed"}:
                 self.send_error(404)
                 return
             run_id = self.headers.get("X-HookStorm-Run", "")
@@ -46,11 +47,25 @@ def receiver() -> Iterator[tuple[str, dict]]:
             if path == "/state-large":
                 payload["padding"] = "x" * (2 * 1024 * 1024 + 1024)
             encoded = json.dumps(payload).encode()
+            if path == "/state-compressed":
+                encoded = gzip.compress(
+                    json.dumps({"processed_events": processed, "padding": "x" * (3 * 1024 * 1024)}).encode()
+                )
             self.send_response(200)
             self.send_header("Content-Type", "application/json")
-            if path == "/state":
-                self.send_header("Content-Length", str(len(encoded)))
+            if path == "/state-compressed":
+                self.send_header("Content-Encoding", "gzip")
+            self.send_header("Content-Length", str(len(encoded)))
             self.end_headers()
+            if path == "/state-slow-drip":
+                try:
+                    for offset in range(0, len(encoded), 6):
+                        self.wfile.write(encoded[offset : offset + 6])
+                        self.wfile.flush()
+                        time.sleep(0.06)
+                except (BrokenPipeError, ConnectionResetError):
+                    pass
+                return
             self.wfile.write(encoded)
 
         def do_POST(self) -> None:  # noqa: N802
@@ -74,6 +89,31 @@ def receiver() -> Iterator[tuple[str, dict]]:
                 {"run_id": run_id, "event_id": event_id, "headers": dict(self.headers), "body": body}
             )
             state["attempts"][delivery_key] += 1
+            if self.path == "/compressed":
+                encoded = gzip.compress(
+                    json.dumps({"ok": True, "padding": "x" * (3 * 1024 * 1024)}).encode()
+                )
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Encoding", "gzip")
+                self.send_header("Content-Length", str(len(encoded)))
+                self.end_headers()
+                self.wfile.write(encoded)
+                return
+            if self.path == "/slow-drip":
+                encoded = b'{"ok":true}'
+                self.send_response(200)
+                self.send_header("Content-Type", "application/json")
+                self.send_header("Content-Length", str(len(encoded)))
+                self.end_headers()
+                try:
+                    for chunk in (encoded[:3], encoded[3:6], encoded[6:9], encoded[9:]):
+                        self.wfile.write(chunk)
+                        self.wfile.flush()
+                        time.sleep(0.06)
+                except (BrokenPipeError, ConnectionResetError):
+                    pass
+                return
             if self.path == "/slow":
                 with state_lock:
                     state["active"] += 1

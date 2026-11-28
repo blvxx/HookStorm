@@ -3,6 +3,7 @@ from __future__ import annotations
 import json
 import math
 import os
+import sqlite3
 import stat
 
 import pytest
@@ -104,6 +105,15 @@ def test_save_list_and_get_run_round_trip(tmp_path) -> None:
     assert loaded["run_id"] == result["run_id"]
     assert loaded["deliveries"] == result["deliveries"]
     assert loaded["history"]["database_run_id"] == "run_001"
+
+def test_in_memory_history_persists_across_connections() -> None:
+    result = make_result("run_memory0")
+
+    assert save_run(result, ":memory:") == "run_memory0"
+    assert get_run("run_memory0", ":memory:")["run_id"] == "run_memory0"
+    assert [item["run_id"] for item in list_runs(":memory:")] == ["run_memory0"]
+
+
 
 
 def test_history_list_filters_scenario_and_limit(tmp_path) -> None:
@@ -440,6 +450,7 @@ def test_business_state_verification_failure_is_a_history_regression() -> None:
         "passed": False,
     }
 
+    current["summary"]["success"] = False
     comparison = compare_results(current, baseline)
 
     assert comparison["has_regressions"] is True
@@ -587,6 +598,99 @@ def test_load_history_export_rejects_inconsistent_summary_metrics(tmp_path) -> N
 
     with pytest.raises(HistoryError, match="total_deliveries"):
         load_history_export(baseline_file)
+
+
+def test_compare_rejects_delivery_pass_flag_that_disagrees_with_final_attempt() -> None:
+    current = make_result("current1", deliveries=[delivery("evt_ok")])
+    current["deliveries"][0]["passed"] = False
+
+    with pytest.raises(HistoryError, match="does not match its final attempt"):
+        compare_results(current, make_result("baseline1"))
+
+
+def test_compare_rejects_summary_success_flag_that_disagrees_with_outcomes() -> None:
+    current = make_result("current1", deliveries=[delivery("evt_failed", passed=False)])
+    current["summary"]["success"] = True
+
+    with pytest.raises(HistoryError, match="summary.success"):
+        compare_results(current, make_result("baseline1"))
+
+
+def test_history_reads_reject_non_object_corrupt_database_rows(tmp_path) -> None:
+    database = tmp_path / "history.sqlite3"
+    save_run(make_result("run_corrup7"), database)
+    connection = sqlite3.connect(database)
+    try:
+        connection.execute(
+            "UPDATE runs SET result_json = ? WHERE run_id = ?",
+            (json.dumps(["not", "a", "run"]), "run_corrup7"),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    with pytest.raises(HistoryError, match="Stored run must be a JSON object"):
+        get_run("run_corrup7", database)
+    with pytest.raises(HistoryError, match="Stored run must be a JSON object"):
+        list_runs(database)
+
+
+def test_history_reads_reject_sqlite_scenario_column_mismatch(tmp_path) -> None:
+    database = tmp_path / "history.sqlite3"
+    save_run(make_result("run_meta7"), database)
+    connection = sqlite3.connect(database)
+    try:
+        connection.execute(
+            "UPDATE runs SET scenario = ? WHERE run_id = ?",
+            ("tampered scenario", "run_meta7"),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    with pytest.raises(HistoryError, match="database scenario does not match"):
+        get_run("run_meta7", database)
+    with pytest.raises(HistoryError, match="database scenario does not match"):
+        list_runs(database)
+
+
+def test_history_reads_reject_sqlite_metric_column_mismatch(tmp_path) -> None:
+    database = tmp_path / "history.sqlite3"
+    save_run(make_result("run_meta9"), database)
+    connection = sqlite3.connect(database)
+    try:
+        connection.execute(
+            "UPDATE runs SET attempts = ? WHERE run_id = ?",
+            (99, "run_meta9"),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    with pytest.raises(HistoryError, match="database attempts does not match"):
+        get_run("run_meta9", database)
+    with pytest.raises(HistoryError, match="database attempts does not match"):
+        list_runs(database)
+
+
+
+def test_history_reads_reject_sqlite_success_column_mismatch(tmp_path) -> None:
+    database = tmp_path / "history.sqlite3"
+    save_run(make_result("run_meta8"), database)
+    connection = sqlite3.connect(database)
+    try:
+        connection.execute(
+            "UPDATE runs SET success = ? WHERE run_id = ?",
+            (0, "run_meta8"),
+        )
+        connection.commit()
+    finally:
+        connection.close()
+
+    with pytest.raises(HistoryError, match="database success does not match"):
+        get_run("run_meta8", database)
+    with pytest.raises(HistoryError, match="database success does not match"):
+        list_runs(database)
 
 
 def test_load_history_export_rejects_empty_attempt_history(tmp_path) -> None:

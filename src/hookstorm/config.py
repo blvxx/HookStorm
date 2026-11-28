@@ -246,6 +246,7 @@ def _validate_verify_auth(value: Any) -> dict[str, str] | None:
     ):
         raise ScenarioError("verify.auth.header must be a valid HTTP header name")
     reserved_headers = {
+        "accept-encoding",
         "authorization",
         "connection",
         "content-length",
@@ -404,7 +405,14 @@ def validate_scenario(data: Any) -> dict[str, Any]:
             for key, value in headers.items()
         ):
             raise ScenarioError(f"{where}.headers must be a mapping of string keys to string values")
+        seen_header_names: set[str] = set()
         for key, value in headers.items():
+            normalized_header = key.lower()
+            if normalized_header in seen_header_names:
+                raise ScenarioError(
+                    f"{where}.headers contains duplicate header names that differ only by case: {key}"
+                )
+            seen_header_names.add(normalized_header)
             if (
                 not re.fullmatch(r"[!#$%&'*+._^|~0-9A-Za-z-]+", key)
                 or not _is_safe_header_value(value)
@@ -412,8 +420,8 @@ def validate_scenario(data: Any) -> dict[str, Any]:
                 raise ScenarioError(
                     f"{where}.headers contains an invalid HTTP header name or non-ASCII/control value"
                 )
-            if key.lower() in {
-                "host", "content-length", "transfer-encoding",
+            if normalized_header in {
+                "host", "content-length", "transfer-encoding", "accept-encoding",
                 "x-hookstorm-run", "x-event-id", "x-event-type",
                 "x-hookstorm-attempt", "x-hookstorm-duplicate-index",
                 "x-hookstorm-signature", "stripe-signature",

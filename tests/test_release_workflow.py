@@ -139,6 +139,28 @@ def test_all_repository_workflow_actions_are_pinned_to_full_commit_shas() -> Non
                 )
 
 
+def test_repository_workflows_do_not_persist_checkout_credentials() -> None:
+    workflow_dir = Path(__file__).resolve().parents[1] / ".github" / "workflows"
+    workflow_paths = sorted((*workflow_dir.glob("*.yml"), *workflow_dir.glob("*.yaml")))
+
+    checkouts = []
+    for workflow_path in workflow_paths:
+        workflow = yaml.load(
+            workflow_path.read_text(encoding="utf-8"), Loader=yaml.BaseLoader
+        )
+        for job in workflow.get("jobs", {}).values():
+            checkouts.extend(
+                step
+                for step in job.get("steps", [])
+                if step.get("uses", "").startswith("actions/checkout@")
+            )
+
+    assert checkouts
+    for checkout in checkouts:
+        assert checkout.get("with", {}).get("persist-credentials") == "false"
+
+
+
 def test_published_release_attaches_validated_distributions_with_limited_permissions() -> None:
     workflow_path = Path(__file__).resolve().parents[1] / ".github" / "workflows" / "release.yml"
     workflow = yaml.load(workflow_path.read_text(encoding="utf-8"), Loader=yaml.BaseLoader)
