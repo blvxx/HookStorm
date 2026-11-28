@@ -215,7 +215,7 @@ automatically read `.env` files; load environment variables through your shell o
 `hookstorm watch scenarios/webhook.yaml` runs immediately, then watches the scenario file
 using a configurable polling interval (`--interval`, 0.2–60 seconds). Invalid edits are
 reported without terminating watch mode; the next file change triggers another validation
-and run. Press Ctrl+C to stop.
+and run. Press Ctrl+C to stop. Interactive terminals also show live per-delivery progress; redirected and CI output stays concise.
 
 `hookstorm init --template` supports `generic`, `stripe`, `github`, `shopify`, and
 `standard-webhooks`. These templates provide representative sample payloads and signature
