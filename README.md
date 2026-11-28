@@ -237,7 +237,7 @@ See [CI integration for application repositories](docs/ci-integration.md) for se
 - Maximum 500 events per scenario; payload limit 1 MiB per event.
 - Maximum 50 concurrent independent events; up to 100 additional duplicates per event.
 - Per-request timeout: up to 5 minutes. Whole-run budget: 60 minutes by default, configurable up to 24 hours.
-- Response body limit: 2 MiB; compressed responses are rejected. JSON values are limited to 128 object/array nesting levels.
+- Response body limit: 2 MiB; compressed responses are rejected. JSON scenario values, response bodies decoded for assertions, and imported history documents are limited to 128 object/array nesting levels.
 - Client-side response-loss injection is not a real network drop. Use the receiver-side commit-then-drop fixture when you need to test a real TCP close.
 - Standard Webhooks support is v1 HMAC only.
 
