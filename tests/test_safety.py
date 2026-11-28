@@ -1,8 +1,15 @@
 from __future__ import annotations
 
+import socket
+
 import pytest
 
-from hookstorm.safety import UnsafeTargetError, validate_target
+from hookstorm.safety import (
+    UnsafeTargetError,
+    canonicalize_hostname,
+    resolve_target,
+    validate_target,
+)
 
 
 def test_accepts_loopback_targets() -> None:
@@ -68,3 +75,49 @@ def test_rejects_invalid_ports_before_network_access(target: str) -> None:
 def test_rejects_malformed_ipv6_url() -> None:
     with pytest.raises(UnsafeTargetError, match="invalid hostname or port"):
         validate_target("http://[not-an-ipv6-address]/webhook")
+
+
+
+@pytest.mark.parametrize(
+    ("hostname", "expected"),
+    [
+        ("BÜCHER.DE", "xn--bcher-kva.de"),
+        ("faß.de", "xn--fa-hia.de"),
+        ("localhost.", "localhost"),
+        ("127.0.0.1", "127.0.0.1"),
+        ("2001:0db8::1", "2001:db8::1"),
+    ],
+)
+def test_canonicalizes_hostnames_for_http_transport(hostname: str, expected: str) -> None:
+    assert canonicalize_hostname(hostname) == expected
+
+
+def test_resolve_target_uses_httpx_compatible_idna_host_for_dns(monkeypatch) -> None:
+    calls: list[str] = []
+
+    def fake_getaddrinfo(host, port, *args, **kwargs):
+        calls.append(host)
+        return [
+            (socket.AF_INET, socket.SOCK_STREAM, 6, "", ("203.0.113.10", port))
+        ]
+
+    monkeypatch.setattr(socket, "getaddrinfo", fake_getaddrinfo)
+    resolved = resolve_target("https://bücher.de/hook", allow_remote=True)
+
+    assert calls == ["xn--bcher-kva.de"]
+    assert resolved.hostname == "xn--bcher-kva.de"
+    assert resolved.addresses == ("203.0.113.10",)
+
+
+def test_resolve_target_rejects_non_loopback_rebinding_for_localhost(monkeypatch) -> None:
+    answers = iter(["127.0.0.1", "192.0.2.1"])
+
+    def rebinding_getaddrinfo(host, port, *args, **kwargs):
+        address = next(answers)
+        return [
+            (socket.AF_INET, socket.SOCK_STREAM, 6, "", (address, port))
+        ]
+
+    monkeypatch.setattr(socket, "getaddrinfo", rebinding_getaddrinfo)
+    with pytest.raises(UnsafeTargetError, match="non-loopback"):
+        resolve_target("http://localhost:8000/hook")

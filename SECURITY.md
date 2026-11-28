@@ -11,6 +11,7 @@ Please do not disclose exploitable vulnerabilities in a public issue. Use GitHub
 ## Safe use
 
 - Use isolated development or staging endpoints.
+- Resolve target hostnames before the run and pin HTTP socket connections to those validated IP addresses. Do not replace the original hostname used for HTTP Host and TLS SNI.
 - Do not run chaos scenarios against production payment, identity, or critical infrastructure endpoints.
 - Treat report files as potentially sensitive because they contain endpoint URLs and event identifiers.
 - Configure verification credentials only through environment variables; never put tokens or API keys in scenario files. HookStorm resolves them before sending webhook traffic and does not persist credential values. Authenticated remote verification endpoints must use HTTPS; plaintext HTTP is restricted to localhost / loopback.

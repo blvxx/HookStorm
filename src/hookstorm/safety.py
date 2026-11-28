@@ -1,14 +1,29 @@
-"""Target URL validation to reduce accidental remote or internal-network requests."""
+"""Target URL validation and connection-time DNS pinning."""
 
 from __future__ import annotations
 
 import ipaddress
 import socket
+from dataclasses import dataclass
 from urllib.parse import urlsplit
+
+import idna
 
 
 class UnsafeTargetError(ValueError):
     """Raised when a target is outside the default local-only policy."""
+
+
+def canonicalize_hostname(hostname: str) -> str:
+    """Use the same IDNA ASCII form that HTTPX/httpcore use for DNS host keys."""
+    normalized = hostname.rstrip(".").lower()
+    try:
+        return ipaddress.ip_address(normalized).compressed.lower()
+    except ValueError:
+        try:
+            return idna.encode(normalized, uts46=True).decode("ascii").lower()
+        except idna.IDNAError as exc:
+            raise UnsafeTargetError("Target hostname is not a valid IDNA hostname") from exc
 
 
 def _is_literal_loopback(hostname: str) -> bool:
@@ -44,6 +59,7 @@ def validate_target(
         raise UnsafeTargetError("Target URL port must be between 1 and 65535")
     if any(character.isspace() for character in parsed.hostname):
         raise UnsafeTargetError("Target URL hostname must not contain whitespace")
+    canonicalize_hostname(parsed.hostname)
     if parsed.username or parsed.password:
         raise UnsafeTargetError("Target URL must not contain embedded credentials")
     if parsed.fragment:
@@ -66,13 +82,84 @@ def validate_target(
         if isinstance(exc, UnsafeTargetError):
             raise
         if hostname != "localhost":
-            raise UnsafeTargetError("Only localhost targets are allowed by default; pass --allow-remote to opt in") from exc
+            raise UnsafeTargetError(
+                "Only localhost targets are allowed by default; pass --allow-remote to opt in"
+            ) from exc
 
     try:
-        resolved = socket.getaddrinfo(hostname, parsed.port or (443 if parsed.scheme == "https" else 80))
+        resolved = socket.getaddrinfo(
+            hostname,
+            parsed.port or (443 if parsed.scheme == "https" else 80),
+            type=socket.SOCK_STREAM,
+        )
     except OSError as exc:
         raise UnsafeTargetError(f"Could not resolve local target host: {exc}") from exc
-    addresses = {item[4][0].split("%", 1)[0] for item in resolved}
-    if not addresses or any(not ipaddress.ip_address(address).is_loopback for address in addresses):
+    addresses = {str(item[4][0]).split("%", 1)[0] for item in resolved}
+    if not addresses or any(
+        not ipaddress.ip_address(address).is_loopback for address in addresses
+    ):
         raise UnsafeTargetError("localhost resolved to a non-loopback address; refusing the request")
     return target.strip()
+
+
+@dataclass(frozen=True)
+class TargetResolution:
+    """Validated URL plus the exact IP addresses approved for its connections."""
+
+    url: str
+    hostname: str
+    addresses: tuple[str, ...]
+
+
+def resolve_target(
+    target: str,
+    *,
+    allow_remote: bool = False,
+    allow_insecure_http: bool = False,
+) -> TargetResolution:
+    """Resolve a target once and return the addresses the HTTP transport must use.
+
+    The URL retains its hostname so HTTP Host, TLS SNI, and certificate hostname
+    verification remain correct. The transport connects only to the returned IPs.
+    """
+    validated = validate_target(
+        target,
+        allow_remote=allow_remote,
+        allow_insecure_http=allow_insecure_http,
+    )
+    parsed = urlsplit(validated)
+    raw_hostname = parsed.hostname or ""
+    hostname = canonicalize_hostname(raw_hostname)
+    try:
+        literal = ipaddress.ip_address(raw_hostname)
+    except ValueError:
+        literal = None
+
+    if literal is not None:
+        return TargetResolution(validated, hostname, (hostname,))
+
+    port = parsed.port or (443 if parsed.scheme == "https" else 80)
+    try:
+        # Resolve the ASCII hostname HTTPX will pass to httpcore (including IDNs).
+        resolved = socket.getaddrinfo(hostname, port, type=socket.SOCK_STREAM)
+    except OSError as exc:
+        raise UnsafeTargetError(
+            f"Could not resolve target host before connecting: {type(exc).__name__}"
+        ) from exc
+
+    addresses = tuple(dict.fromkeys(str(item[4][0]) for item in resolved))
+    if not addresses:
+        raise UnsafeTargetError("Target host resolved to no usable IP addresses")
+
+    if not allow_remote:
+        for address in addresses:
+            try:
+                parsed_address = ipaddress.ip_address(address.split("%", 1)[0])
+            except ValueError as exc:
+                raise UnsafeTargetError("Target host resolved to an invalid IP address") from exc
+            if not parsed_address.is_loopback:
+                raise UnsafeTargetError(
+                    "localhost resolved to a non-loopback address; refusing the request"
+                )
+
+    return TargetResolution(validated, hostname, addresses)

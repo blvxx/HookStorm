@@ -15,12 +15,18 @@ from datetime import UTC, datetime
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
+import httpcore
 import httpx
 
 from hookstorm import __version__
 from hookstorm.config import scenario_fingerprint
 from hookstorm.json_safety import JSONNestingError, ensure_json_nesting_depth
-from hookstorm.safety import validate_target
+from hookstorm.safety import (
+    TargetResolution,
+    UnsafeTargetError,
+    canonicalize_hostname,
+    resolve_target,
+)
 from hookstorm.standard_webhooks import (
     decode_standard_webhooks_secret,
     standard_webhooks_headers,
@@ -79,11 +85,99 @@ def _matches_subset(actual: Any, expected: dict[str, Any]) -> tuple[bool, str | 
     return _match_json_value(actual, expected, "")
 
 
-class _FaultInjectingTransport(httpx.AsyncBaseTransport):
-    """Apply deterministic client-side transport faults to selected request attempts."""
+class _PinnedNetworkBackend:
+    """Route HTTP connections only to IP addresses resolved before the run."""
 
-    def __init__(self) -> None:
-        self._transport = httpx.AsyncHTTPTransport(trust_env=False)
+    def __init__(
+        self,
+        backend: Any,
+        pinned_addresses: dict[str, tuple[str, ...]],
+    ) -> None:
+        self._backend = backend
+        self._pinned_addresses = pinned_addresses
+
+    async def connect_tcp(
+        self,
+        host: str,
+        port: int,
+        timeout: float | None = None,
+        local_address: str | None = None,
+        socket_options: Any = None,
+    ) -> Any:
+        try:
+            canonical_host = canonicalize_hostname(host)
+        except UnsafeTargetError as exc:
+            raise httpcore.ConnectError(
+                "HTTP transport requested an invalid hostname after target validation"
+            ) from exc
+
+        addresses = self._pinned_addresses.get(canonical_host)
+        if not addresses:
+            # Never fall back to a fresh DNS lookup: that would reopen the
+            # validation-to-connection window this transport is designed to close.
+            raise httpcore.ConnectError(
+                "HTTP transport requested a hostname that was not prevalidated"
+            )
+
+        failures: list[Exception] = []
+        for address in addresses:
+            try:
+                return await self._backend.connect_tcp(
+                    address,
+                    port,
+                    timeout=timeout,
+                    local_address=local_address,
+                    socket_options=socket_options,
+                )
+            except (httpcore.ConnectError, httpcore.ConnectTimeout) as exc:
+                failures.append(exc)
+
+        raise failures[-1]
+
+    async def connect_unix_socket(
+        self,
+        path: str,
+        timeout: float | None = None,
+        socket_options: Any = None,
+    ) -> Any:
+        return await self._backend.connect_unix_socket(
+            path,
+            timeout=timeout,
+            socket_options=socket_options,
+        )
+
+    async def sleep(self, seconds: float) -> None:
+        await self._backend.sleep(seconds)
+
+
+class _FaultInjectingTransport(httpx.AsyncBaseTransport):
+    """Apply deterministic client faults while pinning HTTPX to validated DNS results."""
+
+    def __init__(self, targets: tuple[TargetResolution, ...]) -> None:
+        pinned: dict[str, list[str]] = {}
+        for target in targets:
+            addresses = pinned.setdefault(target.hostname, [])
+            for address in target.addresses:
+                if address not in addresses:
+                    addresses.append(address)
+        pinned_addresses = {
+            hostname: tuple(addresses)
+            for hostname, addresses in pinned.items()
+        }
+
+        transport = httpx.AsyncHTTPTransport(trust_env=False)
+        # HTTPX keeps the original request host for Host, TLS SNI and certificate
+        # verification. Only socket address selection is replaced with the pinned
+        # set, preventing the transport from resolving the hostname again.
+        pool = getattr(transport, "_pool", None)
+        backend = getattr(pool, "_network_backend", None)
+        if pool is None or backend is None:
+            raise RuntimeError(
+                "Installed HTTPX transport does not expose the backend needed "
+                "to pin validated DNS results"
+            )
+        pool._network_backend = _PinnedNetworkBackend(backend, pinned_addresses)
+        self._transport = transport
 
     async def handle_async_request(self, request: httpx.Request) -> httpx.Response:
         fault = request.extensions.get("hookstorm_fault_injection")
@@ -213,11 +307,12 @@ async def run_scenario(
     on_delivery: Callable[[dict[str, Any]], None] | None = None,
 ) -> dict[str, Any]:
     """Execute a validated scenario and return a privacy-conscious result document."""
-    target = validate_target(
+    target_resolution = resolve_target(
         target,
         allow_remote=allow_remote,
         allow_insecure_http=allow_insecure_http,
     )
+    target = target_resolution.url
     config_fingerprint = scenario_fingerprint(scenario)
     verify_config = scenario.get("verify")
     verification_auth_config = verify_config.get("auth") if verify_config else None
@@ -225,14 +320,17 @@ async def run_scenario(
         validate_verification_auth_transport(
             verify_config["url"], verification_auth_config
         )
-    verification_url = (
-        validate_target(
+    verification_resolution = (
+        resolve_target(
             verify_config["url"],
             allow_remote=allow_remote,
             allow_insecure_http=allow_insecure_http,
         )
         if verify_config is not None
         else None
+    )
+    verification_url = (
+        verification_resolution.url if verification_resolution is not None else None
     )
     # Resolve verification credentials before any webhook event is sent.
     verification_auth_headers = resolve_verification_auth_headers(verification_auth_config)
@@ -497,7 +595,11 @@ async def run_scenario(
             async with httpx.AsyncClient(
                 follow_redirects=False,
                 trust_env=False,
-                transport=_FaultInjectingTransport(),
+                transport=_FaultInjectingTransport(
+                    (target_resolution,)
+                    if verification_resolution is None
+                    else (target_resolution, verification_resolution)
+                ),
                 timeout=httpx.Timeout(30.0, connect=5.0),
             ) as client:
                 # Start the earliest scheduled events first, even if setup overhead means
