@@ -219,6 +219,209 @@ def _scenario_summary(path: Path, scenario: dict[str, Any]) -> dict[str, Any]:
     }
 
 
+
+def _scenario_event_context(
+    event: dict[str, Any],
+    scenario: dict[str, Any],
+) -> dict[str, Any]:
+    """Return useful event configuration without revealing payload or header values."""
+    delivery = {
+        **scenario["delivery"],
+        **event["delivery"],
+    }
+    payload_bytes = len(
+        __import__("json").dumps(
+            event["payload"],
+            ensure_ascii=False,
+            separators=(",", ":"),
+            allow_nan=False,
+        ).encode("utf-8")
+    )
+    signature = delivery.get("signature", "none")
+    provider = delivery.get("signature_provider", "generic")
+    generated_signature_header = {
+        "generic": "X-HookStorm-Signature",
+        "stripe": "Stripe-Signature",
+        "github": "X-Hub-Signature-256",
+        "shopify": "X-Shopify-Hmac-Sha256",
+        "standard_webhooks": "webhook-signature",
+    }.get(provider)
+    return {
+        "event_type": event["id"],
+        "event_id": event["event_id"],
+        "payload_size_bytes": payload_bytes,
+        "custom_header_names": sorted(event["headers"]),
+        "signature": {
+            "mode": signature,
+            "provider": provider,
+            "generated_header": generated_signature_header if signature in {"valid", "invalid"} else None,
+            "requires_secret": signature in {"valid", "invalid"},
+        },
+        "delivery": {
+            "max_attempts": scenario["retry"]["max_attempts"],
+            "retry_on": scenario["retry"]["retry_on"],
+            "backoff_ms": scenario["retry"]["backoff_ms"],
+            "duplicate_count": delivery.get("duplicate_count", 0),
+            "timeout_ms": delivery.get("timeout_ms", scenario["delivery"].get("timeout_ms", 5_000)),
+            "delay_ms": delivery.get("delay_ms", scenario["delivery"].get("delay_ms", 0)),
+            "concurrency": scenario["delivery"].get("concurrency", 1),
+            "schedule_after_ms": event.get("schedule_after_ms", 0),
+        },
+        "expect_status": event["expect_status"],
+        "expect_json_top_level_keys": sorted(event["expect_json"]) if event.get("expect_json") else [],
+        "expect_duplicate_json_top_level_keys": (
+            sorted(event["expect_duplicate_json"])
+            if event.get("expect_duplicate_json")
+            else []
+        ),
+        "fault_injection": delivery.get(
+            "fault_injection",
+            {"connect_error_attempts": [], "response_loss_attempts": []},
+        ),
+    }
+
+
+def _failure_recommendations(diagnosis: dict[str, Any]) -> list[str]:
+    """Suggest bounded next checks; never claim a cause that history cannot prove."""
+    category = diagnosis["category"]
+    recommendations = {
+        "authentication_or_signature": [
+            "Compare the scenario's signature provider with the receiver's expected signing format.",
+            "Confirm the secret is configured in the receiver and HookStorm environment; do not share secret values.",
+            "Check timestamp tolerance and raw-body handling where the provider uses timestamped signatures.",
+        ],
+        "receiver_validation": [
+            "Compare the event payload schema and required fields with the receiver contract.",
+            "Check validation logs for the event ID and attempt timestamp.",
+        ],
+        "endpoint_route": [
+            "Check the HTTP method and path mounted by the receiver.",
+            "Confirm the request reached the intended application and environment.",
+        ],
+        "receiver_server_error": [
+            "Inspect application and upstream dependency logs for the event ID and attempt time.",
+            "Check database, queue, and downstream service health before replaying.",
+        ],
+        "timeout": [
+            "Compare receiver processing time with the configured request timeout.",
+            "Inspect downstream calls and queue wait time for the event ID.",
+        ],
+        "transport": [
+            "Check DNS, TCP/TLS connectivity, firewall rules, and the configured target path.",
+            "Correlate the attempt time with reverse-proxy and receiver access logs.",
+        ],
+        "transient_http_status": [
+            "Check rate limits, queue saturation, and upstream retry guidance.",
+            "Confirm that retry_on and exponential backoff match the receiver's throttling policy.",
+        ],
+        "response_assertion": [
+            "Compare the receiver's documented JSON response with the scenario's expected key paths.",
+            "Treat the mismatch path as evidence; HookStorm history does not retain the actual response body.",
+        ],
+        "status_assertion": [
+            "Compare the final HTTP status with the scenario's expect_status list.",
+            "Check whether the receiver intentionally returns a different status for duplicate deliveries.",
+        ],
+        "injected_fault": [
+            "This attempt was deliberately altered by HookStorm; do not attribute it to a receiver outage.",
+            "Use the next real attempt and an independent state probe to evaluate idempotency.",
+        ],
+    }.get(category, [
+        "Inspect the receiver logs using the event ID and recorded attempt time.",
+        "Compare the original scenario with the receiver's current webhook contract.",
+    ])
+    if category in {"transport", "timeout"} or any(
+        attempt.get("injected_fault") == "response_loss"
+        for attempt in diagnosis.get("attempts", [])
+    ):
+        recommendations.append(
+            "The business operation may have committed even though HookStorm did not observe an acknowledgement; "
+            "verify receiver state before replaying to avoid repeating a side effect."
+        )
+    return recommendations
+
+
+def _prepare_replay_batch(
+    *,
+    run: dict[str, Any],
+    scenario: dict[str, Any],
+    event_ids: list[str],
+    target: str,
+    allow_scenario_change: bool,
+    allow_target_change: bool,
+) -> tuple[list[dict[str, Any]], dict[str, Any]]:
+    """Validate a bounded batch of failed event IDs against one stored run."""
+    if not isinstance(event_ids, list) or not event_ids:
+        raise ValueError("event_ids must be a non-empty list")
+    if len(event_ids) > 50:
+        raise ValueError("A replay batch may contain at most 50 event IDs")
+    if any(not isinstance(item, str) or not item.strip() for item in event_ids):
+        raise ValueError("Every event_id must be a non-empty string")
+    if len(set(event_ids)) != len(event_ids):
+        raise ValueError("event_ids must not contain duplicates")
+
+    failed_by_id: dict[str, list[dict[str, Any]]] = {}
+    for delivery in run.get("deliveries", []):
+        if not delivery.get("passed"):
+            failed_by_id.setdefault(delivery.get("event_id", ""), []).append(delivery)
+
+    scenario_events: dict[str, dict[str, Any]] = {}
+    for event in scenario["events"]:
+        event_id = event["event_id"]
+        if event_id in scenario_events:
+            raise ValueError("The scenario contains duplicate event IDs")
+        scenario_events[event_id] = event
+
+    selected: list[dict[str, Any]] = []
+    for event_id in event_ids:
+        if not failed_by_id.get(event_id):
+            raise ValueError(
+                f"Run '{run['run_id']}' has no failed delivery for event_id '{event_id}'"
+            )
+        event = scenario_events.get(event_id)
+        if event is None:
+            raise ValueError(
+                f"Scenario does not contain an event with event_id '{event_id}'"
+            )
+        if any(item.get("event_type") != event["id"] for item in failed_by_id[event_id]):
+            raise ValueError(
+                f"Event type for '{event_id}' differs from the failed run; replay is blocked"
+            )
+        selected.append(event)
+
+    scenario_changed = (
+        run.get("scenario") != scenario["name"]
+        or not isinstance(run.get("scenario_fingerprint"), str)
+        or run["scenario_fingerprint"] != scenario_fingerprint(scenario)
+    )
+    target_changed = not _target_matches_history(target, run.get("target", ""))
+    warnings = []
+    if scenario_changed:
+        warnings.append(
+            "The current YAML scenario differs from the configuration recorded for the failed run."
+        )
+    if target_changed:
+        warnings.append(
+            "The supplied target differs from the exact target recorded in the failed run."
+        )
+    if scenario_changed and not allow_scenario_change:
+        raise ValueError(
+            "Scenario mismatch: review the current YAML, then set "
+            "allow_scenario_change=true only when the changed scenario is intentional."
+        )
+    if target_changed and not allow_target_change:
+        raise ValueError(
+            "Target mismatch: use the exact historical target or explicitly set "
+            "allow_target_change=true after checking the destination."
+        )
+    return selected, {
+        "scenario_changed": scenario_changed,
+        "target_changed": target_changed,
+        "failed_deliveries_found": sum(len(failed_by_id[item]) for item in event_ids),
+        "selected_event_count": len(selected),
+        "warnings": warnings,
+    }
+
 def _validate_replay_target(target: str) -> str:
     if not isinstance(target, str) or not target.strip():
         raise ValueError("target must be supplied explicitly for every replay")
@@ -434,6 +637,90 @@ def create_server(
             ],
         }
 
+
+    @server.tool()
+    def hookstorm_analyze_run(
+        run_id: str,
+        scenario_path: str | None = None,
+    ) -> dict[str, Any]:
+        """Combine sanitized run outcomes with scenario settings and actionable failure checks."""
+        run = get_run(run_id, history_db)
+        scenario = None
+        scenario_match = None
+        scenario_file = None
+        if scenario_path is not None:
+            path, scenario = _load_scenario(scenario_path, root)
+            scenario_file = path.name
+            scenario_match = (
+                run.get("scenario") == scenario["name"]
+                and run.get("scenario_fingerprint") == scenario_fingerprint(scenario)
+            )
+
+        event_index = (
+            {event["event_id"]: event for event in scenario["events"]}
+            if scenario is not None
+            else {}
+        )
+        failures = []
+        for delivery in run.get("deliveries", []):
+            if delivery.get("passed"):
+                continue
+            diagnosis = _diagnose_delivery(delivery)
+            event = event_index.get(delivery.get("event_id"))
+            diagnosis["attempt_count"] = len(delivery.get("attempts", []))
+            diagnosis["attempts_exhausted"] = (
+                len(delivery.get("attempts", []))
+                >= (scenario["retry"]["max_attempts"] if scenario is not None else 0)
+                if scenario is not None
+                else None
+            )
+            if event is not None and scenario is not None:
+                context = _scenario_event_context(event, scenario)
+                diagnosis["scenario_context"] = context
+                if not diagnosis["attempts_exhausted"]:
+                    diagnosis["remaining_configured_attempts"] = max(
+                        0, context["delivery"]["max_attempts"] - diagnosis["attempt_count"]
+                    )
+            elif scenario is not None:
+                diagnosis["scenario_context"] = None
+                diagnosis["scenario_warning"] = (
+                    "No event with this ID was found in the supplied scenario."
+                )
+            diagnosis["recommendations"] = _failure_recommendations(diagnosis)
+            failures.append(diagnosis)
+
+        verification = run.get("verification")
+        verification_analysis = None
+        if verification is not None:
+            verification_analysis = {
+                "passed": verification.get("passed"),
+                "status_code": verification.get("status_code"),
+                "latency_ms": verification.get("latency_ms"),
+                "error": verification.get("error"),
+                "recommendation": (
+                    "Check the test-only state endpoint and its run-scoped query. "
+                    "A failed state probe does not by itself identify which delivery caused the mismatch."
+                    if not verification.get("passed")
+                    else "The configured post-delivery state assertion passed."
+                ),
+            }
+
+        return {
+            "run_id": run["run_id"],
+            "scenario": run["scenario"],
+            "scenario_file": scenario_file,
+            "scenario_matches_recorded_fingerprint": scenario_match,
+            "target": run["target"],
+            "success": run["summary"]["success"],
+            "summary": run["summary"],
+            "failed_deliveries": failures,
+            "verification": verification_analysis,
+            "privacy": (
+                "Payload values, header values, credentials, and response bodies are not returned. "
+                "Scenario context contains only payload byte counts, header names, and assertion key names."
+            ),
+        }
+
     @server.tool()
     async def hookstorm_replay_failed_delivery(
         run_id: str,
@@ -523,6 +810,97 @@ def create_server(
             "verification": {
                 "performed": False,
                 "reason": "The original scenario's whole-run verification probe was not repeated.",
+            },
+        }
+
+
+    @server.tool()
+    async def hookstorm_replay_failed_deliveries(
+        run_id: str,
+        scenario_path: str,
+        event_ids: list[str],
+        target: str,
+        confirm: bool = False,
+        allow_scenario_change: bool = False,
+        allow_target_change: bool = False,
+    ) -> dict[str, Any]:
+        """Preview or replay up to 50 failed events from one run after explicit confirmation."""
+        run = get_run(run_id, history_db)
+        path, scenario = _load_scenario(scenario_path, root)
+        safe_target = _validate_replay_target(target)
+        selected_events, checks = _prepare_replay_batch(
+            run=run,
+            scenario=scenario,
+            event_ids=event_ids,
+            target=safe_target,
+            allow_scenario_change=allow_scenario_change,
+            allow_target_change=allow_target_change,
+        )
+        preview = {
+            "executed": False,
+            "replay_enabled": replay_allowed,
+            "requires_confirmation": True,
+            "source_run_id": run_id,
+            "scenario": path.name,
+            "target": safe_target,
+            "event_ids": [event["event_id"] for event in selected_events],
+            **checks,
+        }
+        if not replay_allowed:
+            preview["message"] = (
+                "No request was sent. Replay is disabled. Set "
+                "HOOKSTORM_MCP_ENABLE_REPLAY=1 in the MCP server environment "
+                "after reviewing the local test boundary."
+            )
+            return preview
+        if not confirm:
+            preview["message"] = (
+                "No request was sent. Set confirm=true only after reviewing all selected "
+                "event IDs, the destination, and the warnings."
+            )
+            return preview
+
+        selected_scenario = {
+            **scenario,
+            "events": [
+                {**event, "schedule_after_ms": 0}
+                for event in scenario["events"]
+                if event["event_id"] in set(event_ids)
+            ],
+            "verify": None,
+        }
+        result = await run_scenario(selected_scenario, safe_target)
+        try:
+            save_run(result, history_db)
+            history_saved = True
+            history_warning = None
+        except HistoryError as exc:
+            history_saved = False
+            history_warning = str(exc)
+        return {
+            "executed": True,
+            "replay_enabled": True,
+            "source_run_id": run_id,
+            "run_id": result["run_id"],
+            "scenario": result["scenario"],
+            "target": result["target"],
+            "selected_event_ids": [event["event_id"] for event in selected_events],
+            "summary": result["summary"],
+            "deliveries": [
+                {
+                    "event_type": item["event_type"],
+                    "event_id": item["event_id"],
+                    "duplicate_index": item["duplicate_index"],
+                    "passed": item["passed"],
+                    "attempts": [_attempt_summary(attempt) for attempt in item["attempts"]],
+                }
+                for item in result["deliveries"]
+            ],
+            "history_saved": history_saved,
+            "history_warning": history_warning,
+            "verification": {
+                "performed": False,
+                "reason": "The original whole-scenario verification probe was not repeated.",
             },
         }
 
