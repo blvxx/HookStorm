@@ -984,6 +984,7 @@ def test_deterministic_fault_injection_example_proves_single_effect(receiver) ->
     assert len(state["effects"]) == 1
     assert result["verification"]["passed"] is True
 
+
 def test_deeply_nested_webhook_response_fails_cleanly(receiver, monkeypatch) -> None:
     base, _state = receiver
     nested_json = b"[" * 10_000 + b"0" + b"]" * 10_000
@@ -1007,6 +1008,7 @@ def test_deeply_nested_webhook_response_fails_cleanly(receiver, monkeypatch) -> 
     assert attempt["error"] == (
         "response JSON is nested too deeply to compare safely"
     )
+
 
 
 def test_deeply_nested_verification_response_fails_cleanly(
