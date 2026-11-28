@@ -413,6 +413,11 @@ async def run_scenario(
                                         matched, mismatch = _matches_subset(
                                             json.loads(response_body), expected_json
                                         )
+                                    except RecursionError:
+                                        matched, mismatch = (
+                                            False,
+                                            "response JSON is nested too deeply to compare safely",
+                                        )
                                     except ValueError:
                                         matched, mismatch = (
                                             False,
@@ -543,6 +548,11 @@ async def run_scenario(
                                     try:
                                         matched, mismatch = _matches_subset(
                                             json.loads(response_body), verify_config["expect_json"]
+                                        )
+                                    except RecursionError:
+                                        matched, mismatch = (
+                                            False,
+                                            "verification response JSON is nested too deeply to compare safely",
                                         )
                                     except ValueError:
                                         matched, mismatch = (
