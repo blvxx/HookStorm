@@ -146,7 +146,9 @@ def _parse_record(value: Any) -> dict[str, Any] | None:
     if timestamp is None or event_id is None or severity is None or outcome is None:
         return None
     provider = value.get("provider")
-    if provider is not None and provider not in _ALLOWED_PROVIDERS:
+    if provider is not None and (
+        not isinstance(provider, str) or provider not in _ALLOWED_PROVIDERS
+    ):
         return None
     provider_delivery_id = _safe_text(value.get("provider_delivery_id"), 256)
     event_type = _safe_text(value.get("event_type"), 256)
