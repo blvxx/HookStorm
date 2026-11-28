@@ -358,8 +358,8 @@ def test_shopify_adapter_rejects_option_injection_and_invalid_ranges() -> None:
 
 
 def test_shopify_adapter_hides_cli_errors_and_bounds_output() -> None:
-    from types import SimpleNamespace
     import subprocess
+    from types import SimpleNamespace
 
     def failed_runner(command: list[str], **kwargs: object) -> SimpleNamespace:
         return SimpleNamespace(
