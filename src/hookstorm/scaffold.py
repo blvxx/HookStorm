@@ -8,7 +8,7 @@ import re
 import uuid
 from pathlib import Path, PureWindowsPath
 
-HOOKSTORM_INSTALL_REF = "4b530e56d855fbbeb7d7801d200854fd4775b24a"
+HOOKSTORM_INSTALL_REF = "356364c4978a6f06b1c1a1b6b206c156e6576248"
 _SIGNATURE_PROVIDERS = {"generic", "stripe", "github", "shopify", "standard_webhooks"}
 _SAFE_PATH = re.compile(r"^[A-Za-z0-9._/-]+$")
 _INSTALL_REF_PATTERN = re.compile(
