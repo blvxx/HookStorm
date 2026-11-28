@@ -154,9 +154,10 @@ def render_scenario(
     payload_block = "\n".join(f"      {line}" for line in payload_json.splitlines())
     headers_block = ""
     if headers:
-        headers_json = json.dumps(headers, ensure_ascii=False, indent=2)
         headers_block = "\n    headers:\n" + "\n".join(
-            f"      {line}" for line in headers_json.splitlines()
+            f"      {json.dumps(key, ensure_ascii=False)}: "
+            f"{json.dumps(value, ensure_ascii=False)}"
+            for key, value in headers.items()
         )
 
     return f"""version: 1
