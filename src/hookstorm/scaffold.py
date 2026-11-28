@@ -307,11 +307,85 @@ jobs:
 """
 
 
+def render_gitlab_workflow(*, scenario_path: str) -> str:
+    """Render a GitLab CI pipeline restricted to the default branch.
+
+    Protected staging variables are therefore not exposed to untrusted feature
+    branches or merge-request pipelines by this generated starter configuration.
+    """
+    install = (
+        "git+https://github.com/blvxx/HookStorm.git@"
+        f"{HOOKSTORM_INSTALL_REF}"
+    )
+    return f"""workflow:
+  rules:
+    - if: '$CI_COMMIT_BRANCH == $CI_DEFAULT_BRANCH'
+    - when: never
+
+stages:
+  - test
+
+webhook-regression:
+  stage: test
+  image: python:3.12-slim
+  resource_group: hookstorm-webhook-regression-baseline
+  environment:
+    name: staging
+  variables:
+    HOOKSTORM_SCENARIO: "{scenario_path}"
+    HOOKSTORM_LATENCY_THRESHOLD_PCT: "20"
+    HOOKSTORM_HISTORY_DB: ".hookstorm/history.sqlite3"
+    HOOKSTORM_BASELINE_FILE: ".hookstorm-baselines/webhook.json"
+    PIP_DISABLE_PIP_VERSION_CHECK: "1"
+  cache:
+    key: "hookstorm-baseline-$CI_DEFAULT_BRANCH"
+    paths:
+      - .hookstorm-baselines/
+  script:
+    - |
+      set -e
+      python -m pip install --disable-pip-version-check "{install}"
+      mkdir -p .hookstorm .hookstorm-baselines test-results
+
+      hookstorm doctor "$HOOKSTORM_SCENARIO" --connect --secret-env HOOKSTORM_SECRET
+
+      if [ "[object Object]" = "1" ]; then
+        hookstorm doctor "$HOOKSTORM_SCENARIO" --connect --secret-env HOOKSTORM_SECRET --allow-insecure-http
+        hookstorm run "$HOOKSTORM_SCENARIO" --allow-remote --allow-insecure-http \
+          --secret-env HOOKSTORM_SECRET --history-db "$HOOKSTORM_HISTORY_DB" \
+          --format junit --output test-results/webhook-regression.xml
+      else
+        hookstorm run "$HOOKSTORM_SCENARIO" --allow-remote \
+          --secret-env HOOKSTORM_SECRET --history-db "$HOOKSTORM_HISTORY_DB" \
+          --format junit --output test-results/webhook-regression.xml
+      fi
+
+      if [ -f "$HOOKSTORM_BASELINE_FILE" ]; then
+        hookstorm history compare-file "$HOOKSTORM_BASELINE_FILE" \
+          --db "$HOOKSTORM_HISTORY_DB" \
+          --latency-threshold-pct "$HOOKSTORM_LATENCY_THRESHOLD_PCT"
+      else
+        echo "No baseline exists yet; creating the initial default-branch baseline."
+      fi
+
+      # Advance the cached baseline only after delivery assertions and comparison pass.
+      hookstorm history export latest --output "$HOOKSTORM_BASELINE_FILE" \
+        --db "$HOOKSTORM_HISTORY_DB"
+  artifacts:
+    when: always
+    expire_in: 14 days
+    reports:
+      junit: test-results/webhook-regression.xml
+    paths:
+      - test-results/webhook-regression.xml
+"""
+
 def initialize_project(
     *,
     root: str | Path = ".",
     scenario_path: str = "scenarios/webhook.yaml",
-    workflow_path: str = ".github/workflows/webhook-regression.yml",
+    workflow_path: str | None = None,
+    ci_provider: str = "github",
     template: str = "generic",
     event_type: str | None = None,
     event_id: str | None = None,
@@ -321,13 +395,23 @@ def initialize_project(
     include_workflow: bool = True,
     force: bool = False,
 ) -> list[Path]:
-    """Create a starter scenario and optional GitHub Actions workflow."""
+    """Create a starter scenario and optional GitHub Actions or GitLab CI workflow."""
+    if ci_provider not in {"github", "gitlab"}:
+        raise ValueError("ci_provider must be 'github' or 'gitlab'")
+    if workflow_path is None:
+        workflow_path = (
+            ".github/workflows/webhook-regression.yml"
+            if ci_provider == "github"
+            else ".gitlab-ci.yml"
+        )
     scenario_rel = _relative_project_path(scenario_path, "scenario path")
     workflow_rel = _relative_project_path(workflow_path, "workflow path")
     if scenario_rel == workflow_rel:
         raise ValueError("Scenario and workflow paths must be different")
-    if include_workflow and not workflow_rel.as_posix().startswith(".github/workflows/"):
-        raise ValueError("workflow path must be inside .github/workflows/")
+    if include_workflow and ci_provider == "github" and not workflow_rel.as_posix().startswith(".github/workflows/"):
+        raise ValueError("GitHub Actions workflow path must be inside .github/workflows/")
+    if include_workflow and ci_provider == "gitlab" and workflow_rel.as_posix() != ".gitlab-ci.yml":
+        raise ValueError("GitLab CI configuration must be written to the project root as .gitlab-ci.yml")
     if scenario_rel.suffix.lower() not in {".yaml", ".yml"}:
         raise ValueError("scenario path must end in .yaml or .yml")
     if include_workflow and workflow_rel.suffix.lower() not in {".yaml", ".yml"}:
@@ -351,9 +435,13 @@ def initialize_project(
     if include_workflow:
         outputs.append((
             workflow_file,
-            render_workflow(
-                scenario_path=scenario_rel.as_posix(),
-                workflow_path=workflow_rel.as_posix(),
+            (
+                render_workflow(
+                    scenario_path=scenario_rel.as_posix(),
+                    workflow_path=workflow_rel.as_posix(),
+                )
+                if ci_provider == "github"
+                else render_gitlab_workflow(scenario_path=scenario_rel.as_posix())
             ),
         ))
 
