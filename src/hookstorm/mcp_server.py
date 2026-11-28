@@ -17,6 +17,7 @@ from hookstorm.providers import (
     StripeEventAdapter,
     canonical_json_fingerprint,
 )
+from hookstorm.receiver_evidence import inspect_receiver_evidence
 from hookstorm.runner import probe_business_state, run_scenario
 from hookstorm.safety import validate_target
 
@@ -1072,6 +1073,7 @@ def create_server(
     github_http_client: Any | None = None,
     stripe_http_client: Any | None = None,
     shopify_cli_runner: Any | None = None,
+    evidence_root: str | Path | None = None,
 ):
     """Create the local MCP server; injected paths make its tools testable."""
     try:
@@ -1083,6 +1085,14 @@ def create_server(
         ) from exc
 
     root = _scenario_root(scenario_root)
+    configured_evidence_root = (
+        evidence_root
+        if evidence_root is not None
+        else os.getenv("HOOKSTORM_MCP_EVIDENCE_ROOT", str(root))
+    )
+    evidence_directory = Path(configured_evidence_root).expanduser().resolve()
+    if not evidence_directory.exists() or not evidence_directory.is_dir():
+        raise ValueError("HOOKSTORM_MCP_EVIDENCE_ROOT must be an existing directory")
     replay_allowed = (
         _enabled(os.getenv("HOOKSTORM_MCP_ENABLE_REPLAY"))
         if enable_replay is None
@@ -1099,7 +1109,9 @@ def create_server(
             "Replay targets are loopback-only. If HOOKSTORM_GITHUB_TOKEN is configured, "
             "read-only tools can inspect repository webhook delivery records from GitHub. "
             "Provider HTTP statuses are evidence of observed responses, not automatic proof "
-            "of an internal root cause. Use the guarded replay tool when a scenario has a read-only "
+            "of an internal root cause. Structured receiver JSONL evidence can confirm only an explicit, "
+            "allowlisted receiver error code for an exact event identity. Stripe Events API search is "
+            "not a per-endpoint delivery-attempt log. Use the guarded replay tool when a scenario has a read-only "
             "verify endpoint; it requires pre- and post-replay state assertions and keeps the same "
             "event ID and source-run correlation value."
         ),
@@ -1677,9 +1689,128 @@ def create_server(
             }
         return result
 
+
+    @server.tool()
+    def hookstorm_list_stripe_events(
+        limit: int = 20,
+        event_type: str | None = None,
+        event_types: list[str] | None = None,
+        delivery_success: bool | None = False,
+        created_after: int | None = None,
+        created_before: int | None = None,
+        starting_after: str | None = None,
+        ending_before: str | None = None,
+        run_id: str | None = None,
+        scenario_path: str | None = None,
+    ) -> dict[str, Any]:
+        """List Stripe Events with bounded filters; this is not an endpoint attempt-log API."""
+        if (run_id is None) != (scenario_path is None):
+            raise ValueError("run_id and scenario_path must be supplied together")
+        with StripeEventAdapter(client=stripe_http_client) as adapter:
+            result = adapter.list_events(
+                limit=limit,
+                event_type=event_type,
+                event_types=event_types,
+                delivery_success=delivery_success,
+                created_after=created_after,
+                created_before=created_before,
+                starting_after=starting_after,
+                ending_before=ending_before,
+            )
+        if run_id is not None and scenario_path is not None:
+            run = get_run(run_id, history_db)
+            _, scenario = _load_scenario(scenario_path, root)
+            for item in result["events"]:
+                item["correlation"] = _correlate_stripe_event(item, run, scenario)
+            result["correlation_requested"] = True
+        else:
+            result["correlation_requested"] = False
+        result["read_only"] = True
+        return result
+
+
+    @server.tool()
+    def hookstorm_inspect_receiver_evidence(
+        evidence_path: str,
+        event_id: str,
+        provider: str | None = None,
+        provider_delivery_id: str | None = None,
+        request_id: str | None = None,
+        run_id: str | None = None,
+        scenario_path: str | None = None,
+    ) -> dict[str, Any]:
+        """Inspect structured receiver logs; confirm only exact, explicit, consistent error evidence."""
+        if (run_id is None) != (scenario_path is None):
+            raise ValueError("run_id and scenario_path must be supplied together")
+        result = inspect_receiver_evidence(
+            evidence_path,
+            root=evidence_directory,
+            event_id=event_id,
+            provider=provider,
+            provider_delivery_id=provider_delivery_id,
+            request_id=request_id,
+        )
+        if run_id is not None and scenario_path is not None:
+            run = get_run(run_id, history_db)
+            _, scenario = _load_scenario(scenario_path, root)
+            scenario_matches = (
+                run.get("scenario") == scenario.get("name")
+                and isinstance(run.get("scenario_fingerprint"), str)
+                and run.get("scenario_fingerprint") == scenario_fingerprint(scenario)
+            )
+            events = [
+                item for item in scenario.get("events", [])
+                if item.get("event_id") == event_id
+            ]
+            deliveries = [
+                item for item in run.get("deliveries", [])
+                if item.get("event_id") == event_id
+            ]
+            unique_link = (
+                scenario_matches
+                and len(events) == 1
+                and len(deliveries) == 1
+                and deliveries[0].get("event_type") == events[0].get("id")
+            )
+            result["local_correlation"] = {
+                "status": (
+                    "confirmed"
+                    if unique_link
+                    else "partial"
+                    if events or deliveries
+                    else "unmatched"
+                ),
+                "scenario_matches_recorded_fingerprint": scenario_matches,
+                "scenario_event_found": len(events) == 1,
+                "local_delivery_found": len(deliveries) == 1,
+                "run_id": run_id,
+                "event_id": event_id,
+                "local_event": (
+                    {
+                        "event_type": events[0].get("id"),
+                        "passed": bool(deliveries[0].get("passed")),
+                        "attempt_count": len(deliveries[0].get("attempts", [])),
+                        "diagnosis": (
+                            _diagnose_delivery(deliveries[0])
+                            if not deliveries[0].get("passed")
+                            else None
+                        ),
+                    }
+                    if unique_link
+                    else None
+                ),
+                "note": (
+                    "The local run link is confirmed only when the saved scenario fingerprint, "
+                    "event identity, and local delivery type all agree."
+                ),
+            }
+        return result
+
+
     @server.tool()
     def hookstorm_list_shopify_deliveries(
         since: str = "1h",
+        until: str | None = None,
         limit: int = 20,
         status: str | None = "failure",
         store: str | None = None,
@@ -1693,6 +1824,7 @@ def create_server(
         adapter = ShopifyAppLogsAdapter(runner=shopify_cli_runner)
         deliveries = adapter.list_webhook_deliveries(
             since=since,
+            until=until,
             limit=limit,
             status=status,
             store=store,
@@ -1711,13 +1843,21 @@ def create_server(
         return {
             "provider": "shopify",
             "source": "shopify_cli_app_logs",
+            "query": {
+                "since": since,
+                "until": until,
+                "limit": limit,
+                "status": status,
+                "store": store,
+                "client_id": client_id,
+            },
             "count": len(deliveries),
             "deliveries": deliveries,
             "read_only": True,
             "correlation_requested": run_id is not None,
             "limitations": [
                 "Requires Shopify CLI 5.1+ and an existing authenticated Shopify account session.",
-                "The CLI log query is limited to a 24-hour window per call and 1,000 records.",
+                "The CLI supports a lookback of up to 7 days in windows no longer than 24 hours, with at most 1,000 records per call.",
                 "CI automation tokens are not supported by this CLI log command.",
                 "Shopify CLI log records can omit or truncate bodies; missing payload fingerprints prevent payload-based correlation.",
                 "Correlation is confirmed only when the local scenario fingerprint, event identity, payload, topic, and target agree.",

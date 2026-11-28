@@ -467,10 +467,215 @@ class StripeEventAdapter:
         }
 
 
+    @staticmethod
+    def _summarize_event(event: Any) -> dict[str, Any]:
+        if not isinstance(event, dict):
+            raise ProviderSourceError("Stripe API returned a malformed Event")
+        event_id = event.get("id")
+        if (
+            not isinstance(event_id, str)
+            or not re.fullmatch(r"evt_[A-Za-z0-9]+", event_id)
+        ):
+            raise ProviderSourceError("Stripe API returned an Event without a valid ID")
+
+        event_fingerprint, event_size = canonical_json_fingerprint(event)
+        data = event.get("data")
+        data_object = data.get("object") if isinstance(data, dict) else None
+        if isinstance(data_object, dict):
+            object_fingerprint, object_size = canonical_json_fingerprint(data_object)
+        else:
+            object_fingerprint, object_size = None, None
+
+        created = event.get("created")
+        if isinstance(created, bool) or not isinstance(created, int):
+            created = None
+        pending = event.get("pending_webhooks")
+        if isinstance(pending, bool) or not isinstance(pending, int):
+            pending = None
+        livemode = event.get("livemode") if isinstance(event.get("livemode"), bool) else None
+        request = event.get("request")
+        request_id = request.get("id") if isinstance(request, dict) else None
+        return {
+            "provider": "stripe",
+            "source": "stripe_events_api",
+            "event_id": event_id,
+            "event_type": _safe_text(event.get("type"), 256),
+            "object": _safe_text(event.get("object"), 64),
+            "created": created,
+            "api_version": _safe_text(event.get("api_version"), 64),
+            "livemode": livemode,
+            "pending_webhooks": pending,
+            "request_id": _safe_text(request_id, 128),
+            "payload": {"sha256": event_fingerprint, "size_bytes": event_size},
+            "data_object": {
+                "available": object_fingerprint is not None,
+                "sha256": object_fingerprint,
+                "size_bytes": object_size,
+            },
+            "delivery_attempt_history_available": False,
+        }
+
+    def list_events(
+        self,
+        *,
+        limit: int = 20,
+        event_type: str | None = None,
+        event_types: list[str] | None = None,
+        delivery_success: bool | None = None,
+        created_after: int | None = None,
+        created_before: int | None = None,
+        starting_after: str | None = None,
+        ending_before: str | None = None,
+    ) -> dict[str, Any]:
+        """List recent Stripe Event objects; delivery_success is account-wide, not endpoint-specific."""
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 100:
+            raise ProviderSourceError("limit must be an integer between 1 and 100")
+        if event_type is not None and (
+            not isinstance(event_type, str)
+            or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.*-]{0,127}", event_type)
+        ):
+            raise ProviderSourceError("event_type contains invalid characters")
+        if event_types is not None:
+            if (
+                not isinstance(event_types, list)
+                or not 1 <= len(event_types) <= 20
+                or any(
+                    not isinstance(item, str)
+                    or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.*-]{0,127}", item)
+                    for item in event_types
+                )
+                or len(set(event_types)) != len(event_types)
+            ):
+                raise ProviderSourceError("event_types must contain 1 to 20 unique valid event types")
+        if event_type is not None and event_types is not None:
+            raise ProviderSourceError("Use event_type or event_types, not both")
+        if delivery_success is not None and not isinstance(delivery_success, bool):
+            raise ProviderSourceError("delivery_success must be a boolean or omitted")
+        for name, value in (("created_after", created_after), ("created_before", created_before)):
+            if value is not None and (
+                isinstance(value, bool) or not isinstance(value, int) or value < 0
+            ):
+                raise ProviderSourceError(f"{name} must be a non-negative Unix timestamp")
+        if created_after is not None and created_before is not None and created_after > created_before:
+            raise ProviderSourceError("created_after must not be later than created_before")
+        for name, value in (("starting_after", starting_after), ("ending_before", ending_before)):
+            if value is not None and (
+                not isinstance(value, str)
+                or len(value) > 128
+                or not re.fullmatch(r"evt_[A-Za-z0-9]+", value)
+            ):
+                raise ProviderSourceError(f"{name} must be a valid Stripe event ID")
+        if starting_after is not None and ending_before is not None:
+            raise ProviderSourceError("Use starting_after or ending_before, not both")
+
+        params: list[tuple[str, str]] = [("limit", str(limit))]
+        if event_type is not None:
+            params.append(("type", event_type))
+        if event_types is not None:
+            params.extend(("types[]", item) for item in event_types)
+        if delivery_success is not None:
+            params.append(("delivery_success", str(delivery_success).lower()))
+        if created_after is not None:
+            params.append(("created[gte]", str(created_after)))
+        if created_before is not None:
+            params.append(("created[lte]", str(created_before)))
+        if starting_after is not None:
+            params.append(("starting_after", starting_after))
+        if ending_before is not None:
+            params.append(("ending_before", ending_before))
+
+        try:
+            with self._client.stream(
+                "GET",
+                "https://api.stripe.com/v1/events",
+                params=params,
+                auth=(self._api_key, ""),
+                headers={"Accept": "application/json", "User-Agent": "HookStorm-MCP"},
+                follow_redirects=False,
+            ) as response:
+                body = bytearray()
+                for chunk in response.iter_bytes():
+                    if len(body) + len(chunk) > _MAX_API_RESPONSE_BYTES:
+                        raise ProviderSourceError(
+                            "Stripe API response exceeds the 2 MiB inspection limit"
+                        )
+                    body.extend(chunk)
+                status_code = response.status_code
+        except ProviderSourceError:
+            raise
+        except httpx.TimeoutException as exc:
+            raise ProviderSourceError("Stripe API request timed out") from exc
+        except httpx.HTTPError as exc:
+            raise ProviderSourceError("Stripe API request failed before a response was received") from exc
+
+        if not 200 <= status_code < 300:
+            if status_code in {401, 403}:
+                raise ProviderSourceError(
+                    f"Stripe API denied access (HTTP {status_code}); verify the API key "
+                    "and Events read permission"
+                )
+            raise ProviderSourceError(f"Stripe API returned HTTP {status_code}")
+
+        try:
+            payload = json.loads(body)
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise ProviderSourceError("Stripe API returned invalid JSON") from exc
+        if not isinstance(payload, dict) or not isinstance(payload.get("data"), list):
+            raise ProviderSourceError("Stripe API returned an unexpected Event list")
+        if len(payload["data"]) > limit:
+            raise ProviderSourceError("Stripe API returned more Events than requested")
+        has_more = payload.get("has_more")
+        if not isinstance(has_more, bool):
+            raise ProviderSourceError("Stripe API returned an invalid pagination marker")
+        events = [self._summarize_event(item) for item in payload["data"]]
+        return {
+            "provider": "stripe",
+            "source": "stripe_events_api",
+            "events": events,
+            "count": len(events),
+            "has_more": has_more,
+            "next_cursor": events[-1]["event_id"] if has_more and events else None,
+            "filters": {
+                "event_type": event_type,
+                "event_types": event_types,
+                "delivery_success": delivery_success,
+                "created_after": created_after,
+                "created_before": created_before,
+            },
+            "delivery_success_semantics": (
+                "Stripe applies this filter to whether all webhook endpoints have successfully "
+                "received the Event. false also includes Events still pending delivery. It does "
+                "not identify a particular endpoint or expose its individual delivery attempts."
+                if delivery_success is not None
+                else None
+            ),
+            "delivery_attempt_history_available": False,
+            "limitations": [
+                "Stripe Events API lists Event objects and supports an account-wide delivery_success filter.",
+                "It does not return per-endpoint attempt logs, response bodies, or retry timelines.",
+                "Inspect one endpoint's Webhook attempts in the Stripe Dashboard for those details.",
+            ],
+        }
+
+
 class ShopifyAppLogsAdapter:
     """Read Shopify webhook log entries through the authenticated Shopify CLI 5.1+."""
 
-    _ALLOWED_SINCE = {"1h", "6h", "12h", "24h"}
+    _MAX_LOOKBACK_HOURS = 168
+    _MAX_WINDOW_HOURS = 24
+
+    @classmethod
+    def _duration_hours(cls, value: Any, name: str) -> int:
+        if not isinstance(value, str) or len(value) > 4:
+            raise ProviderSourceError(f"{name} must be a relative duration such as 24h or 2d")
+        match = re.fullmatch(r"(0|[1-9][0-9]*)(h|d)", value)
+        if match is None:
+            raise ProviderSourceError(f"{name} must use whole hours or days, e.g. 24h or 2d")
+        amount = int(match.group(1))
+        hours = amount * (24 if match.group(2) == "d" else 1)
+        if hours < 1 or hours > cls._MAX_LOOKBACK_HOURS:
+            raise ProviderSourceError(f"{name} must be between 1 hour and 7 days")
+        return hours
 
     def __init__(
         self,
@@ -598,6 +803,7 @@ class ShopifyAppLogsAdapter:
         self,
         *,
         since: str = "1h",
+        until: str | None = None,
         limit: int = 20,
         status: str | None = None,
         store: str | None = None,
@@ -608,8 +814,18 @@ class ShopifyAppLogsAdapter:
         import subprocess
         from pathlib import Path
 
-        if since not in self._ALLOWED_SINCE:
-            raise ProviderSourceError("since must be one of: 1h, 6h, 12h, 24h")
+        since_hours = self._duration_hours(since, "since")
+        if until is None:
+            if since_hours > self._MAX_WINDOW_HOURS:
+                raise ProviderSourceError(
+                    "since windows may be at most 24 hours; set until to query older periods"
+                )
+        else:
+            until_hours = self._duration_hours(until, "until")
+            if since_hours <= until_hours:
+                raise ProviderSourceError("since must be earlier than until")
+            if since_hours - until_hours > self._MAX_WINDOW_HOURS:
+                raise ProviderSourceError("Shopify log query windows may not exceed 24 hours")
         if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 1000:
             raise ProviderSourceError("limit must be an integer between 1 and 1000")
         if status not in {None, "success", "failure"}:
@@ -637,11 +853,10 @@ class ShopifyAppLogsAdapter:
             "webhook",
             "--since",
             since,
-            "--limit",
-            str(limit),
-            "--json",
-            "--no-input",
         ]
+        if until is not None:
+            command.extend(["--until", until])
+        command.extend(["--limit", str(limit), "--json", "--no-input"])
         if status is not None:
             command.extend(["--status", status])
         if store is not None:

@@ -314,7 +314,8 @@ def test_shopify_adapter_runs_read_only_bounded_json_command_and_sanitizes() -> 
 
     adapter = ShopifyAppLogsAdapter(executable="/usr/local/bin/shopify", runner=fake_runner)
     result = adapter.list_webhook_deliveries(
-        since="24h",
+        since="168h",
+        until="144h",
         limit=100,
         status="failure",
         store="dev-store.myshopify.com",
@@ -323,16 +324,20 @@ def test_shopify_adapter_runs_read_only_bounded_json_command_and_sanitizes() -> 
     )
 
     command, kwargs = calls[0]
-    assert command[:8] == [
+    assert command[:10] == [
         "/usr/local/bin/shopify",
         "app",
         "logs",
         "--type",
         "webhook",
         "--since",
-        "24h",
+        "168h",
+        "--until",
+        "144h",
         "--limit",
     ]
+    assert "--until" in command
+    assert command[command.index("--until") + 1] == "144h"
     assert "--json" in command and "--no-input" in command
     assert kwargs["shell"] is False
     assert kwargs["capture_output"] is True
@@ -358,6 +363,12 @@ def test_shopify_adapter_rejects_option_injection_and_invalid_ranges() -> None:
         adapter.list_webhook_deliveries(store="shop.myshopify.com;whoami")
     with pytest.raises(ProviderSourceError, match="since"):
         adapter.list_webhook_deliveries(since="30d")
+    with pytest.raises(ProviderSourceError, match="24 hours"):
+        adapter.list_webhook_deliveries(since="48h")
+    with pytest.raises(ProviderSourceError, match="earlier than until"):
+        adapter.list_webhook_deliveries(since="24h", until="48h")
+    with pytest.raises(ProviderSourceError, match="24 hours"):
+        adapter.list_webhook_deliveries(since="72h", until="24h")
     with pytest.raises(ProviderSourceError, match="limit"):
         adapter.list_webhook_deliveries(limit=1001)
 
@@ -393,3 +404,70 @@ def test_shopify_adapter_hides_cli_errors_and_bounds_output() -> None:
 
     with pytest.raises(ProviderSourceError, match="timed out"):
         ShopifyAppLogsAdapter(runner=timeout_runner).list_webhook_deliveries()
+
+
+def test_stripe_adapter_lists_events_with_bounded_delivery_success_filter() -> None:
+    events = [
+        {
+            "id": "evt_1A2B3C",
+            "object": "event",
+            "type": "payment_intent.succeeded",
+            "created": 1795860000,
+            "livemode": False,
+            "pending_webhooks": 1,
+            "data": {"object": {"id": "pi_private_1", "metadata": {"secret": "do-not-return"}}},
+        },
+        {
+            "id": "evt_4D5E6F",
+            "object": "event",
+            "type": "payment_intent.succeeded",
+            "created": 1795860100,
+            "livemode": False,
+            "pending_webhooks": 0,
+            "data": {"object": {"id": "pi_private_2"}},
+        },
+    ]
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.method == "GET"
+        assert request.url.path == "/v1/events"
+        assert request.url.params["limit"] == "2"
+        assert request.url.params["delivery_success"] == "false"
+        assert request.url.params.get_list("types[]") == ["payment_intent.succeeded"]
+        assert request.url.params["created[gte]"] == "1795800000"
+        assert request.url.params["starting_after"] == "evt_previous"
+        assert request.headers["Authorization"].startswith("Basic ")
+        return httpx.Response(200, json={"data": events, "has_more": True})
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    with StripeEventAdapter("sk_test_stripe-secret", client=client) as adapter:
+        result = adapter.list_events(
+            limit=2,
+            event_types=["payment_intent.succeeded"],
+            delivery_success=False,
+            created_after=1795800000,
+            starting_after="evt_previous",
+        )
+    client.close()
+
+    assert result["count"] == 2
+    assert result["has_more"] is True
+    assert result["next_cursor"] == "evt_4D5E6F"
+    assert result["filters"]["delivery_success"] is False
+    assert "pending" in result["delivery_success_semantics"]
+    assert result["delivery_attempt_history_available"] is False
+    serialized = json.dumps(result)
+    for secret in ("stripe-secret", "pi_private", "do-not-return"):
+        assert secret not in serialized
+
+
+def test_stripe_adapter_rejects_unsafe_event_list_filters() -> None:
+    with StripeEventAdapter("sk_test_token") as adapter:
+        with pytest.raises(ProviderSourceError, match="event_types"):
+            adapter.list_events(event_types=["valid.event", ["not-a-string"]])
+        with pytest.raises(ProviderSourceError, match="not both"):
+            adapter.list_events(event_type="charge.*", event_types=["charge.succeeded"])
+        with pytest.raises(ProviderSourceError, match="timestamp"):
+            adapter.list_events(created_after=True)
+        with pytest.raises(ProviderSourceError, match="event ID"):
+            adapter.list_events(starting_after="evt_../private")

@@ -33,6 +33,7 @@ The server reads these environment variables:
 | HOOKSTORM_MCP_SCENARIO_ROOT | Current working directory | Root directory in which MCP may inspect YAML scenarios |
 | HOOKSTORM_HISTORY_DB | HookStorm's normal local history database | Select the same run history used by the CLI |
 | HOOKSTORM_MCP_ENABLE_REPLAY | Disabled | Set to 1 to enable the local loopback replay tools |
+| HOOKSTORM_MCP_EVIDENCE_ROOT | HOOKSTORM_MCP_SCENARIO_ROOT | Directory containing trusted receiver-side JSONL/NDJSON evidence exports |
 | HOOKSTORM_GITHUB_TOKEN | Unset | Optional GitHub token with repository Webhooks: read permission |
 | HOOKSTORM_STRIPE_API_KEY | Unset | Optional restricted/test Stripe key with Events read access |
 | HOOKSTORM_SHOPIFY_CLI | shopify | Optional path to Shopify CLI 5.1+ executable |
@@ -56,7 +57,9 @@ Scenario paths must resolve inside HOOKSTORM_MCP_SCENARIO_ROOT. The server accep
 | hookstorm_list_github_deliveries | List repository webhook delivery metadata from GitHub's read-only REST API |
 | hookstorm_inspect_github_delivery | Inspect one GitHub delivery and optionally correlate it with a local run |
 | hookstorm_retrieve_stripe_event | Retrieve one canonical Stripe Event; optionally compare it with a local run |
+| hookstorm_list_stripe_events | Search a bounded page of Stripe Events by type, creation time, pagination cursor, and account-wide delivery_success |
 | hookstorm_list_shopify_deliveries | Read Shopify webhook delivery logs through an authenticated Shopify CLI session; optionally correlate them with a local run |
+| hookstorm_inspect_receiver_evidence | Match trusted structured receiver logs to an exact event and confirm only a consistent allowlisted failure code |
 
 ### Search recent deliveries
 
@@ -83,17 +86,51 @@ To compare a delivery with a local run, pass both `run_id` and `scenario_path` t
 
 ### Stripe Events
 
-Set `HOOKSTORM_STRIPE_API_KEY` to a restricted or test-mode secret key with Events read access. Then call `hookstorm_retrieve_stripe_event(event_id)`. The adapter uses `GET /v1/events/{id}` and returns allowlisted Event metadata plus canonical payload fingerprints; it does not return nested object values.
+Set `HOOKSTORM_STRIPE_API_KEY` to a restricted or test-mode secret key with Events read access.
 
-This is an **event source**, not a delivery-attempt log source. Stripe's Events API retrieves the Event object, while per-endpoint delivery attempts, response details, and retries must be inspected through Stripe's Dashboard webhook delivery view. `delivery_attempt_history_available` is therefore always `false`. When a run and scenario are supplied, HookStorm can confirm that the canonical event object matches the stored scenario and local event ID, but it will explicitly report that endpoint delivery correlation is unavailable from this API.
+- `hookstorm_retrieve_stripe_event(event_id)` retrieves one canonical Event using `GET /v1/events/{id}`.
+- `hookstorm_list_stripe_events(limit, event_type, event_types, delivery_success, created_after, created_before, starting_after, ending_before)` searches up to 100 Events per page and returns a cursor when more results exist. Optional `run_id` and `scenario_path` let the tool compare each Event with one local run.
+
+Both tools return allowlisted Event metadata and canonical payload fingerprints, not nested object values. The list tool supports Stripe's `delivery_success` filter. This flag describes whether **all webhook endpoints** have successfully received the Event: `false` also includes Events still pending delivery and Events whose attempts have failed. It is account-wide; it does not identify which endpoint failed or return that endpoint's response. The Events API only exposes Events from the last 30 days. Use pagination cursors to inspect additional pages.
+
+This is an **event source**, not a per-endpoint delivery-attempt log source. Stripe's Events API retrieves and filters Event objects, while per-endpoint attempt status, response details, and retry timelines must be inspected through Stripe's Dashboard webhook delivery view. `delivery_attempt_history_available` is therefore always `false`. A matching Event ID and payload can confirm which event a local scenario represents, but it cannot confirm that a particular endpoint attempt failed.
 
 ### Shopify webhook delivery logs
 
-Shopify CLI 5.1+ exposes historical app logs, including webhook deliveries, in JSON. Authenticate a user on the machine that runs MCP with `shopify auth login`, then call `hookstorm_list_shopify_deliveries`. The MCP process runs `shopify app logs --type webhook --json --no-input` from `HOOKSTORM_MCP_SCENARIO_ROOT`. Optional `store` and `client_id` filters narrow the app/store. `since` accepts `1h`, `6h`, `12h`, or `24h`; `limit` accepts 1–1,000.
+Shopify CLI 5.1+ exposes historical app logs, including webhook deliveries, in JSON. Authenticate a user on the machine that runs MCP with `shopify auth login`, then call `hookstorm_list_shopify_deliveries`. The MCP process runs `shopify app logs --type webhook --json --no-input` from `HOOKSTORM_MCP_SCENARIO_ROOT`. Optional `store` and `client_id` filters narrow the app/store. `since` accepts whole-hour or whole-day relative offsets up to `168h`/`7d`; when `until` is supplied, it must describe a later boundary and the interval must be no longer than 24 hours. For example, `since="168h", until="144h"` inspects the window from seven to six days ago. Without `until`, the window may be at most 24 hours. `limit` accepts 1–1,000.
 
 The command needs an existing interactive Shopify account session; Shopify's changelog states that CI automation tokens are not supported for this log command. Set `HOOKSTORM_SHOPIFY_CLI` if the executable is not named `shopify` on `PATH`. The adapter disables optional Shopify CLI usage telemetry, does not pass through `--verbose`, does not invoke a shell, does not expose CLI stderr, and sanitizes JSON records before returning them. The CLI's 2 MiB JSON output limit and command timeout are enforced. Some records may omit or truncate body data; those records cannot be joined by payload fingerprint.
 
 Pass both `run_id` and `scenario_path` to `hookstorm_list_shopify_deliveries` to attach a per-record correlation result. A `confirmed` join requires the saved scenario fingerprint, Shopify event identity, payload fingerprint, topic, and target to agree. Missing or conflicting fields result in `partial` or `unmatched`, never a nearest-run guess.
+
+### Structured receiver-side evidence
+
+Provider delivery records show what the provider observed at the HTTP boundary. They do not expose the receiver's internal signature verifier, handler, database, or queue logs. To make a receiver-side cause confirmable without asking the model to infer it, export structured application logs as UTF-8 JSONL/NDJSON and call `hookstorm_inspect_receiver_evidence(evidence_path, event_id, provider, provider_delivery_id, request_id)`.
+
+The file must be inside `HOOKSTORM_MCP_EVIDENCE_ROOT` (default: the configured scenario root), use a `.jsonl` or `.ndjson` extension, and contain records with this versioned schema:
+
+~~~json
+{
+  "schema_version": 1,
+  "timestamp": "2026-11-28T10:15:00Z",
+  "provider": "stripe",
+  "provider_delivery_id": "evt_1A2B3C",
+  "event_id": "evt_1A2B3C",
+  "event_type": "payment_intent.succeeded",
+  "request_id": "req_123",
+  "trace_id": "trace_123",
+  "component": "webhook-handler",
+  "severity": "error",
+  "outcome": "rejected",
+  "error_code": "signature_invalid"
+}
+~~~
+
+The tool accepts only exact event ID matches and requires at least one additional identity scope (`provider`, `provider_delivery_id`, or `request_id`) before it can confirm a cause. Confirmation requires every matching record to be an ERROR/CRITICAL failed or rejected outcome, all records to report the same explicit allowlisted `error_code`, and the source file to be complete and valid. Event ID alone can produce matching records for inspection, but never a confirmed root cause. Supported codes include signature failures, timestamp expiry, payload validation, unsupported event types/routes, database and queue failures, downstream timeouts/rejections, idempotency conflicts, rate limiting, and internal processing errors.
+
+Malformed or skipped records, conflicting failure codes, successful/duplicate outcomes mixed with failures, or unknown error codes suppress confirmation. The tool returns structured metadata and a deterministic explanation; raw messages, stack traces, payloads, arbitrary fields, and headers are not returned. It caps files at 4 MiB, lines at 16 KiB, records at 10,000, and returned matches at 100. When optional `run_id` and `scenario_path` are supplied, the tool separately confirms the link to the local HookStorm run using the saved scenario fingerprint and exact event ID/type. A receiver log match and a local-run match are distinct claims.
+
+A confirmed cause means the trusted receiver log explicitly recorded the allowlisted failure code for that event. HookStorm does not independently attest that the log producer is correct; export logs from a trusted source and preserve the event/request identifiers across your provider and receiver instrumentation.
 
 ### What a confirmed cause means
 
@@ -109,6 +146,7 @@ Official provider references:
 
 - [GitHub repository webhook delivery REST API](https://docs.github.com/en/rest/repos/webhooks)
 - [Stripe retrieve an Event](https://docs.stripe.com/api/events/retrieve)
+- [Stripe list Events](https://docs.stripe.com/api/events/list)
 - [Shopify CLI app logs, added in Shopify CLI 5.1](https://shopify.dev/changelog/posts/query-your-app-s-logs-in-shopify-app-logs)
 - [Shopify app logs command reference](https://shopify.dev/docs/api/shopify-cli/app/app-logs)
 
