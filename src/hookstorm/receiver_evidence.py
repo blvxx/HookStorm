@@ -193,8 +193,8 @@ def inspect_receiver_evidence(
     event_id = _required_text(event_id, "event_id")
     if provider is not None:
         provider = _required_text(provider, "provider", 16).lower()
-        if provider not in _ALLOWED_PROVIDERS - {"generic"}:
-            raise ReceiverEvidenceError("provider must be github, stripe, or shopify")
+        if provider not in _ALLOWED_PROVIDERS:
+            raise ReceiverEvidenceError("provider must be github, stripe, shopify, or generic")
     if provider_delivery_id is not None:
         provider_delivery_id = _required_text(provider_delivery_id, "provider_delivery_id")
     if request_id is not None:
@@ -263,8 +263,14 @@ def inspect_receiver_evidence(
         and record["error_code"] in _CAUSES
         for record in matches
     )
+    identity_scope_specific = (
+        provider is not None
+        or provider_delivery_id is not None
+        or request_id is not None
+    )
     confirmed = (
-        all_failures
+        identity_scope_specific
+        and all_failures
         and len(codes) == 1
         and ignored_records == 0
         and not truncated
@@ -292,7 +298,12 @@ def inspect_receiver_evidence(
             reason = "Matching records include a non-failure outcome, so the event may have been processed on another attempt."
         else:
             status = "unconfirmed"
-            reason = "Matching records do not contain one consistent, allowlisted receiver failure code."
+            reason = (
+                "A provider, provider_delivery_id, or request_id filter is required to scope "
+                "root-cause confirmation beyond event_id alone."
+                if not identity_scope_specific
+                else "Matching records do not contain one consistent, allowlisted receiver failure code."
+            )
 
     return {
         "provider": provider,
@@ -301,6 +312,7 @@ def inspect_receiver_evidence(
         "event_id": event_id,
         "provider_delivery_id_filter": provider_delivery_id,
         "request_id_filter": request_id,
+        "identity_scope_specific": identity_scope_specific,
         "status": status,
         "matching_record_count": len(matches),
         "returned_record_count": len(returned),
