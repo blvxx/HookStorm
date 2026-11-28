@@ -181,3 +181,10 @@ def test_published_release_attaches_validated_distributions_with_limited_permiss
     assert "--clobber" not in upload["run"]
 
     assert workflow["jobs"]["publish"]["permissions"] == {"id-token": "write"}
+
+def test_build_backend_requires_patched_setuptools() -> None:
+    import tomllib
+
+    project_path = Path(__file__).resolve().parents[1] / "pyproject.toml"
+    project = tomllib.loads(project_path.read_text(encoding="utf-8"))
+    assert "setuptools>=84.1.0" in project["build-system"]["requires"]
