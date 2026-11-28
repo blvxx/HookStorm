@@ -583,10 +583,10 @@ def create_server(
         "HookStorm",
         version=__version__,
         instructions=(
-            "Inspect local HookStorm run history and YAML scenarios. "
+            "Inspect local HookStorm run history and YAML scenarios, analyze failed runs with privacy-preserving scenario context, "
             "History contains sanitized metadata, not request payloads or response bodies. "
             "Webhook replay is disabled unless explicitly enabled in the server environment, "
-            "requires a failed event, an explicit target, and per-call confirmation. "
+            "requires failed events, an explicit target, and per-call confirmation. "
             "Replay targets are loopback-only."
         ),
     )
@@ -678,7 +678,6 @@ def create_server(
                 "Use the original YAML scenario to inspect or replay an event.",
             ],
         }
-
 
     @server.tool()
     def hookstorm_analyze_run(
@@ -860,7 +859,6 @@ def create_server(
                 "reason": "The original scenario's whole-run verification probe was not repeated.",
             },
         }
-
 
     @server.tool()
     async def hookstorm_replay_failed_deliveries(
