@@ -182,9 +182,11 @@ def test_published_release_attaches_validated_distributions_with_limited_permiss
 
     assert workflow["jobs"]["publish"]["permissions"] == {"id-token": "write"}
 
-def test_build_backend_requires_patched_setuptools() -> None:
+def test_dependency_floors_include_patched_build_and_yaml_versions() -> None:
     import tomllib
 
     project_path = Path(__file__).resolve().parents[1] / "pyproject.toml"
     project = tomllib.loads(project_path.read_text(encoding="utf-8"))
+
     assert "setuptools>=84.1.0" in project["build-system"]["requires"]
+    assert "PyYAML>=6.0.4,<7" in project["project"]["dependencies"]
