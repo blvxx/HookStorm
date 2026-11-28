@@ -13,6 +13,10 @@ from hookstorm.config import load_scenario, scenario_fingerprint
 from hookstorm.history import HistoryError, get_run, list_runs, save_run
 from hookstorm.runner import run_scenario
 from hookstorm.safety import validate_target
+from hookstorm.providers import (
+    GitHubWebhookAdapter,
+    canonical_json_fingerprint,
+)
 
 _MAX_SCENARIO_FILE_BYTES = 2 * 1024 * 1024
 _MAX_SCENARIO_LIST_ITEMS = 100
@@ -488,6 +492,248 @@ def _target_matches_history(target: str, historical_target: str) -> bool:
     return target == historical_target
 
 
+def _normalized_target(value: str | None) -> str | None:
+    """Normalize a target for comparison without retaining query strings."""
+    if not isinstance(value, str) or not value.strip():
+        return None
+    try:
+        parsed = urlsplit(value)
+        if parsed.scheme.lower() not in {"http", "https"} or not parsed.hostname:
+            return None
+        if parsed.username or parsed.password:
+            return None
+        hostname = parsed.hostname.encode("idna").decode("ascii").lower()
+        port = parsed.port
+    except (UnicodeError, ValueError):
+        return None
+    netloc = f"[{hostname}]" if ":" in hostname else hostname
+    if port is not None and not (
+        (parsed.scheme.lower() == "http" and port == 80)
+        or (parsed.scheme.lower() == "https" and port == 443)
+    ):
+        netloc = f"{netloc}:{port}"
+    return urlunsplit((parsed.scheme.lower(), netloc, parsed.path, "", ""))
+
+
+def _correlate_github_delivery(
+    external: dict[str, Any],
+    run: dict[str, Any],
+    scenario: dict[str, Any],
+) -> dict[str, Any]:
+    """Join provider evidence to one local run only when stable evidence agrees."""
+    request = external.get("request", {})
+    request_headers = request.get("headers", {})
+    provider_guid = external.get("guid")
+    header_guid = request_headers.get("x-github-delivery")
+    payload_fingerprint = request.get("payload_sha256")
+    provider_event = request_headers.get("x-github-event")
+    provider_action = external.get("action")
+    provider_event_type = (
+        f"{provider_event}.{provider_action}"
+        if provider_event and provider_action
+        else provider_event
+    )
+
+    exact_id_events = [
+        event
+        for event in scenario.get("events", [])
+        if event.get("event_id") in {provider_guid, header_guid}
+    ]
+    payload_events = []
+    if isinstance(payload_fingerprint, str):
+        for event in scenario.get("events", []):
+            try:
+                event_fingerprint, _ = canonical_json_fingerprint(event.get("payload", {}))
+            except ValueError:
+                continue
+            type_matches = (
+                provider_event_type is None
+                or event.get("id") == provider_event_type
+                or event.get("id") == provider_event
+            )
+            if event_fingerprint == payload_fingerprint and type_matches:
+                payload_events.append(event)
+
+    candidates = exact_id_events if exact_id_events else payload_events
+    event = candidates[0] if len(candidates) == 1 else None
+    scenario_matches = (
+        run.get("scenario") == scenario.get("name")
+        and isinstance(run.get("scenario_fingerprint"), str)
+        and run.get("scenario_fingerprint") == scenario_fingerprint(scenario)
+    )
+    event_id_matches_provider = bool(
+        event is not None
+        and event.get("event_id") in {provider_guid, header_guid}
+    )
+    payload_matches = None
+    event_type_matches = None
+    local_delivery = None
+    if event is not None:
+        try:
+            event_fingerprint, _ = canonical_json_fingerprint(event.get("payload", {}))
+            payload_matches = (
+                isinstance(payload_fingerprint, str)
+                and event_fingerprint == payload_fingerprint
+            )
+        except ValueError:
+            payload_matches = False
+        event_type_matches = (
+            provider_event_type is None
+            or event.get("id") == provider_event_type
+            or event.get("id") == provider_event
+        )
+        local_matches = [
+            item
+            for item in run.get("deliveries", [])
+            if item.get("event_id") == event.get("event_id")
+            and item.get("event_type") == event.get("id")
+        ]
+        if len(local_matches) == 1:
+            local_delivery = local_matches[0]
+
+    provider_target = _normalized_target(request.get("target"))
+    local_target = _normalized_target(run.get("target"))
+    target_matches = (
+        provider_target == local_target
+        if provider_target is not None and local_target is not None
+        else None
+    )
+    local_attempts = local_delivery.get("attempts", []) if local_delivery else []
+    latest_attempt = local_attempts[-1] if local_attempts else {}
+    local_status = latest_attempt.get("status_code")
+    provider_status = external.get("status_code")
+    status_codes_match = (
+        local_status == provider_status
+        if isinstance(local_status, int) and isinstance(provider_status, int)
+        else None
+    )
+
+    confirmed_correlation = bool(
+        event is not None
+        and local_delivery is not None
+        and scenario_matches
+        and payload_matches is True
+        and event_type_matches is True
+    )
+    if confirmed_correlation:
+        correlation_status = "confirmed"
+    elif event is not None or local_delivery is not None or payload_events:
+        correlation_status = "partial"
+    else:
+        correlation_status = "unmatched"
+
+    confirmed_facts = []
+    if isinstance(provider_status, int):
+        confirmed_facts.append(
+            {
+                "source": "github_webhook_delivery_api",
+                "fact": "GitHub recorded an HTTP response status for this delivery",
+                "status_code": provider_status,
+                "delivered_at": external.get("delivered_at"),
+            }
+        )
+    if isinstance(local_status, int):
+        confirmed_facts.append(
+            {
+                "source": "hookstorm_local_history",
+                "fact": "HookStorm recorded this HTTP status for the matched local event",
+                "status_code": local_status,
+                "run_id": run.get("run_id"),
+                "event_id": event.get("event_id") if event else None,
+            }
+        )
+
+    injected_fault = latest_attempt.get("injected_fault")
+    if injected_fault:
+        root_cause_confirmed = True
+        root_cause = (
+            "HookStorm recorded an explicitly configured client-side fault: "
+            f"{injected_fault}."
+        )
+        root_cause_source = "hookstorm_local_history"
+    else:
+        root_cause_confirmed = False
+        root_cause = None
+        root_cause_source = None
+
+    replay_target = run.get("target", "")
+    try:
+        _validate_replay_target(replay_target)
+        loopback_target = True
+    except (TypeError, ValueError):
+        loopback_target = False
+
+    replay_candidate = bool(
+        confirmed_correlation
+        and event_id_matches_provider
+        and local_delivery is not None
+        and not local_delivery.get("passed")
+        and loopback_target
+    )
+    return {
+        "status": correlation_status,
+        "match_basis": (
+            "provider_delivery_guid"
+            if event_id_matches_provider
+            else "canonical_payload_sha256_and_event_type"
+            if event is not None and payload_matches is True
+            else None
+        ),
+        "scenario_matches_recorded_fingerprint": scenario_matches,
+        "provider_event_guid_matches_local_event_id": event_id_matches_provider,
+        "payload_fingerprint_matches": payload_matches,
+        "event_type_matches": event_type_matches,
+        "provider_event_type": provider_event_type,
+        "local_event": (
+            {
+                "event_id": event.get("event_id"),
+                "event_type": event.get("id"),
+                "passed": bool(local_delivery.get("passed")),
+                "attempt_count": len(local_attempts),
+                "last_status_code": local_status,
+                "diagnosis": (
+                    _diagnose_delivery(local_delivery)
+                    if not local_delivery.get("passed")
+                    else None
+                ),
+            }
+            if event is not None and local_delivery is not None
+            else None
+        ),
+        "target_matches": target_matches,
+        "status_codes_match": status_codes_match,
+        "confirmed_facts": confirmed_facts,
+        "root_cause": {
+            "confirmed": root_cause_confirmed,
+            "value": root_cause,
+            "source": root_cause_source,
+            "boundary": (
+                "Provider and HTTP status records establish what response was observed, "
+                "not the internal application failure that produced it. A status code alone "
+                "does not prove a signature, database, queue, or business-logic defect."
+            ),
+        },
+        "replay_readiness": {
+            "eligible_for_existing_loopback_replay": replay_candidate,
+            "target_is_loopback": loopback_target,
+            "requires_server_opt_in": "HOOKSTORM_MCP_ENABLE_REPLAY=1",
+            "requires_per_call_confirmation": True,
+            "preserves_event_id_and_run_correlation": True,
+            "idempotency_status": "not_proven_by_correlation",
+            "note": (
+                "Correlation does not prove receiver-side idempotency. Before replay, verify "
+                "the receiver's persisted deduplication state or a suitable read-only business-state "
+                "probe. Provider redelivery is not triggered by this read-only adapter."
+            ),
+        },
+        "limitations": [
+            "A confirmed match requires the original scenario fingerprint and canonical payload fingerprint to match.",
+            "Payload fingerprints are used for comparison; payload values are never returned.",
+            "Provider delivery metadata does not expose the receiver's internal logs or prove its root cause.",
+        ],
+    }
+
+
 def _prepare_replay(
     *,
     run: dict[str, Any],
@@ -566,6 +812,7 @@ def create_server(
     history_db: str | Path | None = None,
     scenario_root: str | Path | None = None,
     enable_replay: bool | None = None,
+    github_http_client: Any | None = None,
 ):
     """Create the local MCP server; injected paths make its tools testable."""
     try:
@@ -590,7 +837,10 @@ def create_server(
             "History contains sanitized metadata, not request payloads or response bodies. "
             "Webhook replay is disabled unless explicitly enabled in the server environment, "
             "requires failed events, an explicit target, and per-call confirmation. "
-            "Replay targets are loopback-only."
+            "Replay targets are loopback-only. If HOOKSTORM_GITHUB_TOKEN is configured, "
+            "read-only tools can inspect repository webhook delivery records from GitHub. "
+            "Provider HTTP statuses are evidence of observed responses, not automatic proof "
+            "of an internal root cause."
         ),
     )
 
@@ -1062,6 +1312,78 @@ def create_server(
                 "History contains sanitized attempt metadata, not request payloads, header values, or response bodies.",
             ],
         }
+
+
+    @server.tool()
+    def hookstorm_list_github_deliveries(
+        owner: str,
+        repo: str,
+        hook_id: int,
+        limit: int = 20,
+        status: str | None = None,
+    ) -> dict[str, Any]:
+        """List external GitHub repository webhook deliveries; performs read-only API calls."""
+        with GitHubWebhookAdapter(client=github_http_client) as adapter:
+            deliveries = adapter.list_deliveries(
+                owner,
+                repo,
+                hook_id,
+                limit=limit,
+                status=status,
+            )
+        return {
+            "provider": "github",
+            "source": "github_repository_webhook_delivery_api",
+            "count": len(deliveries),
+            "deliveries": deliveries,
+            "read_only": True,
+            "limitations": [
+                "The tool reads delivery metadata only; it does not redeliver provider events.",
+                "Use hookstorm_inspect_github_delivery for one delivery's request/response metadata.",
+            ],
+        }
+
+    @server.tool()
+    def hookstorm_inspect_github_delivery(
+        owner: str,
+        repo: str,
+        hook_id: int,
+        delivery_id: int,
+        run_id: str | None = None,
+        scenario_path: str | None = None,
+    ) -> dict[str, Any]:
+        """Inspect one GitHub delivery and optionally correlate it with a local HookStorm run."""
+        if (run_id is None) != (scenario_path is None):
+            raise ValueError("run_id and scenario_path must be supplied together")
+
+        with GitHubWebhookAdapter(client=github_http_client) as adapter:
+            external = adapter.get_delivery(
+                owner,
+                repo,
+                hook_id,
+                delivery_id,
+            )
+
+        result: dict[str, Any] = {
+            "provider": "github",
+            "source": "github_repository_webhook_delivery_api",
+            "delivery": external,
+            "read_only": True,
+        }
+        if run_id is not None and scenario_path is not None:
+            run = get_run(run_id, history_db)
+            _, scenario = _load_scenario(scenario_path, root)
+            result["correlation"] = _correlate_github_delivery(
+                external,
+                run,
+                scenario,
+            )
+        else:
+            result["correlation"] = {
+                "status": "not_requested",
+                "instruction": "Pass both run_id and scenario_path to attempt evidence-based correlation.",
+            }
+        return result
 
     return server
 
