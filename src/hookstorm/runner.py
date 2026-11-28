@@ -11,6 +11,7 @@ import os
 import time
 import uuid
 from datetime import UTC, datetime
+from collections.abc import Callable
 from typing import Any
 from urllib.parse import urlsplit, urlunsplit
 
@@ -208,6 +209,7 @@ async def run_scenario(
     allow_remote: bool = False,
     allow_insecure_http: bool = False,
     secret: str | None = None,
+    on_delivery: Callable[[dict[str, Any]], None] | None = None,
 ) -> dict[str, Any]:
     """Execute a validated scenario and return a privacy-conscious result document."""
     target = validate_target(
@@ -466,17 +468,18 @@ async def run_scenario(
                         )
 
                 last = attempts[-1]
-                event_deliveries.append(
-                    {
-                        "event_id": event["event_id"],
-                        "event_type": event["id"],
-                        "duplicate_index": duplicate_index,
-                        "schedule_after_ms": event.get("schedule_after_ms", 0),
-                        "signature_provider": delivery_config["signature_provider"],
-                        "attempts": attempts,
-                        "passed": bool(last["passed"]),
-                    }
-                )
+                delivery_result = {
+                    "event_id": event["event_id"],
+                    "event_type": event["id"],
+                    "duplicate_index": duplicate_index,
+                    "schedule_after_ms": event.get("schedule_after_ms", 0),
+                    "signature_provider": delivery_config["signature_provider"],
+                    "attempts": attempts,
+                    "passed": bool(last["passed"]),
+                }
+                event_deliveries.append(delivery_result)
+                if on_delivery is not None:
+                    on_delivery(delivery_result)
             return event_deliveries
 
     try:
