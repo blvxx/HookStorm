@@ -291,3 +291,16 @@ def test_update_workflow_install_ref_supports_gitlab_config(tmp_path) -> None:
     assert update_workflow_install_ref(workflow_path, install_ref=new_ref) is True
     updated = workflow_path.read_text(encoding="utf-8")
     assert updated == original.replace(HOOKSTORM_INSTALL_REF, new_ref)
+
+
+def test_provider_delivery_headers_follow_an_overridden_event_id(tmp_path) -> None:
+    initialize_project(
+        root=tmp_path,
+        template="shopify",
+        event_id="evt_custom_shopify_001",
+        include_workflow=False,
+    )
+
+    event = load_scenario(tmp_path / "scenarios" / "webhook.yaml")["events"][0]
+    assert event["event_id"] == "evt_custom_shopify_001"
+    assert event["headers"]["X-Shopify-Webhook-Id"] == "evt_custom_shopify_001"
