@@ -15,6 +15,8 @@ from hookstorm.runner import run_scenario
 from hookstorm.safety import validate_target
 from hookstorm.providers import (
     GitHubWebhookAdapter,
+    ShopifyAppLogsAdapter,
+    StripeEventAdapter,
     canonical_json_fingerprint,
 )
 
@@ -819,12 +821,119 @@ def _prepare_replay(
     }
 
 
+
+
+
+def _correlate_stripe_event(
+    external: dict[str, Any],
+    run: dict[str, Any],
+    scenario: dict[str, Any],
+) -> dict[str, Any]:
+    """Match a canonical Stripe event to local test data without calling it a delivery match."""
+    scenario_matches = (
+        run.get("scenario") == scenario.get("name")
+        and isinstance(run.get("scenario_fingerprint"), str)
+        and run.get("scenario_fingerprint") == scenario_fingerprint(scenario)
+    )
+    event_id = external.get("event_id")
+    event_type = external.get("event_type")
+    event_hash = external.get("payload", {}).get("sha256")
+    event_candidates = [
+        item
+        for item in scenario.get("events", [])
+        if item.get("event_id") == event_id
+    ]
+    if len(event_candidates) == 1:
+        event = event_candidates[0]
+    elif not event_candidates and isinstance(event_hash, str):
+        matches = []
+        for item in scenario.get("events", []):
+            try:
+                fingerprint, _ = canonical_json_fingerprint(item.get("payload", {}))
+            except ValueError:
+                continue
+            if fingerprint == event_hash and item.get("id") == event_type:
+                matches.append(item)
+        event = matches[0] if len(matches) == 1 else None
+    else:
+        event = None
+
+    payload_matches = None
+    event_type_matches = None
+    local_delivery = None
+    if event is not None:
+        try:
+            fingerprint, _ = canonical_json_fingerprint(event.get("payload", {}))
+            payload_matches = fingerprint == event_hash
+        except ValueError:
+            payload_matches = False
+        event_type_matches = event.get("id") == event_type
+        local_matches = [
+            item
+            for item in run.get("deliveries", [])
+            if item.get("event_id") == event.get("event_id")
+            and item.get("event_type") == event.get("id")
+        ]
+        if len(local_matches) == 1:
+            local_delivery = local_matches[0]
+
+    id_matches = bool(event is not None and event.get("event_id") == event_id)
+    confirmed = bool(
+        scenario_matches
+        and event is not None
+        and local_delivery is not None
+        and id_matches
+        and payload_matches is True
+        and event_type_matches is True
+    )
+    return {
+        "status": "confirmed" if confirmed else "partial" if event is not None else "unmatched",
+        "match_basis": (
+            "stripe_event_id_and_payload_sha256"
+            if id_matches and payload_matches is True
+            else "payload_sha256_and_event_type"
+            if payload_matches is True and event_type_matches is True
+            else None
+        ),
+        "scenario_matches_recorded_fingerprint": scenario_matches,
+        "stripe_event_id_matches_local_event_id": id_matches,
+        "payload_fingerprint_matches": payload_matches,
+        "event_type_matches": event_type_matches,
+        "local_event": (
+            {
+                "event_id": event.get("event_id"),
+                "event_type": event.get("id"),
+                "passed": bool(local_delivery.get("passed")),
+                "attempt_count": len(local_delivery.get("attempts", [])),
+                "diagnosis": (
+                    _diagnose_delivery(local_delivery)
+                    if not local_delivery.get("passed")
+                    else None
+                ),
+            }
+            if event is not None and local_delivery is not None
+            else None
+        ),
+        "delivery_attempt_correlation": "not_available_from_stripe_events_api",
+        "root_cause": {
+            "confirmed": False,
+            "value": None,
+            "boundary": (
+                "The Stripe Events API confirms event identity and content, not whether a "
+                "specific endpoint delivery failed or why the receiver behaved as it did."
+            ),
+        },
+    }
+
+
 def create_server(
     *,
     history_db: str | Path | None = None,
     scenario_root: str | Path | None = None,
     enable_replay: bool | None = None,
     github_http_client: Any | None = None,
+    stripe_http_client: Any | None = None,
+    shopify_cli_runner: Any | None = None,
 ):
     """Create the local MCP server; injected paths make its tools testable."""
     try:
@@ -1396,6 +1505,70 @@ def create_server(
                 "instruction": "Pass both run_id and scenario_path to attempt evidence-based correlation.",
             }
         return result
+
+
+    @server.tool()
+    def hookstorm_retrieve_stripe_event(
+        event_id: str,
+        run_id: str | None = None,
+        scenario_path: str | None = None,
+    ) -> dict[str, Any]:
+        """Retrieve one Stripe Event object; it does not retrieve endpoint delivery attempts."""
+        if (run_id is None) != (scenario_path is None):
+            raise ValueError("run_id and scenario_path must be supplied together")
+        with StripeEventAdapter(client=stripe_http_client) as adapter:
+            external = adapter.get_event(event_id)
+        result: dict[str, Any] = {
+            **external,
+            "read_only": True,
+        }
+        if run_id is not None and scenario_path is not None:
+            run = get_run(run_id, history_db)
+            _, scenario = _load_scenario(scenario_path, root)
+            result["correlation"] = _correlate_stripe_event(
+                external,
+                run,
+                scenario,
+            )
+        else:
+            result["correlation"] = {
+                "status": "not_requested",
+                "instruction": "Pass both run_id and scenario_path to compare the event with one local HookStorm run.",
+            }
+        return result
+
+    @server.tool()
+    def hookstorm_list_shopify_deliveries(
+        since: str = "1h",
+        limit: int = 20,
+        status: str | None = "failure",
+        store: str | None = None,
+        client_id: str | None = None,
+    ) -> dict[str, Any]:
+        """Read Shopify webhook delivery logs using an authenticated local Shopify CLI session."""
+        adapter = ShopifyAppLogsAdapter(runner=shopify_cli_runner)
+        deliveries = adapter.list_webhook_deliveries(
+            since=since,
+            limit=limit,
+            status=status,
+            store=store,
+            client_id=client_id,
+            cwd=str(root),
+        )
+        return {
+            "provider": "shopify",
+            "source": "shopify_cli_app_logs",
+            "count": len(deliveries),
+            "deliveries": deliveries,
+            "read_only": True,
+            "limitations": [
+                "Requires Shopify CLI 5.1+ and an existing interactive Shopify account session.",
+                "The CLI log query is limited to a 24-hour window per call and 1,000 records.",
+                "CI automation tokens are not supported by this CLI log command.",
+                "Shopify CLI log records can omit or truncate bodies; missing payload fingerprints prevent payload-based correlation.",
+                "This tool reads logs only and does not request Shopify to redeliver an event.",
+            ],
+        }
 
     return server
 
