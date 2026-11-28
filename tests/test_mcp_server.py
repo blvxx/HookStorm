@@ -44,27 +44,47 @@ events:
     return path
 
 
-def _failed_run(path: Path, target: str, db: Path) -> str:
+def _multi_scenario_file(root: Path) -> Path:
+    path = _scenario_file(root)
+    path.write_text(
+        """version: 1
+name: Replay test
+retry:
+  max_attempts: 1
+events:
+  - id: ping
+    event_id: evt_replay
+    payload:
+      private_value: first-payload
+    expect_status: [200]
+  - id: pong
+    event_id: evt_replay_2
+    payload:
+      private_value: second-payload
+    expect_status: [200]
+""",
+        encoding="utf-8",
+    )
+    return path
+
+
+def _failed_run(
+    path: Path,
+    target: str,
+    db: Path,
+    event_ids: list[str] | None = None,
+) -> str:
     scenario = load_scenario(path)
     run_id = "run_failed_replay_test"
-    result = {
-        "run_id": run_id,
-        "scenario": scenario["name"],
-        "scenario_fingerprint": scenario_fingerprint(scenario),
-        "started_at": "2026-11-28T10:00:00+00:00",
-        "target": target,
-        "duration_ms": 5.0,
-        "summary": {
-            "success": False,
-            "total_deliveries": 1,
-            "passed": 0,
-            "failed": 1,
-            "attempts": 1,
-        },
-        "deliveries": [
+    selected_ids = event_ids or ["evt_replay"]
+    event_index = {event["event_id"]: event for event in scenario["events"]}
+    deliveries = []
+    for event_id in selected_ids:
+        event = event_index[event_id]
+        deliveries.append(
             {
-                "event_type": "ping",
-                "event_id": "evt_replay",
+                "event_type": event["id"],
+                "event_id": event_id,
                 "duplicate_index": 0,
                 "passed": False,
                 "attempts": [
@@ -79,7 +99,23 @@ def _failed_run(path: Path, target: str, db: Path) -> str:
                     }
                 ],
             }
-        ],
+        )
+    count = len(deliveries)
+    result = {
+        "run_id": run_id,
+        "scenario": scenario["name"],
+        "scenario_fingerprint": scenario_fingerprint(scenario),
+        "started_at": "2026-11-28T10:00:00+00:00",
+        "target": target,
+        "duration_ms": 5.0 * count,
+        "summary": {
+            "success": False,
+            "total_deliveries": count,
+            "passed": 0,
+            "failed": count,
+            "attempts": count,
+        },
+        "deliveries": deliveries,
         "verification": None,
     }
     save_run(result, db)
@@ -247,6 +283,118 @@ def test_replay_rejects_changed_scenario_without_explicit_override(
                     "run_id": run_id,
                     "scenario_path": "scenarios/replay.yaml",
                     "event_id": "evt_replay",
+                    "target": target,
+                    "confirm": True,
+                },
+            )
+            assert response.is_error
+
+    asyncio.run(call())
+    assert state["requests"] == []
+
+
+def test_analyze_run_joins_scenario_context_without_disclosing_payload_values(
+    tmp_path: Path,
+) -> None:
+    scenario_path = _scenario_file(tmp_path)
+    db = tmp_path / "history.sqlite3"
+    run_id = _failed_run(
+        scenario_path,
+        "http://127.0.0.1:8000/webhook",
+        db,
+    )
+    server = create_server(
+        history_db=db,
+        scenario_root=tmp_path,
+        enable_replay=False,
+    )
+
+    result = _call_tool(
+        server,
+        "hookstorm_analyze_run",
+        {
+            "run_id": run_id,
+            "scenario_path": "scenarios/replay.yaml",
+        },
+    )
+
+    failure = result["failed_deliveries"][0]
+    assert result["scenario_matches_recorded_fingerprint"] is True
+    assert failure["category"] == "receiver_server_error"
+    assert failure["scenario_context"]["event_id"] == "evt_replay"
+    assert failure["scenario_context"]["payload_size_bytes"] > 0
+    assert failure["scenario_context"]["expect_json_top_level_keys"] == ["ok"]
+    assert failure["attempts_exhausted"] is True
+    assert "payload-must-not-leak" not in json.dumps(result)
+
+
+def test_batch_replay_requires_confirmation_and_replays_only_selected_failed_events(
+    receiver,
+    tmp_path: Path,
+) -> None:
+    base, state = receiver
+    scenario_path = _multi_scenario_file(tmp_path)
+    db = tmp_path / "history.sqlite3"
+    target = f"{base}/webhook"
+    event_ids = ["evt_replay", "evt_replay_2"]
+    run_id = _failed_run(scenario_path, target, db, event_ids)
+    server = create_server(
+        history_db=db,
+        scenario_root=tmp_path,
+        enable_replay=True,
+    )
+    arguments = {
+        "run_id": run_id,
+        "scenario_path": "scenarios/replay.yaml",
+        "event_ids": event_ids,
+        "target": target,
+    }
+
+    preview = _call_tool(
+        server,
+        "hookstorm_replay_failed_deliveries",
+        {**arguments, "confirm": False},
+    )
+    assert preview["executed"] is False
+    assert preview["selected_event_count"] == 2
+    assert state["requests"] == []
+
+    result = _call_tool(
+        server,
+        "hookstorm_replay_failed_deliveries",
+        {**arguments, "confirm": True},
+    )
+
+    assert result["executed"] is True
+    assert result["summary"]["success"] is True
+    assert result["selected_event_ids"] == event_ids
+    assert result["history_saved"] is True
+    assert sorted(request["event_id"] for request in state["requests"]) == sorted(event_ids)
+
+
+def test_batch_replay_refuses_any_event_without_a_failed_delivery(
+    receiver,
+    tmp_path: Path,
+) -> None:
+    base, state = receiver
+    scenario_path = _multi_scenario_file(tmp_path)
+    db = tmp_path / "history.sqlite3"
+    target = f"{base}/webhook"
+    run_id = _failed_run(scenario_path, target, db, ["evt_replay"])
+    server = create_server(
+        history_db=db,
+        scenario_root=tmp_path,
+        enable_replay=True,
+    )
+
+    async def call() -> None:
+        async with Client(server) as client:
+            response = await client.call_tool(
+                "hookstorm_replay_failed_deliveries",
+                {
+                    "run_id": run_id,
+                    "scenario_path": "scenarios/replay.yaml",
+                    "event_ids": ["evt_replay", "evt_replay_2"],
                     "target": target,
                     "confirm": True,
                 },
