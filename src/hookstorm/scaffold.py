@@ -375,12 +375,12 @@ webhook-regression:
 
       if [ "${{HOOKSTORM_ALLOW_INSECURE_HTTP:-0}}" = "1" ]; then
         hookstorm doctor "$HOOKSTORM_SCENARIO" --connect --secret-env HOOKSTORM_SECRET --allow-insecure-http
-        hookstorm run "$HOOKSTORM_SCENARIO" --allow-remote --allow-insecure-http \
+        hookstorm run "$HOOKSTORM_SCENARIO" --target "$HOOKSTORM_TARGET_URL" --allow-remote --allow-insecure-http \
           --secret-env HOOKSTORM_SECRET --history-db "$HOOKSTORM_HISTORY_DB" \
           --format junit --output test-results/webhook-regression.xml
       else
         hookstorm doctor "$HOOKSTORM_SCENARIO" --connect --secret-env HOOKSTORM_SECRET
-        hookstorm run "$HOOKSTORM_SCENARIO" --allow-remote \
+        hookstorm run "$HOOKSTORM_SCENARIO" --target "$HOOKSTORM_TARGET_URL" --allow-remote \
           --secret-env HOOKSTORM_SECRET --history-db "$HOOKSTORM_HISTORY_DB" \
           --format junit --output test-results/webhook-regression.xml
       fi
