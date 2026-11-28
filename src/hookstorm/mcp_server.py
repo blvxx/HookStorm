@@ -1810,6 +1810,7 @@ def create_server(
     @server.tool()
     def hookstorm_list_shopify_deliveries(
         since: str = "1h",
+        until: str | None = None,
         limit: int = 20,
         status: str | None = "failure",
         store: str | None = None,
@@ -1823,6 +1824,7 @@ def create_server(
         adapter = ShopifyAppLogsAdapter(runner=shopify_cli_runner)
         deliveries = adapter.list_webhook_deliveries(
             since=since,
+            until=until,
             limit=limit,
             status=status,
             store=store,
@@ -1847,7 +1849,7 @@ def create_server(
             "correlation_requested": run_id is not None,
             "limitations": [
                 "Requires Shopify CLI 5.1+ and an existing authenticated Shopify account session.",
-                "The CLI log query is limited to a 24-hour window per call and 1,000 records.",
+                "The CLI supports a lookback of up to 7 days in windows no longer than 24 hours, with at most 1,000 records per call.",
                 "CI automation tokens are not supported by this CLI log command.",
                 "Shopify CLI log records can omit or truncate bodies; missing payload fingerprints prevent payload-based correlation.",
                 "Correlation is confirmed only when the local scenario fingerprint, event identity, payload, topic, and target agree.",
