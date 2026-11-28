@@ -12,7 +12,7 @@ After installing HookStorm in your application repository, run:
 hookstorm init
 ~~~
 
-The wizard creates `scenarios/webhook.yaml` and `.github/workflows/webhook-regression.yml`. In an interactive terminal, choose the signature provider (`generic`, `stripe`, `github`, `shopify`, or `standard_webhooks`). Without an interactive terminal, the provider defaults to `generic`.
+By default, the wizard creates `scenarios/webhook.yaml` and `.github/workflows/webhook-regression.yml`. In an interactive terminal, choose the signature provider (`generic`, `stripe`, `github`, `shopify`, or `standard_webhooks`). Without an interactive terminal, the provider defaults to `generic`. To generate GitLab CI instead, use `hookstorm init --ci-provider gitlab`; this creates `.gitlab-ci.yml` at the project root.
 
 Choose a starter payload and provider with `--template`:
 
@@ -34,7 +34,13 @@ hookstorm init --signature-provider github \\
 
 Then edit the generated scenario's payload, HTTP status expectations, and JSON assertions to match your staging receiver. The generated workflow reads the staging URL and signing secret from GitHub Environment values; it never writes them into the scenario or workflow.
 
-The command preserves existing files and exits with an error rather than overwriting them. Use `--force` only when you intend to replace both generated files. Use `--no-workflow` to create just the scenario file. The workflow installs HookStorm from a pinned repository commit. After upgrading the installed HookStorm package, run `hookstorm update-workflow` to refresh only that pin in your generated workflow. The command preserves your other workflow changes and refuses files that do not contain exactly one recognized HookStorm install URL.
+The command preserves existing files and exits with an error rather than overwriting them. Use `--force` only when you intend to replace both generated files. Use `--no-workflow` to create just the scenario file. The workflow installs HookStorm from a pinned repository commit. After upgrading the installed HookStorm package, run `hookstorm update-workflow` to refresh only that pin in your generated workflow (`--path .gitlab-ci.yml` for GitLab). The command preserves your other workflow changes and refuses files that do not contain exactly one recognized HookStorm install URL.
+
+### GitLab CI setup
+
+The generated GitLab configuration intentionally runs only on the default branch. In **Settings → CI/CD → Variables**, configure `HOOKSTORM_TARGET_URL` and, when signed events are used, `HOOKSTORM_SECRET`. Mark secrets as **Masked** and **Protected**, and protect the default branch so protected values are available to the integration job. Optionally configure `HOOKSTORM_ALLOW_INSECURE_HTTP=1` only for an authorized staging endpoint that cannot use HTTPS.
+
+The job serializes baseline updates, compares each successful run with the cached default-branch baseline, advances that baseline only after assertions and comparison pass, and publishes a JUnit report. Feature branches and merge-request pipelines are deliberately excluded by the generated default-branch rule; this avoids sending staging credentials or test events from untrusted branch code. If you need merge-request coverage, add a separate unprivileged validation job and design a trusted staging approval flow for integration runs.
 
 
 
