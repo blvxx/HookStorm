@@ -2,13 +2,19 @@ from __future__ import annotations
 
 import asyncio
 import base64
+import socket
 import time
 
+import httpcore
 import pytest
 
 from hookstorm.config import ScenarioError, load_scenario, validate_scenario
 from hookstorm.report import render_html, render_json, render_junit
-from hookstorm.runner import MAX_RESPONSE_BODY_BYTES, run_scenario
+from hookstorm.runner import (
+    MAX_RESPONSE_BODY_BYTES,
+    _PinnedNetworkBackend,
+    run_scenario,
+)
 
 
 def scenario(*, delivery=None, retry=None, event=None):
@@ -1053,3 +1059,71 @@ def test_runner_calls_progress_callback_after_each_duplicate_delivery(receiver) 
     assert [item["duplicate_index"] for item in completed] == [0, 1, 2]
     assert [item["passed"] for item in completed] == [True, True, True]
     assert completed == result["deliveries"]
+
+
+
+def test_runner_connects_only_to_prevalidated_dns_addresses(receiver, monkeypatch) -> None:
+    base, state = receiver
+    port = int(base.rsplit(":", 1)[1])
+    original_getaddrinfo = socket.getaddrinfo
+    hostname_lookups = 0
+
+    def rebinding_getaddrinfo(host, service, *args, **kwargs):
+        nonlocal hostname_lookups
+        if host == "localhost":
+            hostname_lookups += 1
+            # Both preflight resolutions are loopback. Any additional
+            # connection-time resolution would return a non-loopback address.
+            address = "127.0.0.1" if hostname_lookups <= 2 else "192.0.2.1"
+            return original_getaddrinfo(address, service, *args, **kwargs)
+        return original_getaddrinfo(host, service, *args, **kwargs)
+
+    monkeypatch.setattr(socket, "getaddrinfo", rebinding_getaddrinfo)
+
+    result = asyncio.run(
+        run_scenario(
+            scenario(),
+            f"http://localhost:{port}/webhook",
+        )
+    )
+
+    assert result["summary"]["success"] is True
+    assert hostname_lookups == 2
+    assert len(state["requests"]) == 1
+    assert state["requests"][0]["headers"]["Host"] == f"localhost:{port}"
+
+
+def test_pinned_backend_refuses_unvalidated_host_without_dns_fallback() -> None:
+    class Backend:
+        async def connect_tcp(self, *args, **kwargs):
+            raise AssertionError("unvalidated hosts must never reach the network backend")
+
+    backend = _PinnedNetworkBackend(
+        Backend(),
+        {"approved.example": ("203.0.113.10",)},
+    )
+
+    with pytest.raises(httpcore.ConnectError, match="not prevalidated"):
+        asyncio.run(backend.connect_tcp("unapproved.example", 443))
+
+
+def test_pinned_backend_connects_to_approved_ip_not_hostname() -> None:
+    class Stream:
+        pass
+
+    class Backend:
+        calls: list[str] = []
+
+        async def connect_tcp(self, host, port, **kwargs):
+            self.calls.append(host)
+            return Stream()
+
+    backend_impl = Backend()
+    backend = _PinnedNetworkBackend(
+        backend_impl,
+        {"xn--bcher-kva.de": ("203.0.113.10",)},
+    )
+    stream = asyncio.run(backend.connect_tcp("XN--BCHER-KVA.DE", 443))
+
+    assert isinstance(stream, Stream)
+    assert backend_impl.calls == ["203.0.113.10"]
