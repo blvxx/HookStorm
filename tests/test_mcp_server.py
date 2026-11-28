@@ -1065,7 +1065,9 @@ def test_github_correlation_rejects_conflicting_provider_delivery_identifiers(
 
 def test_list_stripe_events_mcp_tool_returns_sanitized_event_summaries(
     tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
 ) -> None:
+    monkeypatch.setenv("HOOKSTORM_STRIPE_API_KEY", "sk_test_mcp-tool")
     event = {
         "id": "evt_1A2B3C",
         "object": "event",
