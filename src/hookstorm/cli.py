@@ -7,11 +7,13 @@ import asyncio
 import json
 import os
 import sys
+import time
 from collections.abc import Sequence
 from pathlib import Path
 
 from hookstorm import __version__
 from hookstorm.config import load_scenario
+from hookstorm.demo import run_demo
 from hookstorm.doctor import build_preflight_document, run_preflight
 from hookstorm.history import (
     HistoryError,
@@ -26,7 +28,29 @@ from hookstorm.history import (
 from hookstorm.pytest_export import write_pytest
 from hookstorm.report import render_json, write_report
 from hookstorm.runner import run_scenario
-from hookstorm.scaffold import initialize_project
+from hookstorm.scaffold import (
+    initialize_project,
+    template_defaults,
+    update_workflow_install_ref,
+)
+
+
+def _add_execution_arguments(parser: argparse.ArgumentParser) -> None:
+    parser.add_argument(
+        "--target",
+        help="webhook URL; defaults to HOOKSTORM_TARGET_URL",
+    )
+    parser.add_argument("--allow-remote", action="store_true", help="allow a remote HTTPS target")
+    parser.add_argument(
+        "--allow-insecure-http",
+        action="store_true",
+        help="allow unencrypted remote HTTP; requires --allow-remote",
+    )
+    parser.add_argument("--secret-env", default="HOOKSTORM_SECRET", help="environment variable for HMAC secret")
+    parser.add_argument("--format", choices=("html", "json", "junit"), default="html", help="report format")
+    parser.add_argument("--output", help="write a report to this path")
+    parser.add_argument("--history-db", help="history database path")
+    parser.add_argument("--no-history", action="store_true", help="do not persist this run")
 
 
 def _parser() -> argparse.ArgumentParser:
@@ -44,6 +68,12 @@ def _parser() -> argparse.ArgumentParser:
 
     init = subparsers.add_parser(
         "init", help="create a starter webhook scenario and GitHub Actions workflow"
+    )
+    init.add_argument(
+        "--template",
+        choices=("generic", "stripe", "github", "shopify", "standard-webhooks"),
+        default="generic",
+        help="starter event payload and signature format",
     )
     init.add_argument("--scenario-path", default="scenarios/webhook.yaml")
     init.add_argument("--workflow-path", default=".github/workflows/webhook-regression.yml")
@@ -75,18 +105,31 @@ def _parser() -> argparse.ArgumentParser:
 
     run = subparsers.add_parser("run", help="execute a YAML scenario against a webhook endpoint")
     run.add_argument("scenario", help="path to a scenario YAML file")
-    run.add_argument("--target", required=True, help="webhook URL; localhost only unless opted in")
-    run.add_argument("--allow-remote", action="store_true", help="allow a remote HTTPS target")
-    run.add_argument(
-        "--allow-insecure-http",
-        action="store_true",
-        help="allow unencrypted remote HTTP; requires --allow-remote",
+    _add_execution_arguments(run)
+
+    watch = subparsers.add_parser(
+        "watch", help="rerun a scenario whenever its YAML file changes"
     )
-    run.add_argument("--secret-env", default="HOOKSTORM_SECRET", help="environment variable for HMAC secret")
-    run.add_argument("--format", choices=("html", "json", "junit"), default="html", help="report format")
-    run.add_argument("--output", help="write a report to this path")
-    run.add_argument("--history-db", help="history database path")
-    run.add_argument("--no-history", action="store_true", help="do not persist this run")
+    watch.add_argument("scenario", help="path to a scenario YAML file")
+    _add_execution_arguments(watch)
+    watch.add_argument(
+        "--interval", type=float, default=1.0,
+        help="file polling interval in seconds (0.2–60; default: 1)",
+    )
+
+    demo = subparsers.add_parser(
+        "demo", help="run a self-contained retry and duplicate demo against localhost"
+    )
+    demo.add_argument("--output", help="report path (default: hookstorm-demo-report.<format>)")
+    demo.add_argument("--format", choices=("html", "json", "junit"), default="html")
+
+    update_workflow = subparsers.add_parser(
+        "update-workflow", help="refresh the HookStorm version pin in a generated CI workflow"
+    )
+    update_workflow.add_argument(
+        "--path", default=".github/workflows/webhook-regression.yml",
+        help="generated workflow path",
+    )
 
     history = subparsers.add_parser("history", help="inspect and compare local run history")
     history_sub = history.add_subparsers(dest="history_command", required=True)
@@ -418,24 +461,25 @@ def _prompt_integer(prompt: str, default: int, *, minimum: int, maximum: int) ->
 
 def _init_command(args: argparse.Namespace) -> int:
     interactive = sys.stdin.isatty()
+    defaults = template_defaults(args.template)
     signature_provider = args.signature_provider
     if signature_provider is None and interactive:
         signature_provider = _prompt_choice(
             "Signature provider",
             ("generic", "stripe", "github", "shopify", "standard_webhooks"),
-            "generic",
+            defaults["signature_provider"],
         )
-    signature_provider = signature_provider or "generic"
+    signature_provider = signature_provider or defaults["signature_provider"]
 
     event_type = args.event_type
     if event_type is None and interactive:
-        event_type = _prompt_text("Event type", "test.ping")
-    event_type = event_type or "test.ping"
+        event_type = _prompt_text("Event type", defaults["event_type"])
+    event_type = event_type or defaults["event_type"]
 
     event_id = args.event_id
     if event_id is None and interactive:
-        event_id = _prompt_text("Event ID", "evt_hookstorm_init_001")
-    event_id = event_id or "evt_hookstorm_init_001"
+        event_id = _prompt_text("Event ID", defaults["event_id"])
+    event_id = event_id or defaults["event_id"]
 
     max_attempts = args.max_attempts
     if max_attempts is None and interactive:
@@ -454,6 +498,7 @@ def _init_command(args: argparse.Namespace) -> int:
     written = initialize_project(
         scenario_path=args.scenario_path,
         workflow_path=args.workflow_path,
+        template=args.template,
         event_type=event_type,
         event_id=event_id,
         signature_provider=signature_provider,
@@ -488,6 +533,92 @@ def _init_command(args: argparse.Namespace) -> int:
         print("  4. Add a CI workflow when you are ready to gate pull requests.")
     print("No target URL or secret was written to the generated files.")
     return 0
+
+
+def _update_workflow_command(args: argparse.Namespace) -> int:
+    changed = update_workflow_install_ref(args.path)
+    if changed:
+        print(f"Updated HookStorm install pin in {Path(args.path)}.")
+        print("Only the HookStorm commit reference was changed; other workflow settings were preserved.")
+    else:
+        print(f"HookStorm install pin is already current in {Path(args.path)}.")
+    return 0
+
+
+def _resolve_target(explicit_target: str | None) -> str:
+    target = explicit_target or os.getenv("HOOKSTORM_TARGET_URL")
+    if not target or not target.strip():
+        raise ValueError(
+            "No webhook target configured. Set HOOKSTORM_TARGET_URL or pass --target URL."
+        )
+    return target
+
+
+def _execute_scenario(args: argparse.Namespace) -> int:
+    scenario = load_scenario(args.scenario)
+    target = _resolve_target(args.target)
+    secret = os.getenv(args.secret_env)
+    result = asyncio.run(
+        run_scenario(
+            scenario,
+            target,
+            allow_remote=args.allow_remote,
+            allow_insecure_http=args.allow_insecure_http,
+            secret=secret,
+        )
+    )
+
+    history_id = None
+    if not args.no_history:
+        try:
+            history_id = save_run(result, args.history_db)
+        except HistoryError as exc:
+            print(f"History warning: {exc}", file=sys.stderr)
+
+    if args.format == "json" and not args.output:
+        sys.stdout.write(render_json(result))
+        if history_id:
+            print(f"History: {history_id}", file=sys.stderr)
+    else:
+        default_names = {
+            "html": "hookstorm-report.html",
+            "json": "hookstorm-report.json",
+            "junit": "hookstorm-report.xml",
+        }
+        output = Path(args.output or default_names[args.format])
+        write_report(result, output, args.format)
+        _print_summary(result)
+        print(f"Report: {output.resolve()}")
+        if history_id:
+            print(f"History: {history_id}")
+        elif args.no_history:
+            print("History: disabled for this run")
+    return 0 if result["summary"]["success"] else 1
+
+
+def _watch_command(args: argparse.Namespace) -> int:
+    if not 0.2 <= args.interval <= 60:
+        raise ValueError("--interval must be between 0.2 and 60 seconds")
+    scenario_path = Path(args.scenario)
+    print(f"Watching {scenario_path} (polling every {args.interval:g}s). Press Ctrl+C to stop.")
+    previous_signature = None
+    while True:
+        try:
+            stat = scenario_path.stat()
+            signature = (stat.st_mtime_ns, stat.st_size)
+            if signature != previous_signature:
+                previous_signature = signature
+                print(f"\\nChange detected: {scenario_path}")
+                try:
+                    _execute_scenario(args)
+                except (HistoryError, ValueError, OSError) as exc:
+                    print(f"HookStorm watch error: {exc}", file=sys.stderr)
+                    print("Fix the scenario or target; watch will retry after the next file change.")
+            time.sleep(args.interval)
+        except FileNotFoundError:
+            print(f"Waiting for scenario file: {scenario_path}", file=sys.stderr)
+            previous_signature = None
+            time.sleep(args.interval)
 
 
 def _doctor_command(args: argparse.Namespace) -> int:
@@ -528,6 +659,14 @@ def main(argv: Sequence[str] | None = None) -> int:
     try:
         if args.command == "init":
             return _init_command(args)
+        if args.command == "update-workflow":
+            return _update_workflow_command(args)
+        if args.command == "demo":
+            return run_demo(output=args.output, report_format=args.format)
+        if args.command == "watch":
+            return _watch_command(args)
+        if args.command == "run":
+            return _execute_scenario(args)
         if args.command == "doctor":
             return _doctor_command(args)
         if args.command == "history":
@@ -551,43 +690,7 @@ def main(argv: Sequence[str] | None = None) -> int:
             print(f"pytest integration test written: {output.resolve()}")
             print("Set HOOKSTORM_TARGET to the test receiver URL before running pytest.")
             return 0
-        secret = os.getenv(args.secret_env)
-        result = asyncio.run(
-            run_scenario(
-                scenario,
-                args.target,
-                allow_remote=args.allow_remote,
-                allow_insecure_http=args.allow_insecure_http,
-                secret=secret,
-            )
-        )
-
-        history_id = None
-        if not args.no_history:
-            try:
-                history_id = save_run(result, args.history_db)
-            except HistoryError as exc:
-                print(f"History warning: {exc}", file=sys.stderr)
-
-        if args.format == "json" and not args.output:
-            sys.stdout.write(render_json(result))
-            if history_id:
-                print(f"History: {history_id}", file=sys.stderr)
-        else:
-            default_names = {
-                "html": "hookstorm-report.html",
-                "json": "hookstorm-report.json",
-                "junit": "hookstorm-report.xml",
-            }
-            output = Path(args.output or default_names[args.format])
-            write_report(result, output, args.format)
-            _print_summary(result)
-            print(f"Report: {output.resolve()}")
-            if history_id:
-                print(f"History: {history_id}")
-            elif args.no_history:
-                print("History: disabled for this run")
-        return 0 if result["summary"]["success"] else 1
+        raise ValueError(f"Unsupported command: {args.command}")
     except (HistoryError, ValueError, OSError) as exc:
         print(f"HookStorm error: {exc}", file=sys.stderr)
         return 2
