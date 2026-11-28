@@ -539,12 +539,12 @@ class StripeEventAdapter:
             if (
                 not isinstance(event_types, list)
                 or not 1 <= len(event_types) <= 20
-                or len(set(event_types)) != len(event_types)
                 or any(
                     not isinstance(item, str)
                     or not re.fullmatch(r"[A-Za-z0-9][A-Za-z0-9_.*-]{0,127}", item)
                     for item in event_types
                 )
+                or len(set(event_types)) != len(event_types)
             ):
                 raise ProviderSourceError("event_types must contain 1 to 20 unique valid event types")
         if event_type is not None and event_types is not None:
