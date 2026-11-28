@@ -938,6 +938,7 @@ def create_server(
             "replay_enabled": True,
             "source_run_id": run_id,
             "run_id": result["run_id"],
+            "correlation_run_id": result["correlation_run_id"],
             "scenario": result["scenario"],
             "target": result["target"],
             "selected_event_ids": [event["event_id"] for event in selected_events],
