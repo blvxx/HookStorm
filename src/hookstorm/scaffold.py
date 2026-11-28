@@ -347,9 +347,7 @@ webhook-regression:
       python -m pip install --disable-pip-version-check "{install}"
       mkdir -p .hookstorm .hookstorm-baselines test-results
 
-      hookstorm doctor "$HOOKSTORM_SCENARIO" --connect --secret-env HOOKSTORM_SECRET
-
-      if [ "[object Object]" = "1" ]; then
+      if [ "${HOOKSTORM_ALLOW_INSECURE_HTTP:-0}" = "1" ]; then
         hookstorm doctor "$HOOKSTORM_SCENARIO" --connect --secret-env HOOKSTORM_SECRET --allow-insecure-http
         hookstorm run "$HOOKSTORM_SCENARIO" --allow-remote --allow-insecure-http \
           --secret-env HOOKSTORM_SECRET --history-db "$HOOKSTORM_HISTORY_DB" \
