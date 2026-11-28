@@ -215,3 +215,176 @@ def test_github_adapter_does_not_follow_api_redirects() -> None:
     assert len(seen) == 1
     assert seen[0].url.host == "api.github.com"
     client.close()
+
+
+def test_stripe_adapter_retrieves_event_metadata_and_never_returns_event_payload() -> None:
+    event = {
+        "id": "evt_1A2B3C",
+        "object": "event",
+        "type": "payment_intent.succeeded",
+        "created": 1795860000,
+        "api_version": "2025-09-30.clover",
+        "livemode": False,
+        "pending_webhooks": 2,
+        "request": {"id": "req_123"},
+        "data": {
+            "object": {
+                "id": "pi_secret",
+                "object": "payment_intent",
+                "metadata": {"private": "customer-secret"},
+            }
+        },
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.method == "GET"
+        assert request.url.host == "api.stripe.com"
+        assert request.url.path == "/v1/events/evt_1A2B3C"
+        assert request.headers["Authorization"].startswith("Basic ")
+        return httpx.Response(200, json=event)
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    with StripeEventAdapter("sk_test_stripe-secret", client=client) as adapter:
+        result = adapter.get_event("evt_1A2B3C")
+    client.close()
+
+    expected_hash, expected_size = canonical_json_fingerprint(event)
+    assert result["event_id"] == event["id"]
+    assert result["event_type"] == "payment_intent.succeeded"
+    assert result["pending_webhooks"] == 2
+    assert result["payload"] == {"sha256": expected_hash, "size_bytes": expected_size}
+    assert result["delivery_attempt_history_available"] is False
+    serialized = json.dumps(result)
+    for secret in ("stripe-secret", "pi_secret", "customer-secret"):
+        assert secret not in serialized
+
+
+def test_stripe_adapter_rejects_invalid_ids_and_redirects() -> None:
+    client = httpx.Client(
+        transport=httpx.MockTransport(
+            lambda request: httpx.Response(
+                302,
+                headers={"Location": "https://attacker.example.test/collect"},
+            )
+        ),
+        follow_redirects=True,
+    )
+    with StripeEventAdapter("sk_test_token", client=client) as adapter:
+        with pytest.raises(ProviderSourceError, match="event identifier"):
+            adapter.get_event("evt_../secret")
+        with pytest.raises(ProviderSourceError, match="HTTP 302"):
+            adapter.get_event("evt_1A2B3C")
+    client.close()
+
+
+def test_shopify_adapter_runs_read_only_bounded_json_command_and_sanitizes() -> None:
+    from types import SimpleNamespace
+
+    calls: list[tuple[list[str], dict]] = []
+    payload = [
+        {
+            "id": "delivery-1",
+            "eventId": "shp_event_1",
+            "createdAt": "2026-11-28T10:00:00Z",
+            "topic": "orders/create",
+            "status": "failure",
+            "statusCode": 503,
+            "durationMs": 250,
+            "attempt": 2,
+            "shopDomain": "dev-store.myshopify.com",
+            "uri": "https://receiver.example.test/webhook?token=private-url",
+            "payload": {"order_id": 42, "secret": "payload-secret"},
+            "responseBody": "response-secret",
+            "authorization": "authorization-secret",
+        }
+    ]
+
+    def fake_runner(command: list[str], **kwargs: object) -> SimpleNamespace:
+        calls.append((command, kwargs))
+        return SimpleNamespace(
+            returncode=0,
+            stdout=json.dumps(payload),
+            stderr="private stderr that must not appear in errors",
+        )
+
+    adapter = ShopifyAppLogsAdapter(executable="/usr/local/bin/shopify", runner=fake_runner)
+    result = adapter.list_webhook_deliveries(
+        since="24h",
+        limit=100,
+        status="failure",
+        store="dev-store.myshopify.com",
+        client_id="client_123",
+        cwd="/tmp/shopify-app",
+    )
+
+    command, kwargs = calls[0]
+    assert command[:8] == [
+        "/usr/local/bin/shopify",
+        "app",
+        "logs",
+        "--type",
+        "webhook",
+        "--since",
+        "24h",
+        "--limit",
+    ]
+    assert "--json" in command and "--no-input" in command
+    assert kwargs["shell"] is False
+    assert kwargs["capture_output"] is True
+    assert kwargs["timeout"] == 20.0
+    assert kwargs["env"]["SHOPIFY_CLI_NO_ANALYTICS"] == "1"
+    assert kwargs["env"]["OPT_OUT_INSTRUMENTATION"] == "true"
+    assert result[0]["delivery_id"] == "delivery-1"
+    assert result[0]["event_id"] == "shp_event_1"
+    assert result[0]["status_code"] == 503
+    assert result[0]["attempt"] == 2
+    assert result[0]["target"] == "https://receiver.example.test/webhook"
+    expected_hash, expected_size = canonical_json_fingerprint(payload[0]["payload"])
+    assert result[0]["payload_sha256"] == expected_hash
+    assert result[0]["payload_size_bytes"] == expected_size
+    serialized = json.dumps(result)
+    for secret in ("private-url", "payload-secret", "response-secret", "authorization-secret"):
+        assert secret not in serialized
+
+
+def test_shopify_adapter_rejects_option_injection_and_invalid_ranges() -> None:
+    adapter = ShopifyAppLogsAdapter(runner=lambda command, **kwargs: None)
+    with pytest.raises(ProviderSourceError, match="store"):
+        adapter.list_webhook_deliveries(store="shop.myshopify.com;whoami")
+    with pytest.raises(ProviderSourceError, match="since"):
+        adapter.list_webhook_deliveries(since="30d")
+    with pytest.raises(ProviderSourceError, match="limit"):
+        adapter.list_webhook_deliveries(limit=1001)
+
+
+def test_shopify_adapter_hides_cli_errors_and_bounds_output() -> None:
+    from types import SimpleNamespace
+    import subprocess
+
+    def failed_runner(command: list[str], **kwargs: object) -> SimpleNamespace:
+        return SimpleNamespace(
+            returncode=1,
+            stdout="",
+            stderr="access token secret and private details",
+        )
+
+    adapter = ShopifyAppLogsAdapter(runner=failed_runner)
+    with pytest.raises(ProviderSourceError) as error:
+        adapter.list_webhook_deliveries()
+    assert "access token secret" not in str(error.value)
+
+    def huge_runner(command: list[str], **kwargs: object) -> SimpleNamespace:
+        return SimpleNamespace(
+            returncode=0,
+            stdout=" " * (2 * 1024 * 1024 + 1),
+            stderr="",
+        )
+
+    with pytest.raises(ProviderSourceError, match="2 MiB"):
+        ShopifyAppLogsAdapter(runner=huge_runner).list_webhook_deliveries()
+
+    def timeout_runner(command: list[str], **kwargs: object) -> SimpleNamespace:
+        raise subprocess.TimeoutExpired(command, timeout=20)
+
+    with pytest.raises(ProviderSourceError, match="timed out"):
+        ShopifyAppLogsAdapter(runner=timeout_runner).list_webhook_deliveries()
