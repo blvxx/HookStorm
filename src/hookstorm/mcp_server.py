@@ -351,6 +351,22 @@ def _failure_recommendations(diagnosis: dict[str, Any]) -> list[str]:
             "This attempt was deliberately altered by HookStorm; do not attribute it to a receiver outage.",
             "Use the next real attempt and an independent state probe to evaluate idempotency.",
         ],
+        "receiver_conflict": [
+            "Check whether the receiver treats this event ID as already processed or rejects a state transition.",
+            "Verify the business effect independently before retrying or replaying the event.",
+        ],
+        "payload_too_large": [
+            "Check receiver, reverse-proxy, and API gateway body-size limits.",
+            "Compare the scenario payload size with the integration's documented maximum.",
+        ],
+        "unsupported_media_type": [
+            "Check the endpoint's accepted Content-Type values.",
+            "Inspect whether a vendor-specific JSON media type is required.",
+        ],
+        "redirect_not_followed": [
+            "Update the scenario target to the final webhook endpoint rather than relying on redirects.",
+            "Check the intended scheme, host, and path before sending another test request.",
+        ],
     }.get(category, [
         "Inspect the receiver logs using the event ID and recorded attempt time.",
         "Compare the original scenario with the receiver's current webhook contract.",
@@ -446,6 +462,7 @@ def _prepare_replay_batch(
         "selected_event_count": len(selected),
         "warnings": warnings,
     }
+
 
 def _validate_replay_target(target: str) -> str:
     if not isinstance(target, str) or not target.strip():
