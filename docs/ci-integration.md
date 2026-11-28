@@ -14,6 +14,17 @@ hookstorm init
 
 The wizard creates `scenarios/webhook.yaml` and `.github/workflows/webhook-regression.yml`. In an interactive terminal, choose the signature provider (`generic`, `stripe`, `github`, `shopify`, or `standard_webhooks`). Without an interactive terminal, the provider defaults to `generic`.
 
+Choose a starter payload and provider with `--template`:
+
+~~~bash
+hookstorm init --template stripe
+hookstorm init --template github --no-workflow
+~~~
+
+Available templates are `generic`, `stripe`, `github`, `shopify`, and `standard-webhooks`.
+They generate representative payload examples and the matching signature provider; customize
+the event fields and expected response for your receiver before using the scenario.
+
 Customize the event contract directly from the command line:
 
 ~~~bash
@@ -23,7 +34,7 @@ hookstorm init --signature-provider github \\
 
 Then edit the generated scenario's payload, HTTP status expectations, and JSON assertions to match your staging receiver. The generated workflow reads the staging URL and signing secret from GitHub Environment values; it never writes them into the scenario or workflow.
 
-The command preserves existing files and exits with an error rather than overwriting them. Use `--force` only when you intend to replace both generated files. Use `--no-workflow` to create just the scenario file. The workflow installs HookStorm from a pinned repository commit; update that pin when you intentionally upgrade the tool.
+The command preserves existing files and exits with an error rather than overwriting them. Use `--force` only when you intend to replace both generated files. Use `--no-workflow` to create just the scenario file. The workflow installs HookStorm from a pinned repository commit. After upgrading the installed HookStorm package, run `hookstorm update-workflow` to refresh only that pin in your generated workflow. The command preserves your other workflow changes and refuses files that do not contain exactly one recognized HookStorm install URL.
 
 
 
@@ -45,7 +56,7 @@ Validate the scenario locally before connecting it to CI:
 hookstorm validate scenarios/webhook.yaml
 ```
 
-After setting `HOOKSTORM_TARGET_URL` and (for signed scenarios) `HOOKSTORM_SECRET`, run the preflight:
+After setting `HOOKSTORM_TARGET_URL` and (for signed scenarios) `HOOKSTORM_SECRET`, run the preflight. The same `HOOKSTORM_TARGET_URL` variable is used by `hookstorm run`, so you can omit `--target` locally unless you need to override the configured endpoint:
 
 ```bash
 hookstorm doctor scenarios/webhook.yaml
