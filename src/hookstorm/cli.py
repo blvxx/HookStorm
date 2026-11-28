@@ -659,7 +659,7 @@ def _watch_command(args: argparse.Namespace) -> int:
             signature = (stat.st_mtime_ns, stat.st_size)
             if signature != previous_signature:
                 previous_signature = signature
-                print(f"\\nChange detected: {scenario_path}")
+                print(f"\nChange detected: {scenario_path}")
                 try:
                     _execute_scenario(args)
                 except (HistoryError, ValueError, OSError) as exc:
