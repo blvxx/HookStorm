@@ -2,11 +2,10 @@ from __future__ import annotations
 
 import asyncio
 import json
-
-import httpx
 from importlib import import_module
 from pathlib import Path
 
+import httpx
 import pytest
 
 from hookstorm.config import load_scenario, scenario_fingerprint
