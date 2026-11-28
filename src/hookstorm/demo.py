@@ -44,7 +44,7 @@ class _DemoHandler(BaseHTTPRequestHandler):
                 return
             json.loads(self.rfile.read(length))
             attempt = int(self.headers.get("X-HookStorm-Attempt", "1"))
-        except (ValueError, json.JSONDecodeError):
+        except ValueError:
             self._reply(400, {"accepted": False, "error": "invalid request"})
             return
         if attempt == 1:
