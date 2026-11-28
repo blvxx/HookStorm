@@ -97,7 +97,7 @@ This is an **event source**, not a per-endpoint delivery-attempt log source. Str
 
 ### Shopify webhook delivery logs
 
-Shopify CLI 5.1+ exposes historical app logs, including webhook deliveries, in JSON. Authenticate a user on the machine that runs MCP with `shopify auth login`, then call `hookstorm_list_shopify_deliveries`. The MCP process runs `shopify app logs --type webhook --json --no-input` from `HOOKSTORM_MCP_SCENARIO_ROOT`. Optional `store` and `client_id` filters narrow the app/store. `since` accepts `1h`, `6h`, `12h`, or `24h`; `limit` accepts 1–1,000.
+Shopify CLI 5.1+ exposes historical app logs, including webhook deliveries, in JSON. Authenticate a user on the machine that runs MCP with `shopify auth login`, then call `hookstorm_list_shopify_deliveries`. The MCP process runs `shopify app logs --type webhook --json --no-input` from `HOOKSTORM_MCP_SCENARIO_ROOT`. Optional `store` and `client_id` filters narrow the app/store. `since` accepts whole-hour or whole-day relative offsets up to `168h`/`7d`; when `until` is supplied, it must describe a later boundary and the interval must be no longer than 24 hours. For example, `since="168h", until="144h"` inspects the window from seven to six days ago. Without `until`, the window may be at most 24 hours. `limit` accepts 1–1,000.
 
 The command needs an existing interactive Shopify account session; Shopify's changelog states that CI automation tokens are not supported for this log command. Set `HOOKSTORM_SHOPIFY_CLI` if the executable is not named `shopify` on `PATH`. The adapter disables optional Shopify CLI usage telemetry, does not pass through `--verbose`, does not invoke a shell, does not expose CLI stderr, and sanitizes JSON records before returning them. The CLI's 2 MiB JSON output limit and command timeout are enforced. Some records may omit or truncate body data; those records cannot be joined by payload fingerprint.
 
@@ -146,6 +146,7 @@ Official provider references:
 
 - [GitHub repository webhook delivery REST API](https://docs.github.com/en/rest/repos/webhooks)
 - [Stripe retrieve an Event](https://docs.stripe.com/api/events/retrieve)
+- [Stripe list Events](https://docs.stripe.com/api/events/list)
 - [Shopify CLI app logs, added in Shopify CLI 5.1](https://shopify.dev/changelog/posts/query-your-app-s-logs-in-shopify-app-logs)
 - [Shopify app logs command reference](https://shopify.dev/docs/api/shopify-cli/app/app-logs)
 
