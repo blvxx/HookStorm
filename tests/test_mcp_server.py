@@ -682,3 +682,161 @@ def test_github_delivery_inspection_requires_run_and_scenario_together(
             assert response.is_error
 
     asyncio.run(call())
+
+
+def _stripe_scenario_file(root: Path, event: dict) -> Path:
+    path = root / "scenarios" / "stripe-event.yaml"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    import yaml
+
+    path.write_text(
+        yaml.safe_dump(
+            {
+                "version": 1,
+                "name": "Stripe event replay fixture",
+                "retry": {"max_attempts": 1},
+                "events": [
+                    {
+                        "id": event["type"],
+                        "event_id": event["id"],
+                        "payload": event,
+                        "expect_status": [200],
+                    }
+                ],
+            },
+            sort_keys=False,
+        ),
+        encoding="utf-8",
+    )
+    return path
+
+
+def test_retrieve_stripe_event_correlates_canonical_object_without_leaking_payload(
+    tmp_path: Path,
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    from hookstorm.providers import canonical_json_fingerprint
+
+    event = {
+        "id": "evt_1A2B3C",
+        "object": "event",
+        "type": "payment_intent.succeeded",
+        "created": 1795860000,
+        "api_version": "2025-09-30.clover",
+        "livemode": False,
+        "pending_webhooks": 1,
+        "request": {"id": "req_123"},
+        "data": {
+            "object": {
+                "id": "pi_private",
+                "metadata": {"secret": "payload-must-not-leak"},
+            }
+        },
+    }
+    scenario_path = _stripe_scenario_file(tmp_path, event)
+    db = tmp_path / "history.sqlite3"
+    run_id = _failed_run(
+        scenario_path,
+        "http://127.0.0.1:8000/webhook",
+        db,
+        ["evt_1A2B3C"],
+    )
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.method == "GET"
+        assert request.url.host == "api.stripe.com"
+        assert request.headers["Authorization"].startswith("Basic ")
+        return httpx.Response(200, json=event)
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    monkeypatch.setenv("HOOKSTORM_STRIPE_API_KEY", "sk_test_secret")
+    server = create_server(
+        history_db=db,
+        scenario_root=tmp_path,
+        enable_replay=False,
+        stripe_http_client=client,
+    )
+    result = _call_tool(
+        server,
+        "hookstorm_retrieve_stripe_event",
+        {
+            "event_id": "evt_1A2B3C",
+            "run_id": run_id,
+            "scenario_path": "scenarios/stripe-event.yaml",
+        },
+    )
+    client.close()
+
+    correlation = result["correlation"]
+    assert correlation["status"] == "confirmed"
+    assert correlation["stripe_event_id_matches_local_event_id"] is True
+    assert correlation["payload_fingerprint_matches"] is True
+    assert correlation["event_type_matches"] is True
+    assert correlation["delivery_attempt_correlation"] == "not_available_from_stripe_events_api"
+    assert correlation["root_cause"]["confirmed"] is False
+    expected_hash, _ = canonical_json_fingerprint(event)
+    assert result["payload"]["sha256"] == expected_hash
+    serialized = json.dumps(result)
+    assert "sk_test_secret" not in serialized
+    assert "payload-must-not-leak" not in serialized
+    assert "pi_private" not in serialized
+
+
+def test_list_shopify_deliveries_uses_cli_and_returns_sanitized_metadata(
+    tmp_path: Path,
+) -> None:
+    from types import SimpleNamespace
+
+    calls: list[tuple[list[str], dict]] = []
+
+    def fake_runner(command: list[str], **kwargs: object) -> SimpleNamespace:
+        calls.append((command, kwargs))
+        return SimpleNamespace(
+            returncode=0,
+            stdout=json.dumps(
+                [
+                    {
+                        "id": "shopify-delivery-1",
+                        "topic": "orders/create",
+                        "status": "failure",
+                        "statusCode": 502,
+                        "shop": "store.myshopify.com",
+                        "uri": "http://127.0.0.1:8000/webhook?private=secret",
+                        "payload": {"private": "shopify-payload-secret"},
+                        "responseBody": "shopify-response-secret",
+                    }
+                ]
+            ),
+            stderr="",
+        )
+
+    server = create_server(
+        scenario_root=tmp_path,
+        enable_replay=False,
+        shopify_cli_runner=fake_runner,
+    )
+    result = _call_tool(
+        server,
+        "hookstorm_list_shopify_deliveries",
+        {
+            "since": "6h",
+            "limit": 10,
+            "status": "failure",
+            "store": "store.myshopify.com",
+            "client_id": "client_123",
+        },
+    )
+
+    assert result["provider"] == "shopify"
+    assert result["count"] == 1
+    delivery = result["deliveries"][0]
+    assert delivery["status_code"] == 502
+    assert delivery["target"] == "http://127.0.0.1:8000/webhook"
+    assert "shopify-payload-secret" not in json.dumps(result)
+    assert "shopify-response-secret" not in json.dumps(result)
+    assert "private=secret" not in json.dumps(result)
+    command, kwargs = calls[0]
+    assert command[1:5] == ["app", "logs", "--type", "webhook"]
+    assert "--json" in command
+    assert kwargs["shell"] is False
+    assert kwargs["cwd"] == str(tmp_path.resolve())
