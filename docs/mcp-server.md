@@ -44,8 +44,10 @@ Scenario paths must resolve inside HOOKSTORM_MCP_SCENARIO_ROOT. The server accep
 | hookstorm_inspect_run | Retrieve one run with attempt details and failure categories |
 | hookstorm_list_scenarios | List YAML scenarios in the root and scenarios/ |
 | hookstorm_inspect_scenario | Validate a scenario and inspect event identities, retry settings, expected statuses, and assertion keys |
-| hookstorm_diagnose_run | Explain recorded failures and suggest the next checks |
-| hookstorm_replay_failed_delivery | Replay one failed event from its original scenario after the replay safeguards pass |
+| hookstorm_diagnose_run | Explain recorded failures from stored history |
+| hookstorm_analyze_run | Combine failed attempts with scenario settings and privacy-preserving context |
+| hookstorm_replay_failed_delivery | Replay one failed event after the replay safeguards pass |
+| hookstorm_replay_failed_deliveries | Replay up to 50 selected failed event IDs in one confirmed run |
 
 Scenario inspection never returns payload values. Run inspection uses the existing sanitized history record; it does not retrieve or reconstruct request bodies, headers, or receiver response bodies.
 
