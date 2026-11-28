@@ -841,6 +841,8 @@ def test_list_shopify_deliveries_uses_cli_and_returns_sanitized_metadata(
 
     assert result["provider"] == "shopify"
     assert result["count"] == 1
+    assert result["query"]["since"] == "48h"
+    assert result["query"]["until"] == "24h"
     delivery = result["deliveries"][0]
     assert delivery["status_code"] == 502
     assert delivery["target"] == "http://127.0.0.1:8000/webhook"
