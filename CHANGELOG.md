@@ -10,6 +10,7 @@
 - Add scenario-aware MCP run analysis with privacy-preserving payload/header metadata and evidence-bounded recommendations.
 - Add atomic batch replay for up to 50 explicitly selected failed events, retaining loopback-only and per-call confirmation safeguards.
 - Expand HTTP failure classification for conflicts, payload limits, media types, and redirects.
+- Preserve the source request correlation ID during MCP replay while storing the replay as a separate history run.
 
 
 ### UX and automation
