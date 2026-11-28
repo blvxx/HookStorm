@@ -238,6 +238,24 @@ def _print_injected_fault(delivery: dict, attempt: dict, index: int) -> None:
     )
 
 
+def _diagnostic_hint(error: str | None) -> str | None:
+    """Translate common delivery failures into one actionable next step."""
+    if not error:
+        return None
+    message = error.lower()
+    if "timed out" in message:
+        return "Check receiver availability and its processing time; raise delivery.timeout_ms only when justified."
+    if "request error" in message:
+        return "Check the target URL, DNS/TCP/TLS reachability, and any staging firewall or allowlist."
+    if "response json" in message or "response body is not valid json" in message:
+        return "Compare the receiver's actual JSON response with expect_json in the scenario."
+    if "compressed response" in message or "response body exceeds" in message:
+        return "Return an uncompressed response body smaller than HookStorm's 2 MiB limit."
+    if "invalid signature" in message:
+        return "Check the selected signature provider and the matching HOOKSTORM_SECRET."
+    return None
+
+
 def _print_summary(result: dict) -> None:
     summary = result["summary"]
     state = "PASS" if summary["success"] else "FAIL"
@@ -264,6 +282,12 @@ def _print_summary(result: dict) -> None:
                 _print_injected_fault(delivery, attempt, index)
         if latest["error"] and latest.get("injected_fault") is None:
             print(f"   {latest['error']}")
+        if not delivery["passed"]:
+            hint = _diagnostic_hint(latest.get("error"))
+            if hint:
+                print(f"   Next step: {hint}")
+            elif latest.get("expected_status") is False:
+                print("   Next step: Check the receiver's route and HTTP status expectations.")
     verification = result.get("verification")
     if verification is not None:
         verify_mark = "✓" if verification["passed"] else "✗"
