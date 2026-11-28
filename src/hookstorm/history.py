@@ -8,9 +8,9 @@ import os
 import sqlite3
 import threading
 from pathlib import Path
+from typing import Any
 
 from hookstorm.json_safety import JSONNestingError, ensure_json_nesting_depth
-from typing import Any
 
 _DEFAULT_DB = Path.home() / ".hookstorm" / "history.sqlite3"
 _MEMORY_DB_URI = "file:hookstorm_history?mode=memory&cache=shared"
