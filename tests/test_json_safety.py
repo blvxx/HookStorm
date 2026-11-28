@@ -3,8 +3,8 @@ from __future__ import annotations
 import pytest
 
 from hookstorm.json_safety import (
-    JSONNestingError,
     MAX_JSON_NESTING_DEPTH,
+    JSONNestingError,
     ensure_json_nesting_depth,
 )
 
