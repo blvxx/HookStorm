@@ -66,7 +66,7 @@ The replay tool only permits loopback targets (localhost, 127.0.0.1, or ::1). Qu
 
 The current scenario must match the fingerprint recorded in the failed run. If it does not, the replay is rejected unless allow_scenario_change=true is explicitly supplied. Use that override only after reviewing the changed payload and delivery settings.
 
-A replay selects the requested event and sends its configured retries and duplicates. It resets its scheduled start offset to zero. The original whole-scenario business-state verification probe is not repeated because its expectations may describe more events than the selected one. The replay result is saved to HookStorm history when possible.
+A replay selects the requested event and sends its configured retries and duplicates. It resets its scheduled start offset to zero. The original whole-scenario business-state verification probe is not repeated because its expectations may describe more events than the selected one. The replay result is saved to HookStorm history when possible. A replay receives a new `run_id` for its own history record but preserves the source run's `X-HookStorm-Run` correlation value on the HTTP request; the sanitized history stores this separately as `correlation_run_id`. This lets test receivers that scope idempotency by `(X-HookStorm-Run, event_id)` recognize the replay as the same original delivery without overwriting the original HookStorm run record.
 
 The tool is intentionally loopback-only in this first version. Do not use it to test production systems. For staging or remote-target replay, a later iteration must add a stronger target allowlist and DNS-rebinding protection rather than simply exposing --allow-remote to the model.
 
