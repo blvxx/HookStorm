@@ -32,7 +32,10 @@ The server reads these environment variables:
 |---|---|---|
 | HOOKSTORM_MCP_SCENARIO_ROOT | Current working directory | Root directory in which MCP may inspect YAML scenarios |
 | HOOKSTORM_HISTORY_DB | HookStorm's normal local history database | Select the same run history used by the CLI |
-| HOOKSTORM_MCP_ENABLE_REPLAY | Disabled | Set to 1 to enable the replay tool |
+| HOOKSTORM_MCP_ENABLE_REPLAY | Disabled | Set to 1 to enable the local loopback replay tools |
+| HOOKSTORM_GITHUB_TOKEN | Unset | Optional GitHub token with repository Webhooks: read permission |
+| HOOKSTORM_STRIPE_API_KEY | Unset | Optional restricted/test Stripe key with Events read access |
+| HOOKSTORM_SHOPIFY_CLI | shopify | Optional path to Shopify CLI 5.1+ executable |
 
 Scenario paths must resolve inside HOOKSTORM_MCP_SCENARIO_ROOT. The server accepts YAML files in the root or its scenarios directory for listing, and limits individual scenario files to 2 MiB. Symlinks that resolve outside the configured root are rejected.
 
@@ -49,6 +52,10 @@ Scenario paths must resolve inside HOOKSTORM_MCP_SCENARIO_ROOT. The server accep
 | hookstorm_analyze_run | Combine failed attempts with scenario settings and privacy-preserving context |
 | hookstorm_replay_failed_delivery | Replay one failed event after the replay safeguards pass |
 | hookstorm_replay_failed_deliveries | Replay up to 50 selected failed event IDs in one confirmed run |
+| hookstorm_list_github_deliveries | List repository webhook delivery metadata from GitHub's read-only REST API |
+| hookstorm_inspect_github_delivery | Inspect one GitHub delivery and optionally correlate it with a local run |
+| hookstorm_retrieve_stripe_event | Retrieve one canonical Stripe Event; optionally compare it with a local run |
+| hookstorm_list_shopify_deliveries | Read Shopify webhook delivery logs through an authenticated Shopify CLI session; optionally correlate them with a local run |
 
 ### Search recent deliveries
 
@@ -57,6 +64,52 @@ Use `hookstorm_find_deliveries` to locate delivery attempts without opening run 
 The response includes run identifiers, event identity, attempt statuses and timings, bounded diagnostic categories, and the sanitized target. It does not return payload values, custom header values, or response bodies. When more matches exist than the requested result limit, `has_more` is true. The search never sends webhook requests.
 
 Scenario inspection never returns payload values. Run inspection uses the existing sanitized history record; it does not retrieve or reconstruct request bodies, headers, or receiver response bodies.
+
+## Provider event and delivery sources
+
+Provider tools are read-only. They never ask a provider to redeliver an event, and they do not persist provider payloads or raw provider responses in HookStorm history.
+
+### GitHub repository webhook deliveries
+
+Set \`HOOKSTORM_GITHUB_TOKEN\` to a fine-grained personal access token or GitHub App token with **Webhooks: read** access to the repository. Then call:
+
+- \`hookstorm_list_github_deliveries(owner, repo, hook_id, limit, status)\` to list recent deliveries.
+- \`hookstorm_inspect_github_delivery(owner, repo, hook_id, delivery_id)\` to inspect one delivery's request and response metadata.
+
+The detail tool returns the provider delivery GUID, event name/action, delivery timestamp, HTTP status, duration, a query-free destination URL, payload byte counts and SHA-256 fingerprints. It returns only allowlisted request/response header names and values; signature headers, authorization, arbitrary headers, request payload values, and response bodies are not returned. GitHub API responses are capped at 2 MiB and payload fingerprints at 1 MiB.
+
+To compare a delivery with a local run, pass both \`run_id\` and \`scenario_path\` to \`hookstorm_inspect_github_delivery\`. A correlation is \`confirmed\` only if the GitHub GUID/header agree, the local scenario fingerprint still matches the saved run, the canonical JSON payload fingerprint and event type match, and the destination matches. A payload-only match is not enough to authorize replay. Status-code agreement is reported separately; a 4xx/5xx response confirms what the receiver returned, not the internal reason it returned it.
+
+### Stripe Events
+
+Set \`HOOKSTORM_STRIPE_API_KEY\` to a restricted or test-mode secret key with Events read access. Then call \`hookstorm_retrieve_stripe_event(event_id)\`. The adapter uses \`GET /v1/events/{id}\` and returns allowlisted Event metadata plus canonical payload fingerprints; it does not return nested object values.
+
+This is an **event source**, not a delivery-attempt log source. Stripe's Events API retrieves the Event object, while per-endpoint delivery attempts, response details, and retries must be inspected through Stripe's Dashboard webhook delivery view. \`delivery_attempt_history_available\` is therefore always \`false\`. When a run and scenario are supplied, HookStorm can confirm that the canonical event object matches the stored scenario and local event ID, but it will explicitly report that endpoint delivery correlation is unavailable from this API.
+
+### Shopify webhook delivery logs
+
+Shopify CLI 5.1+ exposes historical app logs, including webhook deliveries, in JSON. Authenticate a user on the machine that runs MCP with \`shopify auth login\`, then call \`hookstorm_list_shopify_deliveries\`. The MCP process runs \`shopify app logs --type webhook --json --no-input\` from \`HOOKSTORM_MCP_SCENARIO_ROOT\`. Optional \`store\` and \`client_id\` filters narrow the app/store. \`since\` accepts \`1h\`, \`6h\`, \`12h\`, or \`24h\`; \`limit\` accepts 1–1,000.
+
+The command needs an existing interactive Shopify account session; Shopify's changelog states that CI automation tokens are not supported for this log command. Set \`HOOKSTORM_SHOPIFY_CLI\` if the executable is not named \`shopify\` on \`PATH\`. The adapter disables optional Shopify CLI usage telemetry, does not pass through \`--verbose\`, does not invoke a shell, does not expose CLI stderr, and sanitizes JSON records before returning them. The CLI's 2 MiB JSON output limit and command timeout are enforced. Some records may omit or truncate body data; those records cannot be joined by payload fingerprint.
+
+Pass both \`run_id\` and \`scenario_path\` to \`hookstorm_list_shopify_deliveries\` to attach a per-record correlation result. A \`confirmed\` join requires the saved scenario fingerprint, Shopify event identity, payload fingerprint, topic, and target to agree. Missing or conflicting fields result in \`partial\` or \`unmatched\`, never a nearest-run guess.
+
+### What a confirmed cause means
+
+A provider record can confirm an observed delivery time, endpoint, attempt number, and HTTP status. It cannot by itself prove a database failure, signature bug, queue problem, or business-logic exception inside the receiver. HookStorm labels a root cause as confirmed only when its own local history contains an explicit deterministic client-side fault marker, such as a configured connection error or acknowledgement loss. Otherwise the tool returns observed facts, a bounded diagnosis, and the remaining evidence needed.
+
+### Replay and idempotency boundary
+
+Provider adapters are intentionally read-only. They do not invoke GitHub redelivery, Stripe retries, or Shopify redelivery. A confirmed provider-to-local correlation may mark a failed event as eligible for the existing local loopback replay tool, but \`idempotency_status\` remains \`not_proven_by_correlation\`. Correlation is not an idempotency check.
+
+Before any replay, inspect a read-only business-state endpoint or the receiver's persisted idempotency record. Existing replay remains disabled unless \`HOOKSTORM_MCP_ENABLE_REPLAY=1\`, requires \`confirm=true\`, uses the same event ID and source-run correlation ID, and is restricted to loopback targets. It is a local reproduction flow, not a production provider-redelivery action. Never replay a payment/order event against production merely because the provider log shows a 4xx/5xx response.
+
+Official provider references:
+
+- [GitHub repository webhook delivery REST API](https://docs.github.com/en/rest/repos/webhooks)
+- [Stripe retrieve an Event](https://docs.stripe.com/api/events/retrieve)
+- [Shopify CLI app logs, added in Shopify CLI 5.1](https://shopify.dev/changelog/posts/query-your-app-s-logs-in-shopify-app-logs)
+- [Shopify app logs command reference](https://shopify.dev/docs/api/shopify-cli/app/app-logs)
 
 ## Replay safety
 
@@ -109,7 +162,9 @@ For an MCP client that supports local stdio servers, register the command with t
       "args": [],
       "env": {
         "HOOKSTORM_MCP_SCENARIO_ROOT": "/absolute/path/to/application",
-        "HOOKSTORM_HISTORY_DB": "/absolute/path/to/.hookstorm/history.sqlite3"
+        "HOOKSTORM_HISTORY_DB": "/absolute/path/to/.hookstorm/history.sqlite3",
+        "HOOKSTORM_GITHUB_TOKEN": "read-only-github-token",
+        "HOOKSTORM_STRIPE_API_KEY": "restricted-stripe-test-key"
       }
     }
   }
@@ -124,7 +179,7 @@ Install the development and MCP extras, then run the focused server tests:
 
 ~~~bash
 python -m pip install -e ".[dev,mcp]"
-pytest tests/test_mcp_server.py -q
+pytest tests/test_providers.py tests/test_mcp_server.py -q
 ~~~
 
-The dedicated MCP CI job runs Ruff and the MCP test module on Python 3.12.
+The dedicated MCP CI job runs Ruff and both provider-adapter and MCP tool tests on Python 3.12. Provider integration tests use mocked HTTP/CLI transports; they do not contact GitHub, Stripe, or Shopify.
