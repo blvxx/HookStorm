@@ -599,8 +599,8 @@ def test_inspect_github_delivery_correlates_exact_local_event_without_leaking_da
     assert correlation["status_codes_match"] is True
     assert correlation["confirmed_facts"][0]["status_code"] == 503
     assert correlation["root_cause"]["confirmed"] is False
-    assert correlation["replay_readiness"]["eligible_for_existing_loopback_replay"] is True
-    assert correlation["replay_readiness"]["idempotency_status"] == "not_proven_by_correlation"
+    assert correlation["replay_readiness"]["eligible_for_guarded_replay"] is True
+    assert correlation["replay_readiness"]["idempotency_status"] == "requires_pre_and_post_state_probes"
 
     serialized = json.dumps(result)
     for secret in (
@@ -886,8 +886,118 @@ def test_shopify_log_correlation_requires_exact_payload_topic_target_and_scenari
     assert correlation["topic_matches"] is True
     assert correlation["target_matches"] is True
     assert correlation["root_cause"]["confirmed"] is False
-    assert correlation["replay_readiness"]["eligible_for_existing_loopback_replay"] is True
-    assert correlation["replay_readiness"]["idempotency_status"] == "not_proven_by_correlation"
+    assert correlation["replay_readiness"]["eligible_for_guarded_replay"] is True
+    assert correlation["replay_readiness"]["idempotency_status"] == "requires_pre_and_post_state_probes"
     serialized = json.dumps(result)
     assert "payload-must-not-leak" not in serialized
     assert "do-not-return" not in serialized
+
+def _guarded_replay_scenario(root: Path, state_url: str) -> Path:
+    path = root / "scenarios" / "guarded-replay.yaml"
+    path.parent.mkdir(parents=True, exist_ok=True)
+    path.write_text(
+        f"""version: 1
+name: Guarded replay
+retry:
+  max_attempts: 1
+events:
+  - id: ping
+    event_id: evt_replay
+    payload:
+      private_value: payload-must-not-leak
+    expect_status: [200]
+verify:
+  url: {state_url}
+  expect_status: [200]
+  expect_json:
+    processed_events: 1
+""",
+        encoding="utf-8",
+    )
+    return path
+
+
+def test_guarded_replay_checks_state_before_and_after_and_preserves_idempotency(
+    tmp_path: Path,
+    receiver,
+) -> None:
+    base, state = receiver
+    scenario_path = _guarded_replay_scenario(tmp_path, f"{base}/state")
+    db = tmp_path / "history.sqlite3"
+    run_id = _failed_run(
+        scenario_path,
+        base,
+        db,
+    )
+    server = create_server(
+        history_db=db,
+        scenario_root=tmp_path,
+        enable_replay=True,
+    )
+    arguments = {
+        "run_id": run_id,
+        "scenario_path": "scenarios/guarded-replay.yaml",
+        "event_id": "evt_replay",
+        "target": base,
+        "expected_unprocessed_json": {"processed_events": 0},
+        "expected_processed_json": {"processed_events": 1},
+        "confirm": False,
+    }
+
+    preview = _call_tool(
+        server,
+        "hookstorm_replay_with_idempotency_guard",
+        arguments,
+    )
+    assert preview["executed"] is False
+    assert preview["pre_replay_probe"]["passed"] is True
+    assert state["requests"] == []
+
+    arguments["confirm"] = True
+    result = _call_tool(
+        server,
+        "hookstorm_replay_with_idempotency_guard",
+        arguments,
+    )
+    assert result["executed"] is True
+    assert result["pre_replay_probe"]["passed"] is True
+    assert result["post_replay_probe"]["passed"] is True
+    assert result["idempotency_verified"] is True
+    assert result["correlation_run_id"] == run_id
+    assert len(state["requests"]) == 1
+    assert state["requests"][0]["event_id"] == "evt_replay"
+    assert state["requests"][0]["run_id"] == run_id
+    assert len(state["effects"]) == 1
+
+
+def test_guarded_replay_blocks_when_event_is_already_processed(
+    tmp_path: Path,
+    receiver,
+) -> None:
+    base, state = receiver
+    scenario_path = _guarded_replay_scenario(tmp_path, f"{base}/state")
+    db = tmp_path / "history.sqlite3"
+    run_id = _failed_run(scenario_path, base, db)
+    state["effects"].add((run_id, "evt_replay"))
+    server = create_server(
+        history_db=db,
+        scenario_root=tmp_path,
+        enable_replay=True,
+    )
+    result = _call_tool(
+        server,
+        "hookstorm_replay_with_idempotency_guard",
+        {
+            "run_id": run_id,
+            "scenario_path": "scenarios/guarded-replay.yaml",
+            "event_id": "evt_replay",
+            "target": base,
+            "expected_unprocessed_json": {"processed_events": 0},
+            "expected_processed_json": {"processed_events": 1},
+            "confirm": True,
+        },
+    )
+    assert result["executed"] is False
+    assert result["blocked"] is True
+    assert result["pre_replay_probe"]["passed"] is False
+    assert state["requests"] == []
