@@ -137,7 +137,12 @@ def _resolve_evidence_path(value: str, root: str | Path) -> Path:
 
 
 def _parse_record(value: Any) -> dict[str, Any] | None:
-    if not isinstance(value, dict) or value.get("schema_version") != 1:
+    schema_version = value.get("schema_version") if isinstance(value, dict) else None
+    if (
+        not isinstance(value, dict)
+        or isinstance(schema_version, bool)
+        or schema_version != 1
+    ):
         return None
     timestamp = _timestamp(value.get("timestamp"))
     event_id = _safe_text(value.get("event_id"), 256)
