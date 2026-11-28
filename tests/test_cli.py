@@ -489,7 +489,7 @@ def test_init_template_flag_selects_provider_and_event(tmp_path, monkeypatch, ca
     scenario = load_scenario(tmp_path / "scenarios" / "webhook.yaml")
     assert scenario["delivery"]["signature_provider"] == "stripe"
     assert scenario["events"][0]["id"] == "payment_intent.succeeded"
-    assert "payment_intent" in scenario["events"][0]["payload"]
+    assert scenario["events"][0]["payload"]["type"] == "payment_intent.succeeded"
     capsys.readouterr()
 
 
