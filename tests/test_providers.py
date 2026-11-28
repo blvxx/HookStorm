@@ -314,7 +314,8 @@ def test_shopify_adapter_runs_read_only_bounded_json_command_and_sanitizes() -> 
 
     adapter = ShopifyAppLogsAdapter(executable="/usr/local/bin/shopify", runner=fake_runner)
     result = adapter.list_webhook_deliveries(
-        since="24h",
+        since="168h",
+        until="144h",
         limit=100,
         status="failure",
         store="dev-store.myshopify.com",
@@ -333,6 +334,8 @@ def test_shopify_adapter_runs_read_only_bounded_json_command_and_sanitizes() -> 
         "24h",
         "--limit",
     ]
+    assert "--until" in command
+    assert command[command.index("--until") + 1] == "144h"
     assert "--json" in command and "--no-input" in command
     assert kwargs["shell"] is False
     assert kwargs["capture_output"] is True
@@ -358,6 +361,12 @@ def test_shopify_adapter_rejects_option_injection_and_invalid_ranges() -> None:
         adapter.list_webhook_deliveries(store="shop.myshopify.com;whoami")
     with pytest.raises(ProviderSourceError, match="since"):
         adapter.list_webhook_deliveries(since="30d")
+    with pytest.raises(ProviderSourceError, match="24 hours"):
+        adapter.list_webhook_deliveries(since="48h")
+    with pytest.raises(ProviderSourceError, match="earlier than until"):
+        adapter.list_webhook_deliveries(since="24h", until="48h")
+    with pytest.raises(ProviderSourceError, match="24 hours"):
+        adapter.list_webhook_deliveries(since="72h", until="24h")
     with pytest.raises(ProviderSourceError, match="limit"):
         adapter.list_webhook_deliveries(limit=1001)
 
