@@ -78,10 +78,22 @@ def _payload_fingerprint(value: Any) -> tuple[str | None, int | None]:
         try:
             decoded = json.loads(value)
         except (ValueError, TypeError):
+            encoded = value.encode("utf-8")
+            if len(encoded) <= _MAX_EVENT_PAYLOAD_BYTES:
+                return hashlib.sha256(encoded).hexdigest(), len(encoded)
             return None, None
         if isinstance(decoded, dict):
             fingerprint, size = canonical_json_fingerprint(decoded)
             return fingerprint, size
+        if isinstance(decoded, list):
+            try:
+                fingerprint, size = canonical_json_fingerprint(decoded)
+            except ProviderSourceError:
+                return None, None
+            return fingerprint, size
+        encoded = value.encode("utf-8")
+        if len(encoded) <= _MAX_EVENT_PAYLOAD_BYTES:
+            return hashlib.sha256(encoded).hexdigest(), len(encoded)
     return None, None
 
 
@@ -281,7 +293,7 @@ class GitHubWebhookAdapter:
         )
         payload_hash, payload_size = _payload_fingerprint(request.get("payload"))
         response_hash, response_size = _payload_fingerprint(response.get("payload"))
-        request_url = _safe_target(request.get("url"))
+        request_url = _safe_target(request.get("url") or payload.get("url"))
         status_code = payload.get("status_code")
         if isinstance(status_code, bool) or not isinstance(status_code, int):
             status_code = None
