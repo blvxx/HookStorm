@@ -588,6 +588,7 @@ def test_fault_injection_attempts_cannot_exceed_retry_budget() -> None:
     with pytest.raises(ScenarioError, match="must not exceed retry.max_attempts=2"):
         validate_scenario(data)
 
+
 def test_rejects_payload_nested_too_deep_to_encode() -> None:
     data = valid_scenario()
     nested_payload: object = 0
@@ -599,6 +600,7 @@ def test_rejects_payload_nested_too_deep_to_encode() -> None:
         validate_scenario(data)
 
 
+
 def test_rejects_expected_json_nested_too_deep_to_encode() -> None:
     data = valid_scenario()
     nested_expectation: object = True
@@ -608,6 +610,7 @@ def test_rejects_expected_json_nested_too_deep_to_encode() -> None:
 
     with pytest.raises(ScenarioError, match="expect_json must contain JSON-compatible values"):
         validate_scenario(data)
+
 
 
 def test_rejects_yaml_nested_too_deep_to_parse(tmp_path) -> None:
