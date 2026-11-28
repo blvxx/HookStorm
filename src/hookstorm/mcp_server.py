@@ -717,21 +717,27 @@ def create_server(
             if event is not None and scenario is not None:
                 context = _scenario_event_context(event, scenario)
                 diagnosis["scenario_context"] = context
-                last_attempt = attempts[-1] if attempts else {}
-                last_status = last_attempt.get("status_code")
-                retryable = last_status is None or last_status in context["delivery"]["retry_on"]
-                remaining = (
-                    max(0, context["delivery"]["max_attempts"] - len(attempts))
-                    if retryable
-                    else 0
-                )
-                diagnosis["remaining_configured_attempts"] = remaining
-                diagnosis["attempts_exhausted"] = remaining == 0
                 if scenario_match is False:
+                    diagnosis["remaining_configured_attempts"] = None
+                    diagnosis["attempts_exhausted"] = None
                     diagnosis["scenario_warning"] = (
                         "The supplied scenario fingerprint differs from the stored run; "
                         "scenario settings below are current-file context, not proof of the original request."
                     )
+                else:
+                    last_attempt = attempts[-1] if attempts else {}
+                    last_status = last_attempt.get("status_code")
+                    retryable = (
+                        last_status is None
+                        or last_status in context["delivery"]["retry_on"]
+                    )
+                    remaining = (
+                        max(0, context["delivery"]["max_attempts"] - len(attempts))
+                        if retryable
+                        else 0
+                    )
+                    diagnosis["remaining_configured_attempts"] = remaining
+                    diagnosis["attempts_exhausted"] = remaining == 0
             elif scenario is not None:
                 diagnosis["scenario_context"] = None
                 diagnosis["scenario_warning"] = (
