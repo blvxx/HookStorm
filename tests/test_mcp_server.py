@@ -1056,3 +1056,95 @@ def test_github_correlation_rejects_conflicting_provider_delivery_identifiers(
     assert correlation["status"] == "partial"
     assert correlation["provider_guid_matches_request_header"] is False
     assert correlation["replay_readiness"]["eligible_for_guarded_replay"] is False
+
+
+def test_list_stripe_events_mcp_tool_returns_sanitized_event_summaries(
+    tmp_path: Path,
+) -> None:
+    event = {
+        "id": "evt_1A2B3C",
+        "object": "event",
+        "type": "payment_intent.succeeded",
+        "created": 1795860000,
+        "livemode": False,
+        "pending_webhooks": 1,
+        "data": {"object": {"id": "pi_private", "metadata": {"secret": "not-for-mcp"}}},
+    }
+
+    def handler(request: httpx.Request) -> httpx.Response:
+        assert request.url.path == "/v1/events"
+        assert request.url.params["delivery_success"] == "false"
+        return httpx.Response(200, json={"data": [event], "has_more": False})
+
+    client = httpx.Client(transport=httpx.MockTransport(handler))
+    server = create_server(
+        scenario_root=tmp_path,
+        stripe_http_client=client,
+        enable_replay=False,
+    )
+    result = _call_tool(server, "hookstorm_list_stripe_events", {"limit": 5})
+    client.close()
+
+    assert result["provider"] == "stripe"
+    assert result["count"] == 1
+    assert result["events"][0]["event_id"] == "evt_1A2B3C"
+    assert result["events"][0]["pending_webhooks"] == 1
+    assert result["delivery_attempt_history_available"] is False
+    assert result["read_only"] is True
+    serialized = json.dumps(result)
+    assert "pi_private" not in serialized
+    assert "not-for-mcp" not in serialized
+
+
+def test_inspect_receiver_evidence_tool_links_exact_local_run(
+    tmp_path: Path,
+) -> None:
+    scenario_path = _scenario_file(tmp_path)
+    run_id = _failed_run(
+        scenario_path,
+        "http://127.0.0.1:8000/webhook",
+        tmp_path / "history.sqlite3",
+    )
+    evidence = {
+        "schema_version": 1,
+        "timestamp": "2026-11-28T10:15:00Z",
+        "provider": "stripe",
+        "provider_delivery_id": "evt_replay",
+        "event_id": "evt_replay",
+        "event_type": "ping",
+        "request_id": "req_123",
+        "severity": "error",
+        "outcome": "rejected",
+        "error_code": "signature_invalid",
+        "message": "customer payload secret must never be returned",
+        "stacktrace": "private stacktrace",
+    }
+    (tmp_path / "receiver.jsonl").write_text(json.dumps(evidence), encoding="utf-8")
+
+    server = create_server(
+        history_db=tmp_path / "history.sqlite3",
+        scenario_root=tmp_path,
+        evidence_root=tmp_path,
+        enable_replay=False,
+    )
+    result = _call_tool(
+        server,
+        "hookstorm_inspect_receiver_evidence",
+        {
+            "evidence_path": "receiver.jsonl",
+            "event_id": "evt_replay",
+            "provider": "stripe",
+            "provider_delivery_id": "evt_replay",
+            "run_id": run_id,
+            "scenario_path": "scenarios/replay.yaml",
+        },
+    )
+
+    assert result["status"] == "confirmed"
+    assert result["root_cause"]["confirmed"] is True
+    assert result["root_cause"]["code"] == "signature_invalid"
+    assert result["local_correlation"]["status"] == "confirmed"
+    assert result["local_correlation"]["local_event"]["passed"] is False
+    serialized = json.dumps(result)
+    assert "customer payload secret" not in serialized
+    assert "private stacktrace" not in serialized
