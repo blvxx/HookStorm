@@ -50,7 +50,7 @@ def test_initialize_project_creates_valid_scenario_and_workflow(tmp_path) -> Non
     assert "hookstorm doctor" in preflight["run"]
     assert "--connect" in preflight["run"]
     assert "--allow-insecure-http" in preflight["run"]
-    assert HOOKSTORM_INSTALL_REF == "660240e1fe1b612da6ca64c2cf17f6daf0c9bac2"
+    assert HOOKSTORM_INSTALL_REF == "4b530e56d855fbbeb7d7801d200854fd4775b24a"
     assert len(HOOKSTORM_INSTALL_REF) == 40
     assert all(character in "0123456789abcdef" for character in HOOKSTORM_INSTALL_REF)
     assert f"git+https://github.com/blvxx/HookStorm.git@{HOOKSTORM_INSTALL_REF}" in workflow_text
@@ -187,11 +187,25 @@ def test_initialize_project_templates_create_valid_provider_payloads(
     assert isinstance(event["payload"], dict)
     assert event["payload"]
     if template == "github":
+        import uuid
+
         assert event["headers"]["X-GitHub-Event"] == "issues"
-        assert event["headers"]["X-GitHub-Delivery"] == event["event_id"]
+        assert str(uuid.UUID(event["headers"]["X-GitHub-Delivery"])) == (
+            event["headers"]["X-GitHub-Delivery"]
+        )
+        assert event["headers"]["X-GitHub-Delivery"] != event["event_id"]
     if template == "shopify":
+        import uuid
+
         assert event["headers"]["X-Shopify-Topic"] == "orders/create"
-        assert event["headers"]["X-Shopify-Webhook-Id"] == event["event_id"]
+        assert str(uuid.UUID(event["headers"]["X-Shopify-Webhook-Id"])) == (
+            event["headers"]["X-Shopify-Webhook-Id"]
+        )
+        assert event["headers"]["X-Shopify-Webhook-Id"] != event["event_id"]
+        assert event["headers"]["X-Shopify-Event-Id"] == event["event_id"]
+        assert event["headers"]["X-Shopify-Shop-Domain"].endswith(".myshopify.com")
+        assert event["headers"]["X-Shopify-API-Version"] == "2026-10"
+        assert event["headers"]["X-Shopify-Triggered-At"].endswith("Z")
 
 
 def test_update_workflow_install_ref_changes_only_the_hookstorm_pin(tmp_path) -> None:
