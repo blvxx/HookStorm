@@ -6,7 +6,7 @@
 
 - Add a self-contained `hookstorm demo` that exercises retries and duplicate delivery against a temporary loopback-only receiver.
 - Allow `hookstorm run` and `watch` to use `HOOKSTORM_TARGET_URL` when `--target` is omitted.
-- Add provider-oriented starter scenario templates for generic HMAC, Stripe, GitHub, Shopify, and Standard Webhooks.
+- Add provider-oriented starter scenario templates for generic HMAC, Stripe, GitHub, Shopify, and Standard Webhooks, including typical GitHub and Shopify request headers.
 - Add `hookstorm watch` to validate and rerun scenarios when their files change.
 - Add `hookstorm update-workflow` to refresh only the pinned HookStorm install SHA in generated CI workflows.
 - Generate an optional default-branch-only GitLab CI pipeline with serialized baseline comparison and JUnit artifacts.
