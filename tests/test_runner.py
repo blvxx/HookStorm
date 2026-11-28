@@ -983,3 +983,58 @@ def test_deterministic_fault_injection_example_proves_single_effect(receiver) ->
     ]
     assert len(state["effects"]) == 1
     assert result["verification"]["passed"] is True
+
+def test_deeply_nested_webhook_response_fails_cleanly(receiver, monkeypatch) -> None:
+    base, _state = receiver
+    nested_json = b"[" * 10_000 + b"0" + b"]" * 10_000
+
+    async def read_deep_response(_response):
+        return nested_json, None
+
+    monkeypatch.setattr(
+        "hookstorm.runner._read_limited_response_body", read_deep_response
+    )
+    result = asyncio.run(
+        run_scenario(
+            scenario(event={"expect_json": {"ok": True}}),
+            base,
+        )
+    )
+
+    attempt = result["deliveries"][0]["attempts"][0]
+    assert result["summary"]["success"] is False
+    assert attempt["status_code"] == 200
+    assert attempt["error"] == (
+        "response JSON is nested too deeply to compare safely"
+    )
+
+
+def test_deeply_nested_verification_response_fails_cleanly(
+    receiver, monkeypatch
+) -> None:
+    base, _state = receiver
+    nested_json = b"[" * 10_000 + b"0" + b"]" * 10_000
+
+    async def read_deep_response(_response):
+        return nested_json, None
+
+    monkeypatch.setattr(
+        "hookstorm.runner._read_limited_response_body", read_deep_response
+    )
+    data = validate_scenario({
+        "version": 1,
+        "name": "deeply nested verification response",
+        "events": [{"id": "ping", "event_id": "evt_deep_verify", "payload": {}}],
+        "verify": {
+            "url": f"{base}/__hookstorm/state",
+            "expect_json": {"processed_events": 1},
+        },
+    })
+
+    result = asyncio.run(run_scenario(data, base))
+
+    assert result["summary"]["success"] is False
+    assert result["verification"]["status_code"] == 200
+    assert result["verification"]["error"] == (
+        "verification response JSON is nested too deeply to compare safely"
+    )
