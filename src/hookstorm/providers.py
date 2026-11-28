@@ -477,8 +477,6 @@ class ShopifyAppLogsAdapter:
         executable: str | None = None,
         runner: Any | None = None,
     ) -> None:
-        import subprocess
-
         configured = executable if executable is not None else os.getenv(
             "HOOKSTORM_SHOPIFY_CLI", "shopify"
         )
