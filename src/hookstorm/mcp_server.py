@@ -525,6 +525,11 @@ def _correlate_github_delivery(
     request_headers = request.get("headers", {})
     provider_guid = external.get("guid")
     header_guid = request_headers.get("x-github-delivery")
+    provider_identifiers_match = (
+        provider_guid is None
+        or header_guid is None
+        or provider_guid == header_guid
+    )
     payload_fingerprint = request.get("payload_sha256")
     provider_event = request_headers.get("x-github-event")
     provider_action = external.get("action")
@@ -537,7 +542,9 @@ def _correlate_github_delivery(
     exact_id_events = [
         event
         for event in scenario.get("events", [])
-        if event.get("event_id") in {provider_guid, header_guid}
+        if provider_identifiers_match
+        and provider_guid is not None
+        and event.get("event_id") == provider_guid
     ]
     payload_events = []
     if isinstance(payload_fingerprint, str):
@@ -563,7 +570,9 @@ def _correlate_github_delivery(
     )
     event_id_matches_provider = bool(
         event is not None
-        and event.get("event_id") in {provider_guid, header_guid}
+        and provider_identifiers_match
+        and provider_guid is not None
+        and event.get("event_id") == provider_guid
     )
     payload_matches = None
     event_type_matches = None
@@ -614,6 +623,8 @@ def _correlate_github_delivery(
         and scenario_matches
         and payload_matches is True
         and event_type_matches is True
+        and target_matches is True
+        and provider_identifiers_match
     )
     if confirmed_correlation:
         correlation_status = "confirmed"
@@ -681,6 +692,7 @@ def _correlate_github_delivery(
         ),
         "scenario_matches_recorded_fingerprint": scenario_matches,
         "provider_event_guid_matches_local_event_id": event_id_matches_provider,
+        "provider_guid_matches_request_header": provider_identifiers_match,
         "payload_fingerprint_matches": payload_matches,
         "event_type_matches": event_type_matches,
         "provider_event_type": provider_event_type,
