@@ -3,12 +3,83 @@
 from __future__ import annotations
 
 import json
+import os
 import re
 from pathlib import Path, PureWindowsPath
 
 HOOKSTORM_INSTALL_REF = "660240e1fe1b612da6ca64c2cf17f6daf0c9bac2"
 _SIGNATURE_PROVIDERS = {"generic", "stripe", "github", "shopify", "standard_webhooks"}
 _SAFE_PATH = re.compile(r"^[A-Za-z0-9._/-]+$")
+_INSTALL_REF_PATTERN = re.compile(
+    r"(git\\+https://github\\.com/blvxx/HookStorm\\.git@)([0-9a-f]{40})"
+)
+_TEMPLATES = {
+    "generic": {
+        "signature_provider": "generic",
+        "event_type": "test.ping",
+        "event_id": "evt_hookstorm_generic_001",
+        "payload": {"test": True, "source": "hookstorm"},
+    },
+    "stripe": {
+        "signature_provider": "stripe",
+        "event_type": "payment_intent.succeeded",
+        "event_id": "evt_hookstorm_stripe_001",
+        "payload": {
+            "id": "evt_hookstorm_stripe_001",
+            "type": "payment_intent.succeeded",
+            "data": {"object": {
+                "id": "pi_hookstorm_test_001",
+                "object": "payment_intent",
+                "amount": 1250,
+                "currency": "usd",
+                "status": "succeeded",
+            }},
+        },
+    },
+    "github": {
+        "signature_provider": "github",
+        "event_type": "issues.opened",
+        "event_id": "evt_hookstorm_github_001",
+        "payload": {
+            "action": "opened",
+            "issue": {"number": 42, "title": "HookStorm integration test", "state": "open"},
+            "repository": {"full_name": "example/integration-tests"},
+        },
+    },
+    "shopify": {
+        "signature_provider": "shopify",
+        "event_type": "orders/create",
+        "event_id": "evt_hookstorm_shopify_001",
+        "payload": {
+            "id": 1001,
+            "email": "buyer@example.invalid",
+            "total_price": "12.50",
+            "currency": "USD",
+            "financial_status": "paid",
+        },
+    },
+    "standard-webhooks": {
+        "signature_provider": "standard_webhooks",
+        "event_type": "invoice.created",
+        "event_id": "evt_hookstorm_standard_001",
+        "payload": {
+            "type": "invoice.created",
+            "data": {"invoice_id": "inv_hookstorm_test_001", "amount": 1250},
+        },
+    },
+}
+
+
+def template_defaults(template: str) -> dict:
+    """Return a defensive copy of the selected starter template defaults."""
+    try:
+        defaults = _TEMPLATES[template]
+    except KeyError as exc:
+        choices = ", ".join(sorted(_TEMPLATES))
+        raise ValueError(f"Unknown template '{template}'. Choose: {choices}") from exc
+    return json.loads(json.dumps(defaults))
+
+
 
 
 def _relative_project_path(value: str, label: str) -> Path:
@@ -37,12 +108,19 @@ def _bounded_integer(value: object, label: str, *, minimum: int, maximum: int) -
 
 def render_scenario(
     *,
-    event_type: str = "test.ping",
-    event_id: str = "evt_hookstorm_init_001",
-    signature_provider: str = "generic",
+    template: str = "generic",
+    event_type: str | None = None,
+    event_id: str | None = None,
+    signature_provider: str | None = None,
+    payload: dict | None = None,
     max_attempts: int = 1,
     duplicate_count: int = 0,
 ) -> str:
+    defaults = template_defaults(template)
+    event_type = event_type or defaults["event_type"]
+    event_id = event_id or defaults["event_id"]
+    signature_provider = signature_provider or defaults["signature_provider"]
+    payload = defaults["payload"] if payload is None else payload
     if signature_provider not in _SIGNATURE_PROVIDERS:
         choices = ", ".join(sorted(_SIGNATURE_PROVIDERS))
         raise ValueError(f"Unsupported signature provider '{signature_provider}'. Choose: {choices}")
@@ -61,10 +139,12 @@ def render_scenario(
         f"  duplicate_count: {duplicate_count}\n" if duplicate_count else ""
     )
     backoff_setting = "  backoff_ms: 100\n" if max_attempts > 1 else ""
+    payload_json = json.dumps(payload, ensure_ascii=False, indent=2)
+    payload_block = "\n".join(f"      {line}" for line in payload_json.splitlines())
 
     return f"""version: 1
-name: HookStorm webhook contract
-description: Replace the sample event and assertions with your staging webhook contract.
+name: HookStorm {template} webhook contract
+description: Review the sample payload and assertions, then adapt them to your receiver.
 delivery:
   signature: valid
   signature_provider: {signature_provider}
@@ -75,8 +155,7 @@ delivery:
   - id: {json.dumps(event_type, ensure_ascii=False)}
     event_id: {json.dumps(event_id, ensure_ascii=False)}
     payload:
-      test: true
-      source: hookstorm
+{payload_block}
     expect_status: [200, 201, 202]
     expect_json:
       accepted: true
@@ -233,9 +312,10 @@ def initialize_project(
     root: str | Path = ".",
     scenario_path: str = "scenarios/webhook.yaml",
     workflow_path: str = ".github/workflows/webhook-regression.yml",
-    event_type: str = "test.ping",
-    event_id: str = "evt_hookstorm_init_001",
-    signature_provider: str = "generic",
+    template: str = "generic",
+    event_type: str | None = None,
+    event_id: str | None = None,
+    signature_provider: str | None = None,
     max_attempts: int = 1,
     duplicate_count: int = 0,
     include_workflow: bool = True,
@@ -261,6 +341,7 @@ def initialize_project(
     ):
         raise ValueError("Generated files must stay inside the current project directory")
     outputs = [(scenario_file, render_scenario(
+        template=template,
         event_type=event_type,
         event_id=event_id,
         signature_provider=signature_provider,
@@ -298,3 +379,44 @@ def initialize_project(
                     pass
         raise
     return written
+
+
+
+def update_workflow_install_ref(
+    path: str | Path = ".github/workflows/webhook-regression.yml",
+    *,
+    install_ref: str = HOOKSTORM_INSTALL_REF,
+) -> bool:
+    """Refresh only the pinned HookStorm VCS reference in a generated workflow.
+
+    Returns True when the file changed and False when it was already current.
+    The operation preserves every other byte of the workflow.
+    """
+    if not re.fullmatch(r"[0-9a-f]{40}", install_ref):
+        raise ValueError("install_ref must be a full 40-character lowercase Git commit SHA")
+    workflow_path = Path(path)
+    try:
+        original = workflow_path.read_text(encoding="utf-8")
+    except OSError as exc:
+        raise ValueError(f"Cannot read workflow file {workflow_path}: {exc}") from exc
+    matches = list(_INSTALL_REF_PATTERN.finditer(original))
+    if len(matches) != 1:
+        raise ValueError(
+            "Expected exactly one pinned HookStorm install URL "
+            f"in {workflow_path}, found {len(matches)}"
+        )
+    current_ref = matches[0].group(2)
+    if current_ref == install_ref:
+        return False
+    updated = _INSTALL_REF_PATTERN.sub(rf"\\g<1>{install_ref}", original, count=1)
+    temporary_path = workflow_path.with_name(workflow_path.name + ".hookstorm.tmp")
+    try:
+        temporary_path.write_text(updated, encoding="utf-8", newline="\n")
+        os.replace(temporary_path, workflow_path)
+    except OSError as exc:
+        try:
+            temporary_path.unlink(missing_ok=True)
+        except OSError:
+            pass
+        raise ValueError(f"Cannot update workflow file {workflow_path}: {exc}") from exc
+    return True
