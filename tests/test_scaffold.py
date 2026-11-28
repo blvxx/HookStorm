@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import uuid
 
 import pytest
 import yaml
@@ -187,16 +188,12 @@ def test_initialize_project_templates_create_valid_provider_payloads(
     assert isinstance(event["payload"], dict)
     assert event["payload"]
     if template == "github":
-        import uuid
-
         assert event["headers"]["X-GitHub-Event"] == "issues"
         assert str(uuid.UUID(event["headers"]["X-GitHub-Delivery"])) == (
             event["headers"]["X-GitHub-Delivery"]
         )
         assert event["headers"]["X-GitHub-Delivery"] != event["event_id"]
     if template == "shopify":
-        import uuid
-
         assert event["headers"]["X-Shopify-Topic"] == "orders/create"
         assert str(uuid.UUID(event["headers"]["X-Shopify-Webhook-Id"])) == (
             event["headers"]["X-Shopify-Webhook-Id"]
@@ -318,7 +315,10 @@ def test_provider_delivery_headers_follow_an_overridden_event_id(tmp_path) -> No
 
     event = load_scenario(tmp_path / "scenarios" / "webhook.yaml")["events"][0]
     assert event["event_id"] == "evt_custom_shopify_001"
-    assert event["headers"]["X-Shopify-Webhook-Id"] == "evt_custom_shopify_001"
+    webhook_id = event["headers"]["X-Shopify-Webhook-Id"]
+    assert str(uuid.UUID(webhook_id)) == webhook_id
+    assert webhook_id != event["event_id"]
+    assert event["headers"]["X-Shopify-Event-Id"] == event["event_id"]
 
 
 def test_provider_headers_follow_custom_event_types(tmp_path) -> None:
@@ -332,3 +332,6 @@ def test_provider_headers_follow_custom_event_types(tmp_path) -> None:
     event = load_scenario(tmp_path / "scenarios" / "webhook.yaml")["events"][0]
     assert event["id"] == "pull_request.opened"
     assert event["headers"]["X-GitHub-Event"] == "pull_request"
+    delivery_id = event["headers"]["X-GitHub-Delivery"]
+    assert str(uuid.UUID(delivery_id)) == delivery_id
+    assert delivery_id != event["event_id"]
