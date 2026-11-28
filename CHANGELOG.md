@@ -2,6 +2,17 @@
 
 ## Unreleased
 
+### MCP provider integrations
+
+- Add read-only GitHub repository webhook delivery listing and detail retrieval with a bounded, sanitized API response.
+- Add Stripe Event retrieval with canonical payload fingerprints while explicitly distinguishing Event objects from per-endpoint delivery attempt history.
+- Add Shopify webhook delivery log retrieval through the authenticated Shopify CLI 5.1+ JSON interface.
+- Correlate provider records with local HookStorm runs only when stable event identity, payload fingerprint, event type/topic, target where available, and the saved scenario fingerprint agree.
+- Report observed provider outcomes separately from confirmed local fault-injection causes; provider HTTP status alone is not treated as proof of an internal receiver root cause.
+- Keep provider adapters read-only; retain explicit opt-in, loopback-only local replay and independently verified receiver-side idempotency requirements.
+
+## Unreleased
+
 ### Security
 
 - Pin webhook and verification connections to the exact DNS address set resolved before the run, preventing connection-time re-resolution from bypassing target validation while preserving the original hostname for HTTP Host and TLS SNI.
