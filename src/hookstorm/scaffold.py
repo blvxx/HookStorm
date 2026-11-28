@@ -132,6 +132,10 @@ def render_scenario(
     signature_provider = signature_provider or defaults["signature_provider"]
     payload = defaults["payload"] if payload is None else payload
     headers = defaults.get("headers", {}) if headers is None else headers
+    if headers is not None:
+        for header_name in ("X-GitHub-Delivery", "X-Shopify-Webhook-Id"):
+            if defaults["event_id"] == headers.get(header_name):
+                headers[header_name] = event_id
     if signature_provider not in _SIGNATURE_PROVIDERS:
         choices = ", ".join(sorted(_SIGNATURE_PROVIDERS))
         raise ValueError(f"Unsupported signature provider '{signature_provider}'. Choose: {choices}")
