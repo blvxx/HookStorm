@@ -40,6 +40,10 @@ _TEMPLATES = {
         "signature_provider": "github",
         "event_type": "issues.opened",
         "event_id": "evt_hookstorm_github_001",
+        "headers": {
+            "X-GitHub-Event": "issues",
+            "X-GitHub-Delivery": "evt_hookstorm_github_001",
+        },
         "payload": {
             "action": "opened",
             "issue": {"number": 42, "title": "HookStorm integration test", "state": "open"},
@@ -50,6 +54,11 @@ _TEMPLATES = {
         "signature_provider": "shopify",
         "event_type": "orders/create",
         "event_id": "evt_hookstorm_shopify_001",
+        "headers": {
+            "X-Shopify-Topic": "orders/create",
+            "X-Shopify-Webhook-Id": "evt_hookstorm_shopify_001",
+            "X-Shopify-Shop-Domain": "example.invalid",
+        },
         "payload": {
             "id": 1001,
             "email": "buyer@example.invalid",
@@ -113,6 +122,7 @@ def render_scenario(
     event_id: str | None = None,
     signature_provider: str | None = None,
     payload: dict | None = None,
+    headers: dict | None = None,
     max_attempts: int = 1,
     duplicate_count: int = 0,
 ) -> str:
@@ -121,6 +131,7 @@ def render_scenario(
     event_id = event_id or defaults["event_id"]
     signature_provider = signature_provider or defaults["signature_provider"]
     payload = defaults["payload"] if payload is None else payload
+    headers = defaults.get("headers", {}) if headers is None else headers
     if signature_provider not in _SIGNATURE_PROVIDERS:
         choices = ", ".join(sorted(_SIGNATURE_PROVIDERS))
         raise ValueError(f"Unsupported signature provider '{signature_provider}'. Choose: {choices}")
@@ -141,6 +152,12 @@ def render_scenario(
     backoff_setting = "  backoff_ms: 100\n" if max_attempts > 1 else ""
     payload_json = json.dumps(payload, ensure_ascii=False, indent=2)
     payload_block = "\n".join(f"      {line}" for line in payload_json.splitlines())
+    headers_block = ""
+    if headers:
+        headers_json = json.dumps(headers, ensure_ascii=False, indent=2)
+        headers_block = "\n    headers:\n" + "\n".join(
+            f"      {line}" for line in headers_json.splitlines()
+        )
 
     return f"""version: 1
 name: HookStorm {template} webhook contract
@@ -153,7 +170,7 @@ delivery:
   max_attempts: {max_attempts}
 {backoff_setting}events:
   - id: {json.dumps(event_type, ensure_ascii=False)}
-    event_id: {json.dumps(event_id, ensure_ascii=False)}
+    event_id: {json.dumps(event_id, ensure_ascii=False)}{headers_block}
     payload:
 {payload_block}
     expect_status: [200, 201, 202]
