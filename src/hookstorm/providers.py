@@ -649,6 +649,11 @@ class ShopifyAppLogsAdapter:
                 timeout=timeout_seconds,
                 check=False,
                 shell=False,
+                env={
+                    **os.environ,
+                    "SHOPIFY_CLI_NO_ANALYTICS": "1",
+                    "OPT_OUT_INSTRUMENTATION": "true",
+                },
             )
         except FileNotFoundError as exc:
             raise ProviderSourceError(
