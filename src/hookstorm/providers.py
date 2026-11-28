@@ -533,7 +533,7 @@ class ShopifyAppLogsAdapter:
             status_code = None
         duration = ShopifyAppLogsAdapter._first(
             record,
-            ("duration_ms", "durationMs", "duration", "response_time_ms", "responseTimeMs"),
+            ("duration_ms", "durationMs", "response_time_ms", "responseTimeMs"),
         )
         if isinstance(duration, bool) or not isinstance(duration, (int, float)):
             duration = None
