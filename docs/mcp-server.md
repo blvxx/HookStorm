@@ -68,6 +68,26 @@ A replay selects the requested event and sends its configured retries and duplic
 
 The tool is intentionally loopback-only in this first version. Do not use it to test production systems. For staging or remote-target replay, a later iteration must add a stronger target allowlist and DNS-rebinding protection rather than simply exposing --allow-remote to the model.
 
+
+## AI-assisted diagnosis
+
+Use `hookstorm_analyze_run` when an agent needs more context than the sanitized history contains. Pass the stored run ID and, when available, the original scenario path. The tool joins each failed event to the current YAML by stable event ID and reports:
+
+- The recorded HTTP status, attempt timing, transport error, and assertion outcome.
+- Effective retry, timeout, duplicate, concurrency, and signature-provider settings.
+- Payload byte size, custom header names, generated signature-header name, and expected JSON key names.
+- Failure-specific checks, including authentication/signature rejection, receiver validation, route errors, throttling, server errors, timeouts, transport failures, redirects, oversized payloads, unsupported media types, and possible idempotency conflicts.
+
+The tool never returns payload values, header values, credentials, or response bodies. When the scenario fingerprint differs from the stored run, current-file settings are explicitly marked as context rather than a record of what was sent. A transport timeout or lost acknowledgement is treated as potentially ambiguous: inspect receiver state before replaying because the business operation may already have committed.
+
+The analysis is deterministic and evidence-bounded. It provides structured evidence and next checks for the connected AI agent; it does not claim to have seen receiver logs or to know the exact business outcome.
+
+## Batch replay
+
+`hookstorm_replay_failed_deliveries` accepts one stored run, one YAML scenario, a list of up to 50 event IDs, and an explicit target. Every selected event must have at least one failed delivery in that run and must exist exactly once in the scenario. The tool validates all selected events before sending any request; one invalid ID blocks the entire batch.
+
+The replay uses each selected event's configured retry and duplicate behavior and preserves scenario order. It disables the original whole-scenario verification probe because the original expectation may describe events outside the selected batch. Replay remains disabled by default, requires the server-side opt-in and `confirm=true`, and permits loopback targets only. It does not replay only the failed duplicate index: it replays the selected event using its full configured duplicate policy, so review the preview before confirming.
+
 ## Example MCP client configuration
 
 For an MCP client that supports local stdio servers, register the command with the absolute path to the installed executable when needed:
