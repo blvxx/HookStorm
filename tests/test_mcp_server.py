@@ -76,6 +76,7 @@ def _failed_run(
     target: str,
     db: Path,
     event_ids: list[str] | None = None,
+    injected_fault: str | None = None,
 ) -> str:
     scenario = load_scenario(path)
     run_id = "run_failed_replay_test"
@@ -84,23 +85,24 @@ def _failed_run(
     deliveries = []
     for event_id in selected_ids:
         event = event_index[event_id]
+        attempt = {
+            "attempt": 1,
+            "status_code": 503,
+            "latency_ms": 5.0,
+            "error": "HTTP 503",
+            "expected_status": False,
+            "expected_json": True,
+            "passed": False,
+        }
+        if injected_fault is not None:
+            attempt["injected_fault"] = injected_fault
         deliveries.append(
             {
                 "event_type": event["id"],
                 "event_id": event_id,
                 "duplicate_index": 0,
                 "passed": False,
-                "attempts": [
-                    {
-                        "attempt": 1,
-                        "status_code": 503,
-                        "latency_ms": 5.0,
-                        "error": "HTTP 503",
-                        "expected_status": False,
-                        "expected_json": True,
-                        "passed": False,
-                    }
-                ],
+                "attempts": [attempt],
             }
         )
     count = len(deliveries)
@@ -556,7 +558,12 @@ def test_inspect_github_delivery_correlates_exact_local_event_without_leaking_da
     scenario_path = _scenario_file(tmp_path)
     db = tmp_path / "history.sqlite3"
     target = "http://127.0.0.1:8000/webhook"
-    run_id = _failed_run(scenario_path, target, db)
+    run_id = _failed_run(
+        scenario_path,
+        target,
+        db,
+        injected_fault="response_loss",
+    )
     payload = {"private_value": "payload-must-not-leak"}
     detail = _github_delivery_detail(payload)
 
@@ -599,6 +606,10 @@ def test_inspect_github_delivery_correlates_exact_local_event_without_leaking_da
     assert correlation["status_codes_match"] is True
     assert correlation["confirmed_facts"][0]["status_code"] == 503
     assert correlation["root_cause"]["confirmed"] is False
+    assert correlation["root_cause"]["scope"] == "provider_receiver"
+    assert correlation["local_fault_injection"]["confirmed"] is True
+    assert correlation["local_fault_injection"]["scope"] == "local_hookstorm_reproduction"
+    assert correlation["local_fault_injection"]["value"].endswith("response_loss.")
     assert correlation["replay_readiness"]["eligible_for_guarded_replay"] is True
     assert correlation["replay_readiness"]["idempotency_status"] == "requires_pre_and_post_state_probes"
 

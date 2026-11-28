@@ -97,7 +97,7 @@ Pass both `run_id` and `scenario_path` to `hookstorm_list_shopify_deliveries` to
 
 ### What a confirmed cause means
 
-A provider record can confirm an observed delivery time, endpoint, attempt number, and HTTP status. It cannot by itself prove a database failure, signature bug, queue problem, or business-logic exception inside the receiver. HookStorm labels a root cause as confirmed only when its own local history contains an explicit deterministic client-side fault marker, such as a configured connection error or acknowledgement loss. Otherwise the tool returns observed facts, a bounded diagnosis, and the remaining evidence needed.
+A provider record can confirm an observed delivery time, endpoint, attempt number, and HTTP status. It cannot by itself prove a database failure, signature bug, queue problem, or business-logic exception inside the receiver. The correlation result therefore keeps `root_cause.confirmed=false` for the provider receiver unless receiver-side evidence is available. An explicit deterministic client-side fault marker (for example, a configured connection error or acknowledgement loss) is exposed separately as `local_fault_injection.confirmed`, with scope `local_hookstorm_reproduction`; it proves only what HookStorm injected into its own test request, not why the provider's real delivery failed. Otherwise the tool returns observed facts, a bounded diagnosis, and the remaining evidence needed.
 
 ### Replay and idempotency boundary
 

@@ -658,17 +658,17 @@ def _correlate_github_delivery(
         )
 
     injected_fault = latest_attempt.get("injected_fault")
-    if injected_fault:
-        root_cause_confirmed = True
-        root_cause = (
+    local_fault_injection = {
+        "confirmed": bool(injected_fault),
+        "value": (
             "HookStorm recorded an explicitly configured client-side fault: "
             f"{injected_fault}."
-        )
-        root_cause_source = "hookstorm_local_history"
-    else:
-        root_cause_confirmed = False
-        root_cause = None
-        root_cause_source = None
+            if injected_fault
+            else None
+        ),
+        "source": "hookstorm_local_history" if injected_fault else None,
+        "scope": "local_hookstorm_reproduction",
+    }
 
     replay_target = run.get("target", "")
     try:
@@ -719,15 +719,17 @@ def _correlate_github_delivery(
         "status_codes_match": status_codes_match,
         "confirmed_facts": confirmed_facts,
         "root_cause": {
-            "confirmed": root_cause_confirmed,
-            "value": root_cause,
-            "source": root_cause_source,
+            "confirmed": False,
+            "value": None,
+            "source": None,
+            "scope": "provider_receiver",
             "boundary": (
-                "Provider and HTTP status records establish what response was observed, "
-                "not the internal application failure that produced it. A status code alone "
-                "does not prove a signature, database, queue, or business-logic defect."
+                "The provider delivery record and local reproduction establish observed outcomes, "
+                "not the receiver's internal failure. A provider HTTP status, even when it matches "
+                "a local test status, does not prove a signature, database, queue, or business-logic defect."
             ),
         },
+        "local_fault_injection": local_fault_injection,
         "replay_readiness": {
             "eligible_for_guarded_replay": replay_candidate,
             "target_is_loopback": loopback_target,
