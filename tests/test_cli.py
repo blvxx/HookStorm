@@ -551,3 +551,18 @@ def test_run_shows_live_delivery_progress_in_interactive_terminal(
     ]) == 0
     assert "1/1" in terminal.getvalue()
     assert "CLI history smoke" not in terminal.getvalue()
+
+
+def test_init_can_generate_gitlab_ci_config(tmp_path, monkeypatch, capsys) -> None:
+    monkeypatch.chdir(tmp_path)
+
+    assert main(["init", "--ci-provider", "gitlab"]) == 0
+
+    scenario = tmp_path / "scenarios" / "webhook.yaml"
+    workflow = tmp_path / ".gitlab-ci.yml"
+    assert scenario.is_file()
+    assert workflow.is_file()
+    output = capsys.readouterr().out
+    assert "GitLab CI/CD variables" in output
+    assert "HOOKSTORM_TARGET_URL" in output
+    assert ".gitlab-ci.yml" in output
