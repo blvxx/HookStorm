@@ -8,7 +8,7 @@ from typing import Any
 from urllib.parse import urlsplit
 
 from hookstorm import __version__
-from hookstorm.config import ScenarioError, load_scenario, scenario_fingerprint
+from hookstorm.config import load_scenario, scenario_fingerprint
 from hookstorm.history import HistoryError, get_run, list_runs, save_run
 from hookstorm.runner import run_scenario
 from hookstorm.safety import validate_target
@@ -90,7 +90,19 @@ def _diagnose_delivery(delivery: dict[str, Any]) -> dict[str, Any]:
     error = str(latest.get("error") or "")
     message = error.lower()
 
-    if status in {401, 403}:
+    if latest.get("injected_fault") == "connect_error":
+        category = "injected_fault"
+        explanation = (
+            "HookStorm intentionally failed before sending this attempt. This is a configured "
+            "client-side test fault, not evidence that the receiver rejected the request."
+        )
+    elif latest.get("injected_fault") == "response_loss":
+        category = "injected_fault"
+        explanation = (
+            "HookStorm intentionally discarded the receiver acknowledgement after the "
+            "request was processed. This is a configured client-side simulation."
+        )
+    elif status in {401, 403}:
         category = "authentication_or_signature"
         explanation = (
             "The receiver rejected the request. Check the signature provider, "
@@ -102,11 +114,23 @@ def _diagnose_delivery(delivery: dict[str, Any]) -> dict[str, Any]:
             "The receiver did not complete the response within the configured "
             "deadline. Check receiver latency, dependencies, and timeout settings."
         )
-    elif "request error" in message:
+    elif status is None and error:
         category = "transport"
         explanation = (
             "The request did not complete at the HTTP transport layer. Check the "
             "target URL, DNS/TCP/TLS reachability, firewall, and staging allowlist."
+        )
+    elif status in {408, 429}:
+        category = "transient_http_status"
+        explanation = (
+            "The receiver or an upstream service returned a retryable HTTP status. "
+            "Check rate limits, queue saturation, and whether the retry policy is appropriate."
+        )
+    elif status in {400, 422}:
+        category = "receiver_validation"
+        explanation = (
+            "The receiver rejected the request as invalid. Compare its expected payload "
+            "schema and required headers with the selected YAML scenario."
         )
     elif status == 404:
         category = "endpoint_route"
@@ -213,7 +237,7 @@ def _validate_replay_target(target: str) -> str:
 
 
 def _target_matches_history(target: str, historical_target: str) -> bool:
-    return target.rstrip("/") == historical_target.rstrip("/")
+    return target == historical_target
 
 
 def _prepare_replay(
@@ -312,6 +336,7 @@ def create_server(
     )
     server = MCPServer(
         "HookStorm",
+        version=__version__,
         instructions=(
             "Inspect local HookStorm run history and YAML scenarios. "
             "History contains sanitized metadata, not request payloads or response bodies. "
@@ -504,9 +529,20 @@ def create_server(
     return server
 
 
+try:
+    # Expose a module-level server object for the MCP Inspector and MCP CLI.
+    mcp = create_server()
+except RuntimeError:
+    # Keep the base HookStorm install importable without the optional MCP extra.
+    mcp = None
+
+
 def main() -> None:
     """Run HookStorm MCP over the local stdio transport."""
-    create_server().run()
+    if mcp is None:
+        create_server()  # raises the actionable optional-dependency error
+        return
+    mcp.run()
 
 
 if __name__ == "__main__":
