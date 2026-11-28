@@ -240,7 +240,7 @@ merge requests by default.
 
 ## MCP server (optional)
 
-Install the optional MCP integration with `python -m pip install -e ".[mcp]"`, then run `hookstorm-mcp`. It exposes local tools to list and inspect run history, inspect scenarios without revealing payload values, analyze failures with scenario context, and (when explicitly enabled) replay one or several selected failed events.
+Install the optional MCP integration with `python -m pip install -e ".[mcp]"`, then run `hookstorm-mcp`. It exposes local tools to search recent delivery history, inspect runs and scenarios without revealing payload values, analyze failures with scenario context, and (when explicitly enabled) replay one or several selected failed events.
 
 The server uses the local stdio transport and does not open a network port. Replay is disabled by default, requires `HOOKSTORM_MCP_ENABLE_REPLAY=1` and per-call `confirm=true`, and is restricted to loopback targets. It also checks that the source scenario and destination match the failed run unless explicit overrides are supplied.
 

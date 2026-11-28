@@ -451,3 +451,65 @@ def test_replay_refuses_remote_and_query_string_targets(receiver, tmp_path: Path
     asyncio.run(call("https://example.com/webhook"))
     asyncio.run(call(f"{base}/webhook?token=must-not-be-in-url"))
     assert state["requests"] == []
+
+
+def test_find_deliveries_searches_sanitized_history_by_event_id(tmp_path: Path) -> None:
+    scenario_path = _scenario_file(tmp_path)
+    db = tmp_path / "history.sqlite3"
+    run_id = _failed_run(
+        scenario_path,
+        "http://127.0.0.1:8000/webhook",
+        db,
+    )
+    server = create_server(
+        history_db=db,
+        scenario_root=tmp_path,
+        enable_replay=False,
+    )
+
+    result = _call_tool(
+        server,
+        "hookstorm_find_deliveries",
+        {"event_id": "evt_replay"},
+    )
+
+    assert result["count"] == 1
+    assert result["has_more"] is False
+    assert result["searched_runs"] == 1
+    delivery = result["deliveries"][0]
+    assert delivery["run_id"] == run_id
+    assert delivery["delivery"]["event_type"] == "ping"
+    assert delivery["delivery"]["event_id"] == "evt_replay"
+    assert delivery["delivery"]["passed"] is False
+    assert delivery["delivery"]["diagnosis"]["category"] == "receiver_server_error"
+    assert "payload-must-not-leak" not in json.dumps(result)
+    assert "header-value-must-not-leak" not in json.dumps(result)
+
+
+def test_find_deliveries_applies_status_and_lookback_limits(tmp_path: Path) -> None:
+    scenario_path = _scenario_file(tmp_path)
+    db = tmp_path / "history.sqlite3"
+    _failed_run(scenario_path, "http://127.0.0.1:8000/webhook", db)
+    server = create_server(
+        history_db=db,
+        scenario_root=tmp_path,
+        enable_replay=False,
+    )
+
+    passed = _call_tool(
+        server,
+        "hookstorm_find_deliveries",
+        {"event_type": "ping", "status": "passed", "lookback_runs": 1},
+    )
+    assert passed["count"] == 0
+    assert passed["status_filter"] == "passed"
+
+    async def invalid_limit() -> None:
+        async with Client(server) as client:
+            response = await client.call_tool(
+                "hookstorm_find_deliveries",
+                {"event_id": "evt_replay", "lookback_runs": 501},
+            )
+            assert response.is_error
+
+    asyncio.run(invalid_limit())

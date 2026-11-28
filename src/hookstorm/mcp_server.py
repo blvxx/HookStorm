@@ -961,6 +961,108 @@ def create_server(
             },
         }
 
+    @server.tool()
+    def hookstorm_find_deliveries(
+        event_id: str | None = None,
+        event_type: str | None = None,
+        scenario: str | None = None,
+        status: str = "failed",
+        limit: int = 20,
+        lookback_runs: int = 100,
+    ) -> dict[str, Any]:
+        """Search a bounded number of recent sanitized runs for matching deliveries."""
+        if status not in {"failed", "passed", "all"}:
+            raise ValueError("status must be one of: failed, passed, all")
+        normalized_filters: dict[str, str | None] = {}
+        for field, value in (
+            ("event_id", event_id),
+            ("event_type", event_type),
+            ("scenario", scenario),
+        ):
+            if value is not None:
+                if not isinstance(value, str) or not value.strip() or len(value.strip()) > 256:
+                    raise ValueError(f"{field} must be a non-empty string of at most 256 characters")
+                normalized_filters[field] = value.strip()
+            else:
+                normalized_filters[field] = None
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 100:
+            raise ValueError("limit must be an integer between 1 and 100")
+        if (
+            isinstance(lookback_runs, bool)
+            or not isinstance(lookback_runs, int)
+            or not 1 <= lookback_runs <= 500
+        ):
+            raise ValueError("lookback_runs must be an integer between 1 and 500")
+
+        run_summaries = list_runs(
+            history_db,
+            limit=lookback_runs,
+            scenario=normalized_filters["scenario"],
+        )
+        matches: list[dict[str, Any]] = []
+        searched_runs = 0
+        has_more = False
+        for run_summary in run_summaries:
+            run = get_run(run_summary["run_id"], history_db)
+            searched_runs += 1
+            for delivery in run.get("deliveries", []):
+                if (
+                    normalized_filters["event_id"] is not None
+                    and delivery.get("event_id") != normalized_filters["event_id"]
+                ):
+                    continue
+                if (
+                    normalized_filters["event_type"] is not None
+                    and delivery.get("event_type") != normalized_filters["event_type"]
+                ):
+                    continue
+                passed = bool(delivery.get("passed"))
+                if status == "failed" and passed:
+                    continue
+                if status == "passed" and not passed:
+                    continue
+                if len(matches) >= limit:
+                    has_more = True
+                    break
+                matches.append(
+                    {
+                        "run_id": run["run_id"],
+                        "scenario": run["scenario"],
+                        "started_at": run["started_at"],
+                        "target": run["target"],
+                        "run_success": run["summary"]["success"],
+                        "delivery": {
+                            "event_type": delivery.get("event_type"),
+                            "event_id": delivery.get("event_id"),
+                            "duplicate_index": delivery.get("duplicate_index", 0),
+                            "passed": passed,
+                            "attempts": [
+                                _attempt_summary(attempt)
+                                for attempt in delivery.get("attempts", [])
+                            ],
+                            "diagnosis": (
+                                _diagnose_delivery(delivery) if not passed else None
+                            ),
+                        },
+                    }
+                )
+            if has_more:
+                break
+
+        return {
+            "count": len(matches),
+            "has_more": has_more,
+            "searched_runs": searched_runs,
+            "lookback_runs": lookback_runs,
+            "status_filter": status,
+            "filters": normalized_filters,
+            "deliveries": matches,
+            "limitations": [
+                "Search is limited to the newest lookback_runs records in local HookStorm history.",
+                "History contains sanitized attempt metadata, not request payloads, header values, or response bodies.",
+            ],
+        }
+
     return server
 
 
