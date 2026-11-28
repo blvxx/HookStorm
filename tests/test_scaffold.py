@@ -240,6 +240,7 @@ def test_initialize_project_creates_gitlab_ci_config_on_default_branch_only(tmp_
     assert ".hookstorm-baselines/" in job["cache"]["paths"]
     script = job["script"][0]
     assert "HOOKSTORM_TARGET_URL" in script
+    assert '--target "$HOOKSTORM_TARGET_URL"' in script
     assert "hookstorm doctor" in script
     assert "hookstorm run" in script
     assert "history compare-file" in script
