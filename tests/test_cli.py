@@ -529,3 +529,25 @@ def test_watch_executes_once_then_stops_cleanly_on_keyboard_interrupt(
     ]) == 130
     assert report.is_file()
     assert "Change detected" in capsys.readouterr().out
+
+
+def test_run_shows_live_delivery_progress_in_interactive_terminal(
+    receiver, tmp_path, monkeypatch
+) -> None:
+    import io
+
+    class TerminalStream(io.StringIO):
+        def isatty(self) -> bool:
+            return True
+
+    base, _state = receiver
+    monkeypatch.setenv("HOOKSTORM_TARGET_URL", base)
+    scenario = _scenario_file(tmp_path)
+    terminal = TerminalStream()
+    monkeypatch.setattr("hookstorm.cli.sys.stderr", terminal)
+
+    assert main([
+        "run", scenario, "--no-history", "--output", str(tmp_path / "progress.html"),
+    ]) == 0
+    assert "1/1" in terminal.getvalue()
+    assert "CLI history smoke" not in terminal.getvalue()
