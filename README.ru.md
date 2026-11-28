@@ -50,13 +50,15 @@ git clone https://github.com/blvxx/HookStorm.git
 cd HookStorm
 
 python -m venv .venv
-
-# Linux / macOS
 source .venv/bin/activate
+python -m pip install .
+\`\`\`
 
-# Windows PowerShell
-# .\.venv\Scripts\Activate.ps1
+**Windows PowerShell:**
 
+\`\`\`powershell
+py -3.11 -m venv .venv
+.\.venv\Scripts\Activate.ps1
 python -m pip install .
 ```
 
