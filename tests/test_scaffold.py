@@ -163,3 +163,50 @@ def test_initialize_project_rejects_invalid_retry_and_duplicate_options(
             max_attempts=max_attempts,
             duplicate_count=duplicate_count,
         )
+
+
+@pytest.mark.parametrize(
+    ("template", "provider", "event_type"),
+    [
+        ("generic", "generic", "test.ping"),
+        ("stripe", "stripe", "payment_intent.succeeded"),
+        ("github", "github", "issues.opened"),
+        ("shopify", "shopify", "orders/create"),
+        ("standard-webhooks", "standard_webhooks", "invoice.created"),
+    ],
+)
+def test_initialize_project_templates_create_valid_provider_payloads(
+    tmp_path, template: str, provider: str, event_type: str
+) -> None:
+    initialize_project(root=tmp_path, template=template, include_workflow=False)
+
+    scenario = load_scenario(tmp_path / "scenarios" / "webhook.yaml")
+    event = scenario["events"][0]
+    assert scenario["delivery"]["signature_provider"] == provider
+    assert event["id"] == event_type
+    assert isinstance(event["payload"], dict)
+    assert event["payload"]
+
+
+def test_update_workflow_install_ref_changes_only_the_hookstorm_pin(tmp_path) -> None:
+    from hookstorm.scaffold import update_workflow_install_ref
+
+    initialize_project(root=tmp_path)
+    workflow_path = tmp_path / ".github" / "workflows" / "webhook-regression.yml"
+    original = workflow_path.read_text(encoding="utf-8")
+    new_ref = "a" * 40
+
+    assert update_workflow_install_ref(workflow_path, install_ref=new_ref) is True
+    updated = workflow_path.read_text(encoding="utf-8")
+    assert updated == original.replace(HOOKSTORM_INSTALL_REF, new_ref)
+    assert update_workflow_install_ref(workflow_path, install_ref=new_ref) is False
+
+
+def test_update_workflow_install_ref_rejects_unrecognized_workflows(tmp_path) -> None:
+    from hookstorm.scaffold import update_workflow_install_ref
+
+    workflow_path = tmp_path / "custom.yml"
+    workflow_path.write_text("name: custom workflow\n", encoding="utf-8")
+
+    with pytest.raises(ValueError, match="exactly one pinned HookStorm install URL"):
+        update_workflow_install_ref(workflow_path)
