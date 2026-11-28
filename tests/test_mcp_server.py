@@ -151,7 +151,6 @@ def test_inspect_scenario_does_not_expose_payload_values(tmp_path: Path) -> None
     assert result["events"][0]["expected_json_top_level_keys"] == ["ok"]
     assert "payload-must-not-leak" not in json.dumps(result)
     assert "header-value-must-not-leak" not in json.dumps(result)
-    assert "header-value-must-not-leak" not in json.dumps(result)
     assert scenario_path.is_file()
 
 
@@ -331,6 +330,7 @@ def test_analyze_run_joins_scenario_context_without_disclosing_payload_values(
     assert failure["scenario_context"]["expect_json_top_level_keys"] == ["ok"]
     assert failure["attempts_exhausted"] is True
     assert "payload-must-not-leak" not in json.dumps(result)
+    assert "header-value-must-not-leak" not in json.dumps(result)
 
 
 def test_batch_replay_requires_confirmation_and_replays_only_selected_failed_events(
