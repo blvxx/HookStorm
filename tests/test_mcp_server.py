@@ -341,7 +341,7 @@ def test_batch_replay_requires_confirmation_and_replays_only_selected_failed_eve
     scenario_path = _multi_scenario_file(tmp_path)
     db = tmp_path / "history.sqlite3"
     target = f"{base}/webhook"
-    event_ids = ["evt_replay", "evt_replay_2"]
+    event_ids = ["evt_replay_2", "evt_replay"]
     run_id = _failed_run(scenario_path, target, db, event_ids)
     server = create_server(
         history_db=db,
@@ -372,7 +372,7 @@ def test_batch_replay_requires_confirmation_and_replays_only_selected_failed_eve
 
     assert result["executed"] is True
     assert result["summary"]["success"] is True
-    assert result["selected_event_ids"] == event_ids
+    assert result["selected_event_ids"] == ["evt_replay", "evt_replay_2"]
     assert result["history_saved"] is True
     assert sorted(request["event_id"] for request in state["requests"]) == sorted(event_ids)
 
