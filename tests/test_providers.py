@@ -5,7 +5,13 @@ import json
 import httpx
 import pytest
 
-from hookstorm.providers import GitHubWebhookAdapter, ProviderSourceError, canonical_json_fingerprint
+from hookstorm.providers import (
+    GitHubWebhookAdapter,
+    ProviderSourceError,
+    ShopifyAppLogsAdapter,
+    StripeEventAdapter,
+    canonical_json_fingerprint,
+)
 
 
 GUID = "0b989ba4-242f-11e5-81e1-c7b6966d2516"
