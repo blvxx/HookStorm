@@ -36,6 +36,8 @@ events:
     payload:
       private_value: payload-must-not-leak
     expect_status: [200]
+    headers:
+      X-Internal-Debug-Token: header-value-must-not-leak
     expect_json:
       ok: true
 """,
@@ -148,6 +150,8 @@ def test_inspect_scenario_does_not_expose_payload_values(tmp_path: Path) -> None
     assert result["events"][0]["event_id"] == "evt_replay"
     assert result["events"][0]["expected_json_top_level_keys"] == ["ok"]
     assert "payload-must-not-leak" not in json.dumps(result)
+    assert "header-value-must-not-leak" not in json.dumps(result)
+    assert "header-value-must-not-leak" not in json.dumps(result)
     assert scenario_path.is_file()
 
 
@@ -323,6 +327,7 @@ def test_analyze_run_joins_scenario_context_without_disclosing_payload_values(
     assert failure["category"] == "receiver_server_error"
     assert failure["scenario_context"]["event_id"] == "evt_replay"
     assert failure["scenario_context"]["payload_size_bytes"] > 0
+    assert failure["scenario_context"]["custom_header_names"] == ["X-Internal-Debug-Token"]
     assert failure["scenario_context"]["expect_json_top_level_keys"] == ["ok"]
     assert failure["attempts_exhausted"] is True
     assert "payload-must-not-leak" not in json.dumps(result)
