@@ -11,7 +11,7 @@ from urllib.parse import urlsplit
 from hookstorm import __version__
 from hookstorm.config import load_scenario, scenario_fingerprint
 from hookstorm.history import HistoryError, get_run, list_runs, save_run
-from hookstorm.runner import run_scenario
+from hookstorm.runner import probe_business_state, run_scenario
 from hookstorm.safety import validate_target
 from hookstorm.providers import (
     GitHubWebhookAdapter,
@@ -1717,6 +1717,157 @@ def create_server(
                 "Correlation is confirmed only when the local scenario fingerprint, event identity, payload, topic, and target agree.",
                 "This tool reads logs only and does not request Shopify to redeliver an event.",
             ],
+        }
+
+
+    @server.tool()
+    async def hookstorm_replay_with_idempotency_guard(
+        run_id: str,
+        scenario_path: str,
+        event_id: str,
+        target: str,
+        expected_unprocessed_json: dict[str, Any],
+        expected_processed_json: dict[str, Any],
+        confirm: bool = False,
+    ) -> dict[str, Any]:
+        """Preview or replay one failed event only after explicit read-only before/after state assertions."""
+        run = get_run(run_id, history_db)
+        path, scenario = _load_scenario(scenario_path, root)
+        safe_target = _validate_replay_target(target)
+        event, checks = _prepare_replay(
+            run=run,
+            scenario=scenario,
+            event_id=event_id,
+            target=safe_target,
+            allow_scenario_change=False,
+            allow_target_change=False,
+        )
+        verify_config = scenario.get("verify")
+        if verify_config is None:
+            raise ValueError(
+                "The scenario must define a read-only verify.url and environment-backed auth, "
+                "so idempotency can be checked before and after replay."
+            )
+        if verify_config.get("url", "").find("?") >= 0:
+            raise ValueError("The idempotency probe URL must not contain a query string")
+        for label, expected in (
+            ("expected_unprocessed_json", expected_unprocessed_json),
+            ("expected_processed_json", expected_processed_json),
+        ):
+            if not isinstance(expected, dict):
+                raise ValueError(f"{label} must be a JSON object")
+            canonical_json_fingerprint(expected)
+        before_fingerprint, _ = canonical_json_fingerprint(expected_unprocessed_json)
+        after_fingerprint, _ = canonical_json_fingerprint(expected_processed_json)
+        if before_fingerprint == after_fingerprint:
+            raise ValueError(
+                "The expected unprocessed and processed states must be different"
+            )
+
+        preview = {
+            "executed": False,
+            "replay_enabled": replay_allowed,
+            "requires_confirmation": True,
+            "source_run_id": run_id,
+            "scenario": path.name,
+            "event_type": event["id"],
+            "event_id": event_id,
+            "target": safe_target,
+            "failed_deliveries_found": checks["failed_deliveries_found"],
+            "scenario_changed": checks["scenario_changed"],
+            "target_changed": checks["target_changed"],
+            "idempotency_guard": {
+                "enabled": True,
+                "probe_target": verify_config["url"].split("?", 1)[0],
+                "expected_unprocessed_state": expected_unprocessed_json,
+                "expected_processed_state": expected_processed_json,
+                "receiver_must_deduplicate_by_event_id": True,
+            },
+        }
+        before = await probe_business_state(
+            verify_config,
+            run_id,
+            event_id=event_id,
+            event_type=event["id"],
+            expected_json=expected_unprocessed_json,
+        )
+        preview["pre_replay_probe"] = before
+        if not before["passed"]:
+            preview["blocked"] = True
+            preview["message"] = (
+                "No webhook request was sent. The read-only pre-replay probe did not match "
+                "the expected unprocessed state. Investigate the state endpoint; do not retry blindly."
+            )
+            return preview
+        preview["blocked"] = False
+        if not replay_allowed:
+            preview["message"] = (
+                "The pre-replay idempotency check passed, but replay is disabled. Set "
+                "HOOKSTORM_MCP_ENABLE_REPLAY=1 in the MCP server environment after reviewing "
+                "the loopback test boundary."
+            )
+            return preview
+        if not confirm:
+            preview["message"] = (
+                "The read-only pre-replay state matches. No webhook request was sent. "
+                "Set confirm=true only after reviewing the event, destination, and both state assertions."
+            )
+            return preview
+
+        selected_scenario = {
+            **scenario,
+            "events": [{**event, "schedule_after_ms": 0}],
+            "verify": None,
+        }
+        result = await run_scenario(
+            selected_scenario,
+            safe_target,
+            correlation_run_id=run_id,
+        )
+        try:
+            save_run(result, history_db)
+            history_saved = True
+            history_warning = None
+        except HistoryError as exc:
+            history_saved = False
+            history_warning = str(exc)
+
+        after = await probe_business_state(
+            verify_config,
+            run_id,
+            event_id=event_id,
+            event_type=event["id"],
+            expected_json=expected_processed_json,
+        )
+        return {
+            "executed": True,
+            "replay_enabled": True,
+            "source_run_id": run_id,
+            "run_id": result["run_id"],
+            "correlation_run_id": result["correlation_run_id"],
+            "scenario": result["scenario"],
+            "target": result["target"],
+            "summary": result["summary"],
+            "delivery": (
+                {
+                    "event_type": item["event_type"],
+                    "event_id": item["event_id"],
+                    "duplicate_index": item["duplicate_index"],
+                    "passed": item["passed"],
+                    "attempts": [_attempt_summary(attempt) for attempt in item["attempts"]],
+                }
+                for item in result["deliveries"]
+            ),
+            "history_saved": history_saved,
+            "history_warning": history_warning,
+            "pre_replay_probe": before,
+            "post_replay_probe": after,
+            "idempotency_verified": bool(after["passed"]),
+            "idempotency_boundary": (
+                "The supplied read-only assertions matched before and after this replay. "
+                "The receiver must still enforce atomic deduplication by event ID to protect "
+                "against concurrent requests between the preflight probe and the POST."
+            ),
         }
 
     return server
