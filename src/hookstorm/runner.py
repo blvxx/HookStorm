@@ -19,11 +19,11 @@ import httpx
 from hookstorm import __version__
 from hookstorm.config import scenario_fingerprint
 from hookstorm.safety import validate_target
+from hookstorm.json_safety import JSONNestingError, ensure_json_nesting_depth
 from hookstorm.standard_webhooks import (
     decode_standard_webhooks_secret,
     standard_webhooks_headers,
 )
-from hookstorm.json_safety import JSONNestingError, ensure_json_nesting_depth
 from hookstorm.verify_auth import (
     resolve_verification_auth_headers,
     validate_verification_auth_transport,
