@@ -2,6 +2,7 @@
 
 from __future__ import annotations
 
+import json
 import os
 from pathlib import Path
 from typing import Any
@@ -230,7 +231,7 @@ def _scenario_event_context(
         **event["delivery"],
     }
     payload_bytes = len(
-        __import__("json").dumps(
+        json.dumps(
             event["payload"],
             ensure_ascii=False,
             separators=(",", ":"),
@@ -667,19 +668,25 @@ def create_server(
                 continue
             diagnosis = _diagnose_delivery(delivery)
             event = event_index.get(delivery.get("event_id"))
-            diagnosis["attempt_count"] = len(delivery.get("attempts", []))
-            diagnosis["attempts_exhausted"] = (
-                len(delivery.get("attempts", []))
-                >= (scenario["retry"]["max_attempts"] if scenario is not None else 0)
-                if scenario is not None
-                else None
-            )
+            attempts = delivery.get("attempts", [])
+            diagnosis["attempt_count"] = len(attempts)
             if event is not None and scenario is not None:
                 context = _scenario_event_context(event, scenario)
                 diagnosis["scenario_context"] = context
-                if not diagnosis["attempts_exhausted"]:
-                    diagnosis["remaining_configured_attempts"] = max(
-                        0, context["delivery"]["max_attempts"] - diagnosis["attempt_count"]
+                last_attempt = attempts[-1] if attempts else {}
+                last_status = last_attempt.get("status_code")
+                retryable = last_status is None or last_status in context["delivery"]["retry_on"]
+                remaining = (
+                    max(0, context["delivery"]["max_attempts"] - len(attempts))
+                    if retryable
+                    else 0
+                )
+                diagnosis["remaining_configured_attempts"] = remaining
+                diagnosis["attempts_exhausted"] = remaining == 0
+                if scenario_match is False:
+                    diagnosis["scenario_warning"] = (
+                        "The supplied scenario fingerprint differs from the stored run; "
+                        "scenario settings below are current-file context, not proof of the original request."
                     )
             elif scenario is not None:
                 diagnosis["scenario_context"] = None
