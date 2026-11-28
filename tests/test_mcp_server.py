@@ -90,7 +90,7 @@ def _call_tool(server, name: str, arguments: dict) -> dict:
     async def call() -> dict:
         async with Client(server) as client:
             response = await client.call_tool(name, arguments)
-            assert not response.isError
+            assert not response.is_error
             assert response.structured_content is not None
             return response.structured_content
 
@@ -126,7 +126,7 @@ def test_scenario_paths_cannot_escape_configured_root(tmp_path: Path) -> None:
                 "hookstorm_inspect_scenario",
                 {"scenario_path": str(outside)},
             )
-            assert response.isError
+            assert response.is_error
 
     asyncio.run(call())
 
@@ -251,7 +251,7 @@ def test_replay_rejects_changed_scenario_without_explicit_override(
                     "confirm": True,
                 },
             )
-            assert response.isError
+            assert response.is_error
 
     asyncio.run(call())
     assert state["requests"] == []
