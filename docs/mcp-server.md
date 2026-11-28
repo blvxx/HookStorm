@@ -52,6 +52,7 @@ Scenario paths must resolve inside HOOKSTORM_MCP_SCENARIO_ROOT. The server accep
 | hookstorm_analyze_run | Combine failed attempts with scenario settings and privacy-preserving context |
 | hookstorm_replay_failed_delivery | Replay one failed event after the replay safeguards pass |
 | hookstorm_replay_failed_deliveries | Replay up to 50 selected failed event IDs in one confirmed run |
+| hookstorm_replay_with_idempotency_guard | Replay one failed event only after matching explicit pre- and post-replay business-state assertions |
 | hookstorm_list_github_deliveries | List repository webhook delivery metadata from GitHub's read-only REST API |
 | hookstorm_inspect_github_delivery | Inspect one GitHub delivery and optionally correlate it with a local run |
 | hookstorm_retrieve_stripe_event | Retrieve one canonical Stripe Event; optionally compare it with a local run |
@@ -143,6 +144,45 @@ Use `hookstorm_analyze_run` when an agent needs more context than the sanitized 
 The tool never returns payload values, header values, credentials, or response bodies. When the scenario fingerprint differs from the stored run, current-file settings are explicitly marked as context rather than a record of what was sent. A transport timeout or lost acknowledgement is treated as potentially ambiguous: inspect receiver state before replaying because the business operation may already have committed.
 
 The analysis is deterministic and evidence-bounded. It provides structured evidence and next checks for the connected AI agent; it does not claim to have seen receiver logs or to know the exact business outcome.
+
+### Guarded replay with idempotency assertions
+
+For an event with a possible business side effect, prefer \`hookstorm_replay_with_idempotency_guard\` over the basic local replay tools. The source scenario must include a read-only \`verify.url\` endpoint, and the tool requires two distinct JSON subset assertions:
+
+- \`expected_unprocessed_json\`: the state that must be observed before the request is sent (for example, \`{"processed_events": 0}\`).
+- \`expected_processed_json\`: the state that must be observed after the request (for example, \`{"processed_events": 1}\`).
+
+The tool sends a bounded GET to the scenario's verify URL before replay. It includes \`X-HookStorm-Run\`, \`X-Event-ID\`, and \`X-Event-Type\`, uses the scenario's environment-backed verification authentication, pins the resolved loopback address, rejects redirects, and applies the existing 2 MiB response limit. If the precondition does not match, the tool blocks the POST even when \`confirm=true\`.
+
+The first call should use \`confirm=false\` to review the read-only preflight result. A second call with \`confirm=true\` sends exactly the selected event to the same loopback target while preserving the source event ID and correlation run ID. It then runs the same read-only state probe against \`expected_processed_json\`. The result reports \`idempotency_verified=true\` only when the postcondition matches.
+
+These assertions are supplied by the operator and must reflect a receiver endpoint that checks the actual idempotency key/effect for this event. Prefer a postcondition that proves one business effect, not merely an HTTP acknowledgement. The preflight and POST are not an atomic transaction: the receiver must still enforce atomic deduplication by event ID to protect against concurrent requests between the GET and POST. A timeout or failed postcondition is inconclusive; inspect the business state before another attempt.
+
+Example scenario probe:
+
+~~~yaml
+verify:
+  url: http://127.0.0.1:8000/__hookstorm/state
+  expect_status: [200]
+  expect_json:
+    processed_events: 1
+~~~
+
+Example guarded tool arguments:
+
+~~~json
+{
+  "run_id": "the-failed-run-id",
+  "scenario_path": "scenarios/webhook.yaml",
+  "event_id": "evt_order_1001",
+  "target": "http://127.0.0.1:8000/webhook",
+  "expected_unprocessed_json": {"processed_events": 0},
+  "expected_processed_json": {"processed_events": 1},
+  "confirm": false
+}
+~~~
+
+Change \`confirm\` to \`true\` only after reviewing the target and assertions. This tool is local-loopback-only and does not ask GitHub, Stripe, or Shopify to redeliver the provider event. The other replay tools remain available for isolated fixtures, but they do not perform this explicit pre/post-state guard.
 
 ## Batch replay
 
