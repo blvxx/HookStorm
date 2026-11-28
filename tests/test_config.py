@@ -614,12 +614,12 @@ def test_rejects_yaml_nested_too_deep_to_parse(tmp_path) -> None:
     scenario_path = tmp_path / "deep.yaml"
     nested_value = "[" * 3_000 + "0" + "]" * 3_000
     scenario_path.write_text(
-        "version: 1\\n"
-        "name: deeply nested input\\n"
-        "events:\\n"
-        "  - id: ping\\n"
-        "    event_id: evt_deep_yaml\\n"
-        f"    payload: {nested_value}\\n",
+        "version: 1\n"
+        "name: deeply nested input\n"
+        "events:\n"
+        "  - id: ping\n"
+        "    event_id: evt_deep_yaml\n"
+        f"    payload: {nested_value}\n",
         encoding="utf-8",
     )
 
