@@ -192,6 +192,7 @@ HookStorm передаёт заголовок `X-HookStorm-Run`, чтобы rece
 |---|---|
 | `hookstorm demo` | Запустить локальную демонстрацию retry и duplicate без внешнего endpoint |
 | `hookstorm init --template stripe` | Создать стартовый сценарий с примером события и подписи провайдера |
+| `hookstorm init --ci-provider gitlab` | Создать pipeline для GitLab CI вместо GitHub Actions |
 | `hookstorm update-workflow` | Обновить SHA HookStorm в сгенерированном workflow после обновления |
 | `hookstorm watch FILE.yaml` | Перезапускать сценарий при изменении YAML-файла |
 | `hookstorm init` | Создать стартовый сценарий и GitHub Actions workflow |
@@ -225,7 +226,14 @@ HookStorm не загружает `.env` автоматически: перед�
 
 После осознанного обновления HookStorm выполните `hookstorm update-workflow` в репозитории
 приложения. Команда меняет только SHA HookStorm в сгенерированном workflow и сохраняет
-остальные настройки. Новый SHA берётся из установленной версии HookStorm.
+остальные настройки. Для GitLab CI укажите `--path .gitlab-ci.yml`.
+
+Чтобы создать GitLab CI вместо GitHub Actions, выполните `hookstorm init --ci-provider gitlab`.
+Сгенерированный `.gitlab-ci.yml` намеренно запускается только в default branch. Добавьте
+`HOOKSTORM_TARGET_URL` и (для сценариев с подписью) `HOOKSTORM_SECRET` в GitLab CI/CD variables;
+секреты храните как masked и protected, а default branch защитите. Pipeline выполняет
+preflight, запускает сценарий, сравнивает и обновляет baseline только после успешной проверки
+и публикует JUnit-отчёт. По умолчанию feature branches и merge requests не запускают этот job.
 
 ## Отчёты и история
 
