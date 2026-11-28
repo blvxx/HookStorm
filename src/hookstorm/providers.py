@@ -311,3 +311,371 @@ class GitHubWebhookAdapter:
                 "processed only to compute bounded metadata; their values are never returned."
             ),
         }
+
+
+
+class StripeEventAdapter:
+    """Retrieve one canonical Stripe Event; this is not a delivery-attempt log API."""
+
+    def __init__(
+        self,
+        api_key: str | None = None,
+        *,
+        client: httpx.Client | None = None,
+    ) -> None:
+        credential = api_key if api_key is not None else os.getenv("HOOKSTORM_STRIPE_API_KEY")
+        if not isinstance(credential, str) or not credential.strip():
+            raise ProviderSourceError(
+                "Stripe event access is not configured; set HOOKSTORM_STRIPE_API_KEY "
+                "to a restricted or test-mode secret key with Events read access"
+            )
+        credential = credential.strip()
+        if len(credential) > 4096 or any(ord(char) < 33 or ord(char) > 126 for char in credential):
+            raise ProviderSourceError("HOOKSTORM_STRIPE_API_KEY contains invalid characters")
+
+        self._api_key = credential
+        self._owns_client = client is None
+        self._client = client or httpx.Client(
+            timeout=httpx.Timeout(8.0, connect=4.0),
+            follow_redirects=False,
+            trust_env=False,
+        )
+
+    def close(self) -> None:
+        if self._owns_client:
+            self._client.close()
+
+    def __enter__(self) -> StripeEventAdapter:
+        return self
+
+    def __exit__(self, *_: object) -> None:
+        self.close()
+
+    def get_event(self, event_id: str) -> dict[str, Any]:
+        if (
+            not isinstance(event_id, str)
+            or len(event_id) > 128
+            or not re.fullmatch(r"evt_[A-Za-z0-9]+", event_id)
+        ):
+            raise ProviderSourceError("event_id must be a valid Stripe event identifier")
+
+        try:
+            with self._client.stream(
+                "GET",
+                f"https://api.stripe.com/v1/events/{event_id}",
+                auth=(self._api_key, ""),
+                headers={
+                    "Accept": "application/json",
+                    "User-Agent": "HookStorm-MCP",
+                },
+                follow_redirects=False,
+            ) as response:
+                body = bytearray()
+                for chunk in response.iter_bytes():
+                    if len(body) + len(chunk) > _MAX_API_RESPONSE_BYTES:
+                        raise ProviderSourceError(
+                            "Stripe API response exceeds the 2 MiB inspection limit"
+                        )
+                    body.extend(chunk)
+                status_code = response.status_code
+        except ProviderSourceError:
+            raise
+        except httpx.TimeoutException as exc:
+            raise ProviderSourceError("Stripe API request timed out") from exc
+        except httpx.HTTPError as exc:
+            raise ProviderSourceError("Stripe API request failed before a response was received") from exc
+
+        if not 200 <= status_code < 300:
+            if status_code in {401, 403}:
+                raise ProviderSourceError(
+                    f"Stripe API denied access (HTTP {status_code}); verify the API key "
+                    "and Events read permission"
+                )
+            if status_code == 404:
+                raise ProviderSourceError(
+                    "Stripe event was not found or is not accessible with this API key"
+                )
+            raise ProviderSourceError(f"Stripe API returned HTTP {status_code}")
+
+        try:
+            event = json.loads(body)
+        except (UnicodeDecodeError, json.JSONDecodeError) as exc:
+            raise ProviderSourceError("Stripe API returned invalid JSON") from exc
+        if not isinstance(event, dict) or event.get("id") != event_id:
+            raise ProviderSourceError("Stripe API returned an unexpected event object")
+
+        event_fingerprint, event_size = canonical_json_fingerprint(event)
+        data = event.get("data")
+        data_object = data.get("object") if isinstance(data, dict) else None
+        if isinstance(data_object, dict):
+            object_fingerprint, object_size = canonical_json_fingerprint(data_object)
+        else:
+            object_fingerprint, object_size = None, None
+
+        created = event.get("created")
+        if isinstance(created, bool) or not isinstance(created, int):
+            created = None
+        pending = event.get("pending_webhooks")
+        if isinstance(pending, bool) or not isinstance(pending, int):
+            pending = None
+        livemode = event.get("livemode") if isinstance(event.get("livemode"), bool) else None
+        request = event.get("request")
+        request_id = request.get("id") if isinstance(request, dict) else None
+
+        return {
+            "provider": "stripe",
+            "source": "stripe_events_api",
+            "event_id": event_id,
+            "event_type": _safe_text(event.get("type"), 256),
+            "object": _safe_text(event.get("object"), 64),
+            "created": created,
+            "api_version": _safe_text(event.get("api_version"), 64),
+            "livemode": livemode,
+            "pending_webhooks": pending,
+            "request_id": _safe_text(request_id, 128),
+            "payload": {
+                "sha256": event_fingerprint,
+                "size_bytes": event_size,
+            },
+            "data_object": {
+                "available": object_fingerprint is not None,
+                "sha256": object_fingerprint,
+                "size_bytes": object_size,
+            },
+            "delivery_attempt_history_available": False,
+            "limitations": [
+                "The Events API returns the canonical Event object, not a per-endpoint delivery-attempt history.",
+                "Use the Stripe Dashboard webhook delivery view to inspect attempt status, response details, and retries.",
+            ],
+            "privacy": (
+                "Event payload values and nested object fields are never returned; only canonical "
+                "SHA-256 fingerprints, byte counts, and allowlisted event metadata are exposed."
+            ),
+        }
+
+
+class ShopifyAppLogsAdapter:
+    """Read Shopify webhook log entries through the authenticated Shopify CLI 5.1+."""
+
+    _ALLOWED_SINCE = {"1h", "6h", "12h", "24h"}
+
+    def __init__(
+        self,
+        *,
+        executable: str | None = None,
+        runner: Any | None = None,
+    ) -> None:
+        import subprocess
+
+        configured = executable if executable is not None else os.getenv(
+            "HOOKSTORM_SHOPIFY_CLI", "shopify"
+        )
+        if (
+            not isinstance(configured, str)
+            or not configured.strip()
+            or len(configured) > 4096
+            or any(ord(char) < 32 for char in configured)
+        ):
+            raise ProviderSourceError("HOOKSTORM_SHOPIFY_CLI must be a valid executable path")
+        self._executable = configured.strip()
+        self._runner = runner or subprocess.run
+
+    @staticmethod
+    def _first(record: dict[str, Any], names: tuple[str, ...]) -> Any:
+        for name in names:
+            if name in record:
+                return record[name]
+        return None
+
+    @staticmethod
+    def _records(value: Any) -> list[dict[str, Any]]:
+        if isinstance(value, list):
+            if not all(isinstance(item, dict) for item in value):
+                raise ProviderSourceError("Shopify CLI returned a malformed log record")
+            return value
+        if isinstance(value, dict):
+            for key in ("data", "logs", "records", "results"):
+                nested = value.get(key)
+                if isinstance(nested, list):
+                    return ShopifyAppLogsAdapter._records(nested)
+            if "id" in value or "timestamp" in value or "createdAt" in value:
+                return [value]
+        raise ProviderSourceError("Shopify CLI returned an unsupported JSON log format")
+
+    @staticmethod
+    def _sanitize_record(record: dict[str, Any]) -> dict[str, Any]:
+        payload = ShopifyAppLogsAdapter._first(
+            record,
+            ("payload", "request_body", "requestBody", "request_payload", "requestPayload"),
+        )
+        payload_hash, payload_size = _payload_fingerprint(payload)
+        target = _safe_target(
+            ShopifyAppLogsAdapter._first(
+                record,
+                ("uri", "url", "destination", "target", "webhook_url", "webhookUrl"),
+            )
+        )
+        status_code = ShopifyAppLogsAdapter._first(
+            record,
+            ("status_code", "statusCode", "response_status_code", "responseStatusCode", "response_code"),
+        )
+        if isinstance(status_code, bool) or not isinstance(status_code, int):
+            status_code = None
+        duration = ShopifyAppLogsAdapter._first(
+            record,
+            ("duration_ms", "durationMs", "duration", "response_time_ms", "responseTimeMs"),
+        )
+        if isinstance(duration, bool) or not isinstance(duration, (int, float)):
+            duration = None
+        attempt = ShopifyAppLogsAdapter._first(
+            record,
+            ("attempt", "attempt_number", "attemptNumber", "delivery_attempt"),
+        )
+        if isinstance(attempt, bool) or not isinstance(attempt, int):
+            attempt = None
+        return {
+            "delivery_id": _safe_text(
+                ShopifyAppLogsAdapter._first(
+                    record,
+                    ("id", "delivery_id", "deliveryId", "webhook_id", "webhookId"),
+                ),
+                128,
+            ),
+            "event_id": _safe_text(
+                ShopifyAppLogsAdapter._first(
+                    record,
+                    ("event_id", "eventId", "webhook_id", "webhookId"),
+                ),
+                128,
+            ),
+            "timestamp": _safe_text(
+                ShopifyAppLogsAdapter._first(
+                    record,
+                    ("timestamp", "created_at", "createdAt", "time"),
+                ),
+                64,
+            ),
+            "topic": _safe_text(
+                ShopifyAppLogsAdapter._first(
+                    record,
+                    ("topic", "webhook_topic", "webhookTopic", "event_type", "eventType"),
+                ),
+                256,
+            ),
+            "status": _safe_text(
+                ShopifyAppLogsAdapter._first(record, ("status", "result")),
+                64,
+            ),
+            "status_code": status_code,
+            "duration_ms": duration,
+            "attempt": attempt,
+            "shop": _safe_text(
+                ShopifyAppLogsAdapter._first(record, ("shop", "shop_domain", "shopDomain", "store")),
+                256,
+            ),
+            "target": target,
+            "request_id": _safe_text(
+                ShopifyAppLogsAdapter._first(record, ("request_id", "requestId")),
+                128,
+            ),
+            "payload_available": payload_hash is not None,
+            "payload_sha256": payload_hash,
+            "payload_size_bytes": payload_size,
+        }
+
+    def list_webhook_deliveries(
+        self,
+        *,
+        since: str = "1h",
+        limit: int = 20,
+        status: str | None = None,
+        store: str | None = None,
+        client_id: str | None = None,
+        cwd: str | None = None,
+        timeout_seconds: float = 20.0,
+    ) -> list[dict[str, Any]]:
+        import subprocess
+        from pathlib import Path
+
+        if since not in self._ALLOWED_SINCE:
+            raise ProviderSourceError("since must be one of: 1h, 6h, 12h, 24h")
+        if isinstance(limit, bool) or not isinstance(limit, int) or not 1 <= limit <= 1000:
+            raise ProviderSourceError("limit must be an integer between 1 and 1000")
+        if status not in {None, "success", "failure"}:
+            raise ProviderSourceError("status must be success, failure, or omitted")
+        if store is not None and (
+            not isinstance(store, str)
+            or len(store) > 255
+            or not re.fullmatch(r"[a-zA-Z0-9][a-zA-Z0-9.-]*", store)
+        ):
+            raise ProviderSourceError("store must be a Shopify store domain without a URL scheme")
+        if client_id is not None and (
+            not isinstance(client_id, str)
+            or len(client_id) > 128
+            or not re.fullmatch(r"[A-Za-z0-9_-]+", client_id)
+        ):
+            raise ProviderSourceError("client_id contains invalid characters")
+        if not isinstance(timeout_seconds, (int, float)) or isinstance(timeout_seconds, bool) or not 1 <= timeout_seconds <= 60:
+            raise ProviderSourceError("timeout_seconds must be between 1 and 60")
+
+        command = [
+            self._executable,
+            "app",
+            "logs",
+            "--type",
+            "webhook",
+            "--since",
+            since,
+            "--limit",
+            str(limit),
+            "--json",
+            "--no-input",
+        ]
+        if status is not None:
+            command.extend(["--status", status])
+        if store is not None:
+            command.extend(["--store", store])
+        if client_id is not None:
+            command.extend(["--client-id", client_id])
+
+        try:
+            completed = self._runner(
+                command,
+                cwd=str(Path(cwd).resolve()) if cwd is not None else None,
+                capture_output=True,
+                text=True,
+                encoding="utf-8",
+                errors="replace",
+                timeout=timeout_seconds,
+                check=False,
+                shell=False,
+            )
+        except FileNotFoundError as exc:
+            raise ProviderSourceError(
+                "Shopify CLI was not found. Install Shopify CLI 5.1+ and set "
+                "HOOKSTORM_SHOPIFY_CLI if its executable is not on PATH."
+            ) from exc
+        except subprocess.TimeoutExpired as exc:
+            raise ProviderSourceError("Shopify CLI log query timed out") from exc
+        except OSError as exc:
+            raise ProviderSourceError("Shopify CLI could not be started") from exc
+
+        stdout = completed.stdout if isinstance(completed.stdout, str) else ""
+        if len(stdout.encode("utf-8", errors="replace")) > _MAX_API_RESPONSE_BYTES:
+            raise ProviderSourceError(
+                "Shopify CLI output exceeds the 2 MiB inspection limit; reduce --limit"
+            )
+        if completed.returncode != 0:
+            raise ProviderSourceError(
+                "Shopify CLI log query failed. Authenticate with shopify auth login, "
+                "verify the linked app/store, and use Shopify CLI 5.1 or newer."
+            )
+        try:
+            payload = json.loads(stdout)
+        except json.JSONDecodeError as exc:
+            raise ProviderSourceError("Shopify CLI did not return valid JSON; ensure --json is supported") from exc
+
+        records = self._records(payload)
+        if len(records) > limit:
+            raise ProviderSourceError("Shopify CLI returned more log records than requested")
+        return [self._sanitize_record(record) for record in records]
