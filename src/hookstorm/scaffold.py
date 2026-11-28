@@ -158,7 +158,12 @@ def render_scenario(
             )
         )
     if "X-Shopify-Event-Id" in headers:
-        headers["X-Shopify-Event-Id"] = event_id
+        headers["X-Shopify-Event-Id"] = str(
+            uuid.uuid5(
+                uuid.NAMESPACE_URL,
+                f"hookstorm:{template}:{event_id}:shopify-event",
+            )
+        )
     if signature_provider not in _SIGNATURE_PROVIDERS:
         choices = ", ".join(sorted(_SIGNATURE_PROVIDERS))
         raise ValueError(f"Unsupported signature provider '{signature_provider}'. Choose: {choices}")
