@@ -830,7 +830,8 @@ def test_list_shopify_deliveries_uses_cli_and_returns_sanitized_metadata(
         server,
         "hookstorm_list_shopify_deliveries",
         {
-            "since": "6h",
+            "since": "48h",
+            "until": "24h",
             "limit": 10,
             "status": "failure",
             "store": "store.myshopify.com",
@@ -849,6 +850,8 @@ def test_list_shopify_deliveries_uses_cli_and_returns_sanitized_metadata(
     command, kwargs = calls[0]
     assert command[1:5] == ["app", "logs", "--type", "webhook"]
     assert "--json" in command
+    assert "--until" in command
+    assert command[command.index("--until") + 1] == "24h"
     assert kwargs["shell"] is False
     assert kwargs["cwd"] == str(tmp_path.resolve())
 
