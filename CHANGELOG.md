@@ -5,6 +5,7 @@
 ### Reliability and safety hardening
 
 - Require setuptools 84.1.0 or newer for package builds, avoiding the affected range in the Windows legacy wheel-installation advisory (GHSA-xmj3-9gf7-h52w).
+- Require PyYAML 6.0.4 or newer to avoid exponential YAML merge-key expansion when loading scenarios.
 
 - Reject case-insensitive duplicate event request headers to avoid ambiguous HTTP field values.
 
