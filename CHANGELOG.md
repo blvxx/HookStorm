@@ -2,6 +2,13 @@
 
 ## Unreleased
 
+### MCP integration
+
+- Add an optional local MCP server for sanitized run inspection, scenario introspection, and failure diagnosis.
+- Add an explicitly opt-in, loopback-only replay tool that checks the failed run, scenario fingerprint, and target before sending one selected event.
+- Add a dedicated Python 3.12 CI job for MCP server tools and replay safeguards.
+
+
 ### UX and automation
 
 - Add a self-contained `hookstorm demo` that exercises retries and duplicate delivery against a temporary loopback-only receiver.
