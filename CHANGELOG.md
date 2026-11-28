@@ -2,6 +2,9 @@
 
 ## Unreleased
 
+### Security
+
+- Pin webhook and verification connections to the exact DNS address set resolved before the run, preventing connection-time re-resolution from bypassing target validation while preserving the original hostname for HTTP Host and TLS SNI.
 ## 0.1.0a1 — First public alpha preview (2026-11-28)
 
 ### MCP integration
