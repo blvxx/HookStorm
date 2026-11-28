@@ -853,13 +853,10 @@ class ShopifyAppLogsAdapter:
             "webhook",
             "--since",
             since,
-            "--limit",
-            str(limit),
-            "--json",
-            "--no-input",
         ]
         if until is not None:
             command.extend(["--until", until])
+        command.extend(["--limit", str(limit), "--json", "--no-input"])
         if status is not None:
             command.extend(["--status", status])
         if store is not None:
