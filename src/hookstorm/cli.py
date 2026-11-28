@@ -582,6 +582,32 @@ def _execute_scenario(args: argparse.Namespace) -> int:
     scenario = load_scenario(args.scenario)
     target = _resolve_target(args.target)
     secret = os.getenv(args.secret_env)
+    on_delivery = None
+    if sys.stderr.isatty():
+        total_deliveries = sum(
+            1 + {**scenario["delivery"], **event["delivery"]}.get("duplicate_count", 0)
+            for event in scenario["events"]
+        )
+        completed_deliveries = 0
+        print(
+            f"HookStorm: running {len(scenario['events'])} event(s), "
+            f"{total_deliveries} delivery/deliveries",
+            file=sys.stderr,
+            flush=True,
+        )
+
+        def report_progress(delivery: dict) -> None:
+            nonlocal completed_deliveries
+            completed_deliveries += 1
+            state = "PASS" if delivery["passed"] else "FAIL"
+            print(
+                f"HookStorm progress: {completed_deliveries}/{total_deliveries} "
+                f"· {delivery['event_type']} · {state}",
+                file=sys.stderr,
+                flush=True,
+            )
+
+        on_delivery = report_progress
     result = asyncio.run(
         run_scenario(
             scenario,
@@ -589,6 +615,7 @@ def _execute_scenario(args: argparse.Namespace) -> int:
             allow_remote=args.allow_remote,
             allow_insecure_http=args.allow_insecure_http,
             secret=secret,
+            on_delivery=on_delivery,
         )
     )
 
