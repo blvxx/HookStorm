@@ -15,7 +15,7 @@ A scenario is a YAML document. It describes events, delivery behavior, and expec
 | verify | no | Optional read-only GET probe for checking backend state after all deliveries. |
 | run_timeout_ms | no | Hard wall-clock budget for the entire run; defaults to 3,600,000 ms (60 minutes), range 100–86,400,000 ms (24 hours). |
 
-Unknown keys and duplicate YAML mapping keys are rejected to catch typos and ambiguous configuration early. Scenarios can be exported with `hookstorm export-pytest`; the generated test embeds the normalized scenario and reads its endpoint from `HOOKSTORM_TARGET` at runtime.
+Unknown keys and duplicate YAML mapping keys are rejected to catch typos and ambiguous configuration early. JSON payloads and expectations are limited to 128 nested object/array levels. Scenarios can be exported with `hookstorm export-pytest`; the generated test embeds the normalized scenario and reads its endpoint from `HOOKSTORM_TARGET` at runtime.
 
 ## Run timeout budget
 
@@ -104,7 +104,7 @@ The probe is not a universal exactly-once guarantee: it verifies only the state 
 
 ## Response body safety limit
 
-Webhook delivery responses and the business-state verification response are requested with `Accept-Encoding: identity` and streamed from raw response chunks under a 2 MiB limit. If a response exceeds this limit, HookStorm closes the response stream and marks the JSON assertion as failed with a clear size-limit error. Unexpected compressed responses are rejected before HTTP content decompression; this prevents a small compressed payload from expanding into an unbounded allocation. The limit applies even when no JSON expectation is configured; HookStorm does not buffer arbitrarily large response bodies or persist response content.
+Webhook delivery responses and the business-state verification response are requested with `Accept-Encoding: identity` and streamed from raw response chunks under a 2 MiB limit. If a response exceeds this limit, HookStorm closes the response stream and marks the JSON assertion as failed with a clear size-limit error. Unexpected compressed responses are rejected before HTTP content decompression; this prevents a small compressed payload from expanding into an unbounded allocation. JSON response and verification documents are also limited to 128 nested object/array levels before decoding. The limit applies even when no JSON expectation is configured; HookStorm does not buffer arbitrarily large response bodies or persist response content.
 
 ## Event fields
 
