@@ -569,6 +569,7 @@ def scenario_fingerprint(scenario: dict[str, Any]) -> str:
             separators=(",", ":"),
             allow_nan=False,
         ).encode("utf-8")
+        ensure_json_nesting_depth(canonical, label="Scenario fingerprint")
     except (RecursionError, TypeError, ValueError, UnicodeEncodeError) as exc:
         raise ScenarioError("Scenario configuration cannot be fingerprinted as JSON") from exc
     return hashlib.sha256(canonical).hexdigest()
