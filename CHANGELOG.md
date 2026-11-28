@@ -9,7 +9,8 @@
 - Add Shopify webhook delivery log retrieval through the authenticated Shopify CLI 5.1+ JSON interface.
 - Correlate provider records with local HookStorm runs only when stable event identity, payload fingerprint, event type/topic, target where available, and the saved scenario fingerprint agree.
 - Report observed provider outcomes separately from confirmed local fault-injection causes; provider HTTP status alone is not treated as proof of an internal receiver root cause.
-- Keep provider adapters read-only; retain explicit opt-in, loopback-only local replay and independently verified receiver-side idempotency requirements.
+- Add a guarded local replay tool that requires explicit read-only pre- and post-replay business-state assertions, while preserving same-event identity and source-run correlation.
+- Keep provider adapters read-only; retain explicit opt-in and loopback-only replay, and document the remaining receiver-side atomic-deduplication requirement.
 
 ## Unreleased
 
