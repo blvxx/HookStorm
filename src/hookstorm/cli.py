@@ -67,7 +67,13 @@ def _parser() -> argparse.ArgumentParser:
     subparsers = parser.add_subparsers(dest="command", required=True)
 
     init = subparsers.add_parser(
-        "init", help="create a starter webhook scenario and GitHub Actions workflow"
+        "init", help="create a starter webhook scenario and CI workflow"
+    )
+    init.add_argument(
+        "--ci-provider",
+        choices=("github", "gitlab"),
+        default="github",
+        help="CI configuration to generate (default: github)",
     )
     init.add_argument(
         "--template",
@@ -76,7 +82,7 @@ def _parser() -> argparse.ArgumentParser:
         help="starter event payload and signature format",
     )
     init.add_argument("--scenario-path", default="scenarios/webhook.yaml")
-    init.add_argument("--workflow-path", default=".github/workflows/webhook-regression.yml")
+    init.add_argument("--workflow-path", help="override the generated CI configuration path")
     init.add_argument(
         "--signature-provider",
         choices=("generic", "stripe", "github", "shopify", "standard_webhooks"),
@@ -519,9 +525,15 @@ def _init_command(args: argparse.Namespace) -> int:
         )
     duplicate_count = 0 if duplicate_count is None else duplicate_count
 
+    workflow_path = args.workflow_path or (
+        ".github/workflows/webhook-regression.yml"
+        if args.ci_provider == "github"
+        else ".gitlab-ci.yml"
+    )
     written = initialize_project(
         scenario_path=args.scenario_path,
-        workflow_path=args.workflow_path,
+        workflow_path=workflow_path,
+        ci_provider=args.ci_provider,
         template=args.template,
         event_type=event_type,
         event_id=event_id,
@@ -543,18 +555,23 @@ def _init_command(args: argparse.Namespace) -> int:
         print(f"  + {display_path}")
     print("\nNext steps:")
     print(f"  1. Edit {args.scenario_path}: replace the sample payload and expected response.")
-    print("  2. Configure GitHub Environment 'staging':")
-    print("     Variable: HOOKSTORM_TARGET_URL")
-    print("     Secret:   HOOKSTORM_SECRET")
-    print("     Add required reviewers to protect staging credentials.")
+    if args.ci_provider == "github":
+        print("  2. Configure GitHub Environment 'staging':")
+        print("     Variable: HOOKSTORM_TARGET_URL")
+        print("     Secret:   HOOKSTORM_SECRET")
+        print("     Add required reviewers to protect staging credentials.")
+    else:
+        print("  2. Configure GitLab CI/CD variables:")
+        print("     HOOKSTORM_TARGET_URL (staging URL) and HOOKSTORM_SECRET (masked, protected secret).")
+        print("     The generated pipeline runs only on the default branch.")
     print("  3. Set HOOKSTORM_TARGET_URL and, for signed scenarios, HOOKSTORM_SECRET locally:")
     print(f"     hookstorm doctor {args.scenario_path}")
     print("     Add --connect for a socket check, or --verbose for DNS/IP timing and TLS certificate details.")
     if not args.no_workflow:
-        print(f"  4. Commit {args.workflow_path} and {args.scenario_path}.")
-        print("  5. Run the workflow on main once to create its first baseline.")
+        print(f"  4. Commit {workflow_path} and {args.scenario_path}.")
+        print("  5. Run the workflow on the default branch once to create its first baseline.")
     else:
-        print("  4. Add a CI workflow when you are ready to gate pull requests.")
+        print("  4. Add a CI workflow when you are ready to gate integration tests.")
     print("No target URL or secret was written to the generated files.")
     return 0
 
