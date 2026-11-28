@@ -24,9 +24,9 @@ def _detail() -> dict:
         "action": "opened",
         "repository_id": 456,
         "installation_id": 123,
+        "url": "https://receiver.example.test/webhook?token=url-secret",
         "request": {
             "method": "POST",
-            "url": "https://receiver.example.test/webhook?token=url-secret",
             "headers": {
                 "X-GitHub-Delivery": GUID,
                 "X-GitHub-Event": "issues",
