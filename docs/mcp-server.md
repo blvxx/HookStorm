@@ -41,6 +41,7 @@ Scenario paths must resolve inside HOOKSTORM_MCP_SCENARIO_ROOT. The server accep
 | Tool | Behavior |
 |---|---|
 | hookstorm_list_runs | List recent sanitized runs, optionally filtered by scenario |
+| hookstorm_find_deliveries | Search a bounded recent history window by event ID, event type, scenario, and pass/fail status |
 | hookstorm_inspect_run | Retrieve one run with attempt details and failure categories |
 | hookstorm_list_scenarios | List YAML scenarios in the root and scenarios/ |
 | hookstorm_inspect_scenario | Validate a scenario and inspect event identities, retry settings, expected statuses, and assertion keys |
@@ -48,6 +49,12 @@ Scenario paths must resolve inside HOOKSTORM_MCP_SCENARIO_ROOT. The server accep
 | hookstorm_analyze_run | Combine failed attempts with scenario settings and privacy-preserving context |
 | hookstorm_replay_failed_delivery | Replay one failed event after the replay safeguards pass |
 | hookstorm_replay_failed_deliveries | Replay up to 50 selected failed event IDs in one confirmed run |
+
+### Search recent deliveries
+
+Use `hookstorm_find_deliveries` to locate delivery attempts without opening run records one by one. It supports exact filters for `event_id`, `event_type`, and `scenario`, plus `status=failed|passed|all`. By default it returns failed deliveries from the newest 100 runs. Set `lookback_runs` from 1 to 500 and `limit` from 1 to 100 to control the search cost and result size.
+
+The response includes run identifiers, event identity, attempt statuses and timings, bounded diagnostic categories, and the sanitized target. It does not return payload values, custom header values, or response bodies. When more matches exist than the requested result limit, `has_more` is true. The search never sends webhook requests.
 
 Scenario inspection never returns payload values. Run inspection uses the existing sanitized history record; it does not retrieve or reconstruct request bodies, headers, or receiver response bodies.
 
