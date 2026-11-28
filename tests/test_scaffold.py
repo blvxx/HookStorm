@@ -186,6 +186,12 @@ def test_initialize_project_templates_create_valid_provider_payloads(
     assert event["id"] == event_type
     assert isinstance(event["payload"], dict)
     assert event["payload"]
+    if template == "github":
+        assert event["headers"]["X-GitHub-Event"] == "issues"
+        assert event["headers"]["X-GitHub-Delivery"] == event["event_id"]
+    if template == "shopify":
+        assert event["headers"]["X-Shopify-Topic"] == "orders/create"
+        assert event["headers"]["X-Shopify-Webhook-Id"] == event["event_id"]
 
 
 def test_update_workflow_install_ref_changes_only_the_hookstorm_pin(tmp_path) -> None:
