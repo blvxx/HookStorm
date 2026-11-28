@@ -8,7 +8,7 @@ from pathlib import Path
 import pytest
 
 from hookstorm.config import load_scenario, scenario_fingerprint
-from hookstorm.history import save_run
+from hookstorm.history import get_run, save_run
 from hookstorm.mcp_server import create_server
 
 try:
@@ -254,6 +254,7 @@ def test_replay_requires_confirmation_and_sends_only_selected_event(
     assert result["executed"] is True
     assert result["summary"]["success"] is True
     assert result["history_saved"] is True
+    assert result["correlation_run_id"] == run_id
     assert len(state["requests"]) == 1
     assert state["requests"][0]["event_id"] == "evt_replay"
 
@@ -343,6 +344,10 @@ def test_batch_replay_requires_confirmation_and_replays_only_selected_failed_eve
     target = f"{base}/webhook"
     event_ids = ["evt_replay_2", "evt_replay"]
     run_id = _failed_run(scenario_path, target, db, event_ids)
+    # Simulate the first attempts committing their business effects before the ACK was lost.
+    for event_id in event_ids:
+        state["seen"].add((run_id, event_id))
+        state["effects"].add((run_id, event_id))
     server = create_server(
         history_db=db,
         scenario_root=tmp_path,
@@ -374,7 +379,15 @@ def test_batch_replay_requires_confirmation_and_replays_only_selected_failed_eve
     assert result["summary"]["success"] is True
     assert result["selected_event_ids"] == ["evt_replay", "evt_replay_2"]
     assert result["history_saved"] is True
+    assert result["correlation_run_id"] == run_id
+    assert get_run(result["run_id"], db)["correlation_run_id"] == run_id
     assert sorted(request["event_id"] for request in state["requests"]) == sorted(event_ids)
+    assert all(
+        request["headers"]["X-HookStorm-Run"] == run_id
+        for request in state["requests"]
+    )
+    # The receiver recognizes both deliveries as duplicates and applies no new effects.
+    assert len(state["effects"]) == 2
 
 
 def test_batch_replay_refuses_any_event_without_a_failed_delivery(
