@@ -6,7 +6,7 @@ import json
 import os
 from pathlib import Path
 from typing import Any
-from urllib.parse import urlsplit
+from urllib.parse import urlsplit, urlunsplit
 
 from hookstorm import __version__
 from hookstorm.config import load_scenario, scenario_fingerprint
