@@ -413,7 +413,6 @@ def _prepare_replay_batch(
             raise ValueError("The scenario contains duplicate event IDs")
         scenario_events[event_id] = event
 
-    selected: list[dict[str, Any]] = []
     for event_id in event_ids:
         if not failed_by_id.get(event_id):
             raise ValueError(
@@ -428,8 +427,13 @@ def _prepare_replay_batch(
             raise ValueError(
                 f"Event type for '{event_id}' differs from the failed run; replay is blocked"
             )
-        selected.append(event)
 
+    selected_ids = set(event_ids)
+    selected = [
+        event
+        for event in scenario["events"]
+        if event["event_id"] in selected_ids
+    ]
     scenario_changed = (
         run.get("scenario") != scenario["name"]
         or not isinstance(run.get("scenario_fingerprint"), str)
