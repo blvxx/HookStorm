@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import shutil
 import subprocess
+import uuid
 
 import pytest
 import yaml
@@ -50,7 +51,7 @@ def test_initialize_project_creates_valid_scenario_and_workflow(tmp_path) -> Non
     assert "hookstorm doctor" in preflight["run"]
     assert "--connect" in preflight["run"]
     assert "--allow-insecure-http" in preflight["run"]
-    assert HOOKSTORM_INSTALL_REF == "660240e1fe1b612da6ca64c2cf17f6daf0c9bac2"
+    assert HOOKSTORM_INSTALL_REF == "4b530e56d855fbbeb7d7801d200854fd4775b24a"
     assert len(HOOKSTORM_INSTALL_REF) == 40
     assert all(character in "0123456789abcdef" for character in HOOKSTORM_INSTALL_REF)
     assert f"git+https://github.com/blvxx/HookStorm.git@{HOOKSTORM_INSTALL_REF}" in workflow_text
@@ -188,10 +189,23 @@ def test_initialize_project_templates_create_valid_provider_payloads(
     assert event["payload"]
     if template == "github":
         assert event["headers"]["X-GitHub-Event"] == "issues"
-        assert event["headers"]["X-GitHub-Delivery"] == event["event_id"]
+        assert str(uuid.UUID(event["headers"]["X-GitHub-Delivery"])) == (
+            event["headers"]["X-GitHub-Delivery"]
+        )
+        assert event["headers"]["X-GitHub-Delivery"] != event["event_id"]
     if template == "shopify":
         assert event["headers"]["X-Shopify-Topic"] == "orders/create"
-        assert event["headers"]["X-Shopify-Webhook-Id"] == event["event_id"]
+        assert str(uuid.UUID(event["headers"]["X-Shopify-Webhook-Id"])) == (
+            event["headers"]["X-Shopify-Webhook-Id"]
+        )
+        assert event["headers"]["X-Shopify-Webhook-Id"] != event["event_id"]
+        shopify_event_id = event["headers"]["X-Shopify-Event-Id"]
+        assert str(uuid.UUID(shopify_event_id)) == shopify_event_id
+        assert shopify_event_id != event["event_id"]
+        assert shopify_event_id != event["headers"]["X-Shopify-Webhook-Id"]
+        assert event["headers"]["X-Shopify-Shop-Domain"].endswith(".myshopify.com")
+        assert event["headers"]["X-Shopify-API-Version"] == "2026-10"
+        assert event["headers"]["X-Shopify-Triggered-At"].endswith("Z")
 
 
 def test_update_workflow_install_ref_changes_only_the_hookstorm_pin(tmp_path) -> None:
@@ -304,7 +318,12 @@ def test_provider_delivery_headers_follow_an_overridden_event_id(tmp_path) -> No
 
     event = load_scenario(tmp_path / "scenarios" / "webhook.yaml")["events"][0]
     assert event["event_id"] == "evt_custom_shopify_001"
-    assert event["headers"]["X-Shopify-Webhook-Id"] == "evt_custom_shopify_001"
+    webhook_id = event["headers"]["X-Shopify-Webhook-Id"]
+    assert str(uuid.UUID(webhook_id)) == webhook_id
+    assert webhook_id != event["event_id"]
+    shopify_event_id = event["headers"]["X-Shopify-Event-Id"]
+    assert str(uuid.UUID(shopify_event_id)) == shopify_event_id
+    assert shopify_event_id != event["headers"]["X-Shopify-Webhook-Id"]
 
 
 def test_provider_headers_follow_custom_event_types(tmp_path) -> None:
@@ -318,3 +337,6 @@ def test_provider_headers_follow_custom_event_types(tmp_path) -> None:
     event = load_scenario(tmp_path / "scenarios" / "webhook.yaml")["events"][0]
     assert event["id"] == "pull_request.opened"
     assert event["headers"]["X-GitHub-Event"] == "pull_request"
+    delivery_id = event["headers"]["X-GitHub-Delivery"]
+    assert str(uuid.UUID(delivery_id)) == delivery_id
+    assert delivery_id != event["event_id"]

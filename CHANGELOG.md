@@ -2,6 +2,11 @@
 
 ## Unreleased
 
+### Audit fixes
+
+- Use provider-shaped GitHub delivery GUIDs and keep Shopify delivery IDs distinct from merchant-action event IDs in generated fixtures.
+- Refresh generated GitHub Actions and GitLab CI install pins to the latest reviewed main revision.
+
 ### UX and automation
 
 - Add a self-contained `hookstorm demo` that exercises retries and duplicate delivery against a temporary loopback-only receiver.
