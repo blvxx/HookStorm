@@ -245,7 +245,7 @@ jobs:
         run: |
           set -euo pipefail
           mkdir -p .hookstorm .hookstorm-baselines test-results
-      : "${HOOKSTORM_TARGET_URL:?Set HOOKSTORM_TARGET_URL in GitLab CI/CD variables}"
+      : "${{HOOKSTORM_TARGET_URL:?Set HOOKSTORM_TARGET_URL in GitLab CI/CD variables}}"
 
           ALLOW_INSECURE_HTTP_ARGS=()
           if [[ "${{HOOKSTORM_ALLOW_INSECURE_HTTP:-0}}" == "1" ]]; then
@@ -348,7 +348,7 @@ webhook-regression:
       python -m pip install --disable-pip-version-check "{install}"
       mkdir -p .hookstorm .hookstorm-baselines test-results
 
-      if [ "${HOOKSTORM_ALLOW_INSECURE_HTTP:-0}" = "1" ]; then
+      if [ "${{HOOKSTORM_ALLOW_INSECURE_HTTP:-0}}" = "1" ]; then
         hookstorm doctor "$HOOKSTORM_SCENARIO" --connect --secret-env HOOKSTORM_SECRET --allow-insecure-http
         hookstorm run "$HOOKSTORM_SCENARIO" --allow-remote --allow-insecure-http \
           --secret-env HOOKSTORM_SECRET --history-db "$HOOKSTORM_HISTORY_DB" \
