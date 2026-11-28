@@ -199,7 +199,10 @@ def test_initialize_project_templates_create_valid_provider_payloads(
             event["headers"]["X-Shopify-Webhook-Id"]
         )
         assert event["headers"]["X-Shopify-Webhook-Id"] != event["event_id"]
-        assert event["headers"]["X-Shopify-Event-Id"] == event["event_id"]
+        shopify_event_id = event["headers"]["X-Shopify-Event-Id"]
+        assert str(uuid.UUID(shopify_event_id)) == shopify_event_id
+        assert shopify_event_id != event["event_id"]
+        assert shopify_event_id != event["headers"]["X-Shopify-Webhook-Id"]
         assert event["headers"]["X-Shopify-Shop-Domain"].endswith(".myshopify.com")
         assert event["headers"]["X-Shopify-API-Version"] == "2026-10"
         assert event["headers"]["X-Shopify-Triggered-At"].endswith("Z")
@@ -318,7 +321,9 @@ def test_provider_delivery_headers_follow_an_overridden_event_id(tmp_path) -> No
     webhook_id = event["headers"]["X-Shopify-Webhook-Id"]
     assert str(uuid.UUID(webhook_id)) == webhook_id
     assert webhook_id != event["event_id"]
-    assert event["headers"]["X-Shopify-Event-Id"] == event["event_id"]
+    shopify_event_id = event["headers"]["X-Shopify-Event-Id"]
+    assert str(uuid.UUID(shopify_event_id)) == shopify_event_id
+    assert shopify_event_id != event["headers"]["X-Shopify-Webhook-Id"]
 
 
 def test_provider_headers_follow_custom_event_types(tmp_path) -> None:
