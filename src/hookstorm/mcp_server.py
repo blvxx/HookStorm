@@ -623,6 +623,7 @@ def _correlate_github_delivery(
         event is not None
         and local_delivery is not None
         and scenario_matches
+        and event_id_matches_provider
         and payload_matches is True
         and event_type_matches is True
         and target_matches is True
@@ -1096,7 +1097,9 @@ def create_server(
             "Replay targets are loopback-only. If HOOKSTORM_GITHUB_TOKEN is configured, "
             "read-only tools can inspect repository webhook delivery records from GitHub. "
             "Provider HTTP statuses are evidence of observed responses, not automatic proof "
-            "of an internal root cause."
+            "of an internal root cause. Use the guarded replay tool when a scenario has a read-only "
+            "verify endpoint; it requires pre- and post-replay state assertions and keeps the same "
+            "event ID and source-run correlation value."
         ),
     )
 
